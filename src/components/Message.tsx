@@ -5,7 +5,9 @@ import Clipped, { howMuch } from './Clipped';
 import Markdown from './Markdown';
 import './Message.css';
 
-export type MessageAuthor = 'you' | 'graphe';
+/** Who a turn is from. An add-on is somebody's own extension, speaking for
+ *  itself in the record rather than as the app or as the person. */
+export type MessageAuthor = 'you' | 'graphe' | 'add-on';
 
 type Props = {
   from: MessageAuthor;
@@ -110,6 +112,8 @@ function Sent({ picture }: { picture: SentPicture }) {
  */
 function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
   const mine = from === 'you';
+  // An add-on's message is drawn on the app's surface, in the add-on's name.
+  const who = mine ? 'You' : from === 'add-on' ? 'An add-on' : 'Graphe';
   // Named for what it copies: one message, not the conversation.
   const copying = useCopying({ idle: 'Copy this message' });
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
@@ -129,8 +133,8 @@ function Message({ from, children, streaming, aside, isLast, pictures, copy }: P
   );
 
   return (
-    <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
-      <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
+    <article className={`message message--${mine ? 'you' : 'graphe'}`} aria-label={who}>
+      <div className="message__who">{who}</div>
       {pictures === undefined || pictures.length === 0 ? null : (
         <div className="message__pictures">
           {pictures.map((picture, at) => (

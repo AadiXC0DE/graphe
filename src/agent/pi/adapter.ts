@@ -45,14 +45,8 @@ import {
 } from '../guard/policy';
 import { containsPath } from '../guard/paths';
 import { afterCall, atTheEnd, beforeCall, readRules, rulesFile, RULE_WORDS, type Rules, type World } from '../hooks';
-import { readAgentsMd } from '../../lib/agentsMd';
-import {
-  AGENTS_BUDGET,
-  PROMPT_BUDGET,
-  saysPromptSize,
-  standingWords,
-  withinBudget,
-} from './standing';
+import { PROMPT_BUDGET, saysPromptSize, standingWords } from './standing';
+import { MEMORY_BUDGET, assemblePrompt, piecesOf, type PiPromptOptions } from './prompt';
 import {
   ALWAYS_WORDS,
   alwaysFile,
@@ -149,13 +143,23 @@ import {
 
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 
 import {
   ADVISOR_SETTINGS_FILE,
+  advisorScopeWords,
   advisorSettings,
   advisorToolNames,
   extensionToolNames,
+  holdScope,
+  letGoScope,
+  noScope,
+  reconcile,
+  saysChoice,
+  type AdvisorChoice,
+  type AdvisorScope,
+  type AdvisorSwitches,
   type LoadedExtension,
 } from '../advisor';
 import { SUBAGENT_SETTINGS_FILE, artifactsBesideSessions, subagentsLoaded } from './subagents';
@@ -704,6 +708,9 @@ export type CreateSessionOptions = {
    *  to. A conversation someone is sitting in front of must not set this — it
    *  is meant to behave exactly like a terminal in that folder. */
   ownPort?: boolean;
+  /** The transcript to fork: the new conversation starts with a copy of its
+   *  history, written as a conversation of its own by Pi's own fork. */
+  forkFrom?: string;
   /** Somewhere to put a piece of background work. Given, the agent can break a
    *  request into pieces that run side by side; left out, it cannot — which is
    *  what keeps a run on the board from filling the board it is running on. */
@@ -1411,33 +1418,65 @@ function theirsTrustedAndPolicied(
 }
 
 /**
+ * Whose choice the machine's one advisor file holds, per agent folder.
+ *
+ * `pi-advisor-flow` reads its own settings file and has nowhere to take a
+ * per-conversation choice from, so a conversation's choice only takes effect by
+ * being written there. One conversation holds the file at a time — see
+ * `holdScope` — and the writes are serialized, because two conversations
+ * starting together used to interleave two half-written files.
+ */
+const advisorHolders = new Map<string, { scope: AdvisorScope; writing: Promise<void> }>();
+
+/** Names one session so two conversations of the same folder can tell each
+ *  other's claim apart. Only ever compared, never shown. */
+let sessionsOpened = 0;
+
+/** The settings file read as a plain object. Anything else reads as none, and
+ *  whoever opens Pi's file next gets its own keys back untouched: they are
+ *  read as data, never trusted. */
+function asSettings(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const held: Record<string, unknown> = value as Record<string, unknown>;
+  return { ...held };
+}
+
+/**
  * Write the chosen advisor where the addition will look for it.
  *
  * The file is Pi's, not ours, and somebody may well be keeping their own
  * settings in it — so it is read, three keys are changed, and the rest is put
  * back exactly as it was. Never throws: an advisor that does not survive the
  * quit is not worth refusing to open a project over.
+ *
+ * The choice is written only by the conversation holding the file, and only
+ * when it changes: the setting is one per computer, so rewriting it on every
+ * turn is how two conversations used to overwrite each other. A null choice
+ * writes none of it and puts only the keys this app owns right, which every
+ * conversation that opens does — a machine that ran an older install should not
+ * keep redaction off just because the conversation in front has the advisor off.
  */
 async function keepAdvisorSettings(
   agentDir: string,
-  advises: ModelChoice | null,
-  does: ModelChoice | null,
-  advisorThinks?: ThinkingLevel | undefined,
-  switches?: { completionGate: boolean; loopGate: boolean } | undefined,
+  choice: AdvisorChoice | null,
+  gates?: AdvisorSwitches,
 ): Promise<void> {
   const file = join(agentDir, ADVISOR_SETTINGS_FILE);
-  let existing: unknown = null;
+  let existing: Record<string, unknown> | null = null;
   try {
-    existing = JSON.parse(await readFile(file, 'utf8'));
+    existing = asSettings(JSON.parse(await readFile(file, 'utf8')));
   } catch {
     // No file yet, or one nobody can parse. Either way there is nothing to keep.
   }
-  const next = advisorSettings(existing, {
-    advises,
-    does,
-    advisorThinks,
-    ...(switches === undefined ? {} : { switches }),
-  });
+  const next =
+    choice === null
+      ? reconcile(existing ?? {}, gates).settings
+      : advisorSettings(existing, {
+          advises: choice.advises,
+          does: choice.does,
+          advisorThinks: choice.thinks,
+          ...(choice.gates === undefined ? {} : { switches: choice.gates }),
+        });
   if (JSON.stringify(existing) === JSON.stringify(next)) return;
   try {
     await mkdir(agentDir, { recursive: true });
@@ -1747,6 +1786,58 @@ function isAlreadyProcessing(cause: unknown): boolean {
 const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const;
 
 /**
+ * Pi's own system prompt, out of the event that carries it.
+ *
+ * Narrowed rather than asserted, so a Pi version that renames the field leaves
+ * the prompt to Pi instead of assembling sections of `undefined`. The event is
+ * the current shape and the context is the older one; both are read, and a
+ * version with neither leaves the prompt alone.
+ */
+function promptFrom(
+  event: unknown,
+  ctx: unknown,
+): { was: string; options: PiPromptOptions } {
+  if (typeof event === 'object' && event !== null && 'systemPrompt' in event) {
+    const said = event.systemPrompt;
+    if (typeof said === 'string' && said !== '') {
+      return {
+        was: said,
+        options: 'systemPromptOptions' in event ? thatPiLoaded(event.systemPromptOptions) : {},
+      };
+    }
+  }
+  if (typeof ctx === 'object' && ctx !== null && 'getSystemPrompt' in ctx) {
+    const ask = ctx.getSystemPrompt;
+    if (typeof ask === 'function') {
+      const said: unknown = Reflect.apply(ask, ctx, []);
+      if (typeof said === 'string' && said !== '') return { was: said, options: {} };
+    }
+  }
+  return { was: '', options: {} };
+}
+
+/** What Pi says it put in the prompt: the instruction files, with their paths,
+ *  and whatever an add-on appended. Anything of another shape is left out and
+ *  the assembly then keeps Pi's text as it stands. */
+function thatPiLoaded(raw: unknown): PiPromptOptions {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const appended = 'appendSystemPrompt' in raw ? raw.appendSystemPrompt : null;
+  const listed = 'contextFiles' in raw ? raw.contextFiles : null;
+  const files: { path: string; content: string }[] = [];
+  if (Array.isArray(listed)) {
+    for (const one of listed) {
+      if (typeof one !== 'object' || one === null || !('path' in one) || !('content' in one)) continue;
+      const { path, content } = one;
+      if (typeof path === 'string' && typeof content === 'string') files.push({ path, content });
+    }
+  }
+  return {
+    ...(typeof appended === 'string' && appended !== '' ? { appendSystemPrompt: appended } : {}),
+    ...(files.length === 0 ? {} : { contextFiles: files }),
+  };
+}
+
+/**
  * Open a session against a project.
  *
  * Two choices here are load-bearing rather than incidental:
@@ -1999,20 +2090,19 @@ const MOST_AFTER_SAYINGS = 3;
   const always = alwaysFrom(
     await readFile(alwaysFile(options.projectRoot ?? ''), 'utf8').catch(() => null),
   );
-  // AGENTS.md hierarchy — Codex-compatible, closest wins, 32 KiB cap.
-  // Read once at sitting start, no writes. Prepended to system prompt after memory.
-  let agentsMdNote: string | null = null;
-  if (options.projectRoot !== undefined && options.projectRoot !== '') {
-    try {
-      const read = await readAgentsMd(options.projectRoot);
-      // Held to the same cap the budget holds it to. A 40 KB house-rules file
-      // would otherwise take most of the window before the work starts, and
-      // the rest of it is on disk for the model to read when it needs it.
-      agentsMdNote = read === null ? null : withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed);
-    } catch {
-      agentsMdNote = null;
-    }
-  }
+  /*
+   * Codex's own global file, which Pi's loader does not read.
+   *
+   * Graphe's reader used to fold this in with the project's own AGENTS.md and
+   * hand the result to Pi to append, so the project's file reached the model
+   * twice: once as this and once as Pi's own project instructions, and only the
+   * copy here was ever held to a cap. The project's files now come from Pi,
+   * which has their real paths, and this is the one file it would not have
+   * found.
+   */
+  const codexGlobal = await readFile(join(homedir(), '.codex', 'AGENTS.md'), 'utf8').catch(
+    () => null,
+  );
 
   /**
    * Run the things this project always does, at one of the three moments.
@@ -2278,14 +2368,13 @@ const MOST_AFTER_SAYINGS = 3;
   )) {
     cards.set(where, card);
   }
-  const agentsPrompt = agentsMdNote === null ? [] : [`<agents_md>\n${agentsMdNote}\n</agents_md>`];
-  const allNotes = [...(options.contextNotes ?? []), ...agentsPrompt];
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
-    // A few sentences about the folder itself, when there is something a folder
-    // listing cannot say. Empty is the ordinary case and passes nothing through.
-    ...(allNotes.length === 0 ? {} : { appendSystemPrompt: allNotes }),
+    // Nothing of Graphe's is appended here. Pi assembles the project's
+    // instruction files and the skills it found into the prompt itself, and
+    // what this app adds travels as sections of its own in `graphe-prompt`
+    // below, where each piece can be held to its own size and named by path.
     // Extensions are on, but only the ones the person chose for themselves.
     // `extensionsOverride` runs after discovery and before anything is
     // installed into the session, so it is the one place a rule like that can
@@ -2335,17 +2424,25 @@ const MOST_AFTER_SAYINGS = 3;
         },
       },
       /*
-       * Graphe's own standing block, appended last so it is the end of the
-       * system prompt whatever else is installed.
+       * Graphe's own block, and the rest of the prompt's pieces, put back
+       * together as sections.
        *
        * The checklist used to travel with the person's typed message, so a
        * steer carried it and a retry after a rate limit did not — exactly the
        * turns where a long job forgets it had a list. Add-ons write into the
        * system prompt too, and on a small model the system prompt wins over
        * anything in a user message.
+       *
+       * What is new here is that a long prompt no longer gets cut at a
+       * character count. Pi assembles one string, and trimming it blind could
+       * take half a repository's instructions with it while keeping a paragraph
+       * of notes. Each piece is a section now: the instructions are never
+       * dropped, a section longer than it may carry names where the rest of it
+       * is, and the notes this app carries itself are what gives way first, in
+       * the prompt's own words.
        */
       {
-        name: 'graphe-standing',
+        name: 'graphe-prompt',
         factory: (api) => {
           /** Said once per sitting: a warning repeated every turn is a warning
            *  nobody reads. */
@@ -2355,25 +2452,52 @@ const MOST_AFTER_SAYINGS = 3;
             already.add(id);
             options.onEvent({ type: 'notice', what });
           };
-          api.on('before_agent_start', async (_event, ctx) => {
+          api.on('before_agent_start', async (event, ctx) => {
             const block = await options.standing?.().catch(() => null);
-            const was = (ctx as { getSystemPrompt?: () => string }).getSystemPrompt?.() ?? '';
-            /* Our own block is never cut: it is what holds the job together.
-               What is over budget is everything else, and a prompt too heavy
-               for a small model to hold a list in is a prompt that quietly
-               stops working. */
-            const room = PROMPT_BUDGET - (block?.length ?? 0);
-            const before =
-              was.length <= room ? was : withinBudget(was, room, standingWords.promptTrimmed);
-            const characters = before.length + (block?.length ?? 0);
-            // Said whether or not there is a block, so the chip can show how
-            // heavy the prompt has become before a small model stops coping.
-            options.onEvent({ type: 'prompt-size', characters });
-            if (before !== was) sayOnce('prompt-over-budget', saysPromptSize(was.length + (block?.length ?? 0)));
-            if (block === null || block === undefined || block === '') {
-              return before === was ? undefined : { systemPrompt: before };
+            const asked = promptFrom(event, ctx);
+            const was = asked.was;
+            const { sections, foot } = piecesOf(was, {
+              ...asked.options,
+              ...(codexGlobal === null
+                ? {}
+                : {
+                    extraFiles: [
+                      { path: join(homedir(), '.codex', 'AGENTS.md'), content: codexGlobal },
+                    ],
+                  }),
+            });
+            const notes = options.contextNotes ?? [];
+            const put = assemblePrompt(
+              [
+                ...sections,
+                ...(block === null || block === undefined || block === ''
+                  ? []
+                  : [{ of: 'plan' as const, text: block }]),
+                ...(notes.length === 0
+                  ? []
+                  : [
+                      {
+                        of: 'memory' as const,
+                        heading: standingWords.memory,
+                        text: notes.map((one) => `- ${one}`).join('\n'),
+                        most: MEMORY_BUDGET,
+                        // The instructions above it are the job. These are what
+                        // this app carries, and they are what gives way.
+                        required: false,
+                      },
+                    ]),
+              ],
+              PROMPT_BUDGET,
+              foot,
+            );
+            // Said whether or not there is a block, so the diagnostics can show
+            // how heavy the prompt has become before a small model stops
+            // coping.
+            options.onEvent({ type: 'prompt-size', characters: put.characters });
+            if (put.saidSo !== null) {
+              sayOnce('prompt-over-budget', `${saysPromptSize(put.characters)}. ${put.saidSo}`);
             }
-            return { systemPrompt: `${before}\n\n${block}` };
+            return { systemPrompt: put.systemPrompt };
           });
         },
       },
@@ -2435,16 +2559,67 @@ const MOST_AFTER_SAYINGS = 3;
   /** The advisor's own tools, kept apart because a chip turns them on and off
    *  without rebuilding the conversation. */
   const advisorTools = advisorToolNames(loadedExtensions);
-  /* The advisor addition keeps one settings file for the whole machine, so the
-     choice that file holds is whichever conversation wrote it last. Held here
-     as well, and written again before each turn, so the file says what *this*
-     conversation chose at the moment it is about to be used. */
   let advises = options.advisor ?? null;
   let advisorThinks = options.advisorThinking ?? undefined;
   /** Named once here, because `prompt` shadows `options` with its own. */
   const gates = options.advisorGates;
+
+  /* One settings file for the whole machine, so one conversation holds it. The
+     choice used to be written on every turn, which meant a conversation asking
+     for a different advisor rewrote what another was in the middle of using. */
+  const advisorWho = `session-${String((sessionsOpened += 1))}`;
+  const advisorFile = advisorHolders.get(agentDir) ?? { scope: noScope(), writing: Promise.resolve() };
+  advisorHolders.set(agentDir, advisorFile);
+
+  /**
+   * The machine's one advisor setting, taken for this conversation.
+   *
+   * False means another conversation holds the file with a different choice:
+   * this one runs without a second opinion rather than being answered by a
+   * model nobody chose here, and is told so.
+   */
+  async function takeTheAdvisor(choice: AdvisorChoice): Promise<boolean> {
+    if (advisorTools.length === 0) return false;
+    const taken = holdScope(advisorFile.scope, advisorWho, choice);
+    advisorFile.scope = taken.scope;
+    if (!taken.granted) {
+      if (taken.because !== null) options.onEvent({ type: 'notice', what: taken.because });
+      return false;
+    }
+    await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, choice));
+    return true;
+  }
+
+  /** Every write goes through one queue per agent folder: two conversations
+   *  starting together used to interleave two half-written files. */
+  function queueAdvisorWrite(work: () => Promise<void>): Promise<void> {
+    const next = advisorFile.writing.then(work).catch(() => undefined);
+    advisorFile.writing = next;
+    return next;
+  }
+
   if (advisorTools.length > 0) {
-    await keepAdvisorSettings(agentDir, advises, options.model ?? null, advisorThinks, gates);
+    // The keys this app owns, put right for whoever reads the file next. Not
+    // the choice: whose advisor it is belongs to the conversation holding it.
+    await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, null, gates));
+    if (advises === null) {
+      // Nothing asked for here. Said once, and only when the file another
+      // conversation holds has a gate that can have the advisor speak up on its
+      // own: that is the one case this conversation would hear it uninvited.
+      const theirs = advisorFile.scope.holds;
+      if (
+        theirs?.advises !== null &&
+        theirs?.advises !== undefined &&
+        (theirs.gates?.completionGate === true || theirs.gates?.loopGate === true)
+      ) {
+        options.onEvent({
+          type: 'notice',
+          what: advisorScopeWords.running(saysChoice(theirs)),
+        });
+      }
+    } else if (!(await takeTheAdvisor({ advises, does: options.model ?? null, thinks: advisorThinks, gates }))) {
+      advises = null;
+    }
   }
   if (subagentsLoaded(loadedExtensions)) await keepSubagentSettings(agentDir);
 
@@ -2733,13 +2908,21 @@ const MOST_AFTER_SAYINGS = 3;
   // case that must not do that: somebody asking for a new conversation and being
   // handed the last one back is a button that does nothing.
   const manager =
-    options.sessionPath === undefined
-      ? options.sessionDir === undefined
-        ? pi.SessionManager.inMemory(options.projectRoot)
-        : options.fresh === true
-          ? pi.SessionManager.create(options.projectRoot, options.sessionDir)
-          : pi.SessionManager.continueRecent(options.projectRoot, options.sessionDir)
-      : pi.SessionManager.open(options.sessionPath);
+    options.forkFrom !== undefined
+      ? // Pi's own fork: the whole history up to now, written into a new
+        // conversation of its own that carries on from the same words.
+        pi.SessionManager.forkFrom(
+          options.forkFrom,
+          options.projectRoot,
+          options.sessionDir,
+        )
+      : options.sessionPath === undefined
+        ? options.sessionDir === undefined
+          ? pi.SessionManager.inMemory(options.projectRoot)
+          : options.fresh === true
+            ? pi.SessionManager.create(options.projectRoot, options.sessionDir)
+            : pi.SessionManager.continueRecent(options.projectRoot, options.sessionDir)
+        : pi.SessionManager.open(options.sessionPath);
 
   let session;
   try {
@@ -3021,15 +3204,11 @@ const MOST_AFTER_SAYINGS = 3;
         say({ type: 'busy', on: true });
       }
       activePrompts += 1;
-      // Before the turn, not only when the choice changed: the file is shared
-      // with every other conversation, and the last one to write it wins.
-      if (advisorTools.length > 0) {
-        // `gates` rather than `options.advisorGates`: inside `prompt` the name
-        // `options` is the call's own, not the session's.
-        await keepAdvisorSettings(agentDir, advises, inUse, advisorThinks, gates).catch(
-          () => undefined,
-        );
-      }
+      /* Nothing writes the advisor's file here. It did, on every turn, because
+         that file is shared by the whole machine and the last writer won — so a
+         conversation asking for a different advisor changed what another was in
+         the middle of using. The choice is written once, when this conversation
+         takes the file, and given back when it is done with it. */
       const looking = options?.lookFirst === true;
       if (looking) {
         planning = true;
@@ -3191,14 +3370,25 @@ const MOST_AFTER_SAYINGS = 3;
 
     async useAdvisor(next, thinks): Promise<void> {
       if (closed) return;
-      advisorStuck = !advisorActive(next !== null);
-      advises = next;
       advisorThinks = thinks;
+      if (next === null) {
+        advises = null;
+        // Giving the file back, and writing "off" only when this conversation is
+        // the one holding it: turning the advisor off here is not a way to turn
+        // it off in somebody else's conversation.
+        if (advisorFile.scope.owner === advisorWho) {
+          advisorFile.scope = letGoScope(advisorFile.scope, advisorWho);
+          const off: AdvisorChoice = { advises: null, does: inUse, thinks, gates };
+          await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, off));
+        }
+      } else {
+        advises = (await takeTheAdvisor({ advises: next, does: inUse, thinks, gates }))
+          ? next
+          : null;
+      }
+      advisorStuck = !advisorActive(advises !== null);
       // Not into the middle of a reply: the next turn opens with it instead.
       if (!session.isStreaming) sayAdvisorStuck();
-      if (advisorTools.length > 0) {
-        await keepAdvisorSettings(agentDir, next, inUse, thinks, gates);
-      }
     },
 
     async useModel(next): Promise<boolean> {
@@ -3316,6 +3506,11 @@ const MOST_AFTER_SAYINGS = 3;
     dispose(): void {
       if (closed) return;
       closed = true;
+      // The machine's one advisor setting is nobody's while nobody is open:
+      // another conversation may take it, and the file it writes then is its
+      // own. Nothing is written here — the last user of it is not necessarily
+      // the last one to close.
+      advisorFile.scope = letGoScope(advisorFile.scope, advisorWho);
       paused.hold(false);
       confirmations.abandonAll();
       asking.abandonAll();

@@ -1,8 +1,7 @@
-import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import Away from './Away';
 import Waiting from './Waiting';
 import CostMeter from './CostMeter';
-import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import History from './History';
 import Lines from './Lines';
 import Landing, { type Outcome } from './Landing';
@@ -16,17 +15,14 @@ import type {
   EveryKind,
   Fetched,
   GitSnapshot,
-  InStep as InStepState,
   Landing as LandingState,
   PutBack,
   RepoOverview,
   SavedVersion,
   Money,
   SpendLimit,
-  StyleToken,
   Swatch,
 } from '../lib/ipc';
-import type { DesignReading } from '../design/reading';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import { elapsedWords } from '../work/goal';
@@ -223,14 +219,6 @@ export type OverviewView = {
   /** Things the last turn made that are worth looking at. */
   artifacts: readonly Artifact[];
   swatches: readonly Swatch[];
-  /** This project's own tokens, and where they live. */
-  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
-  /** What the stylesheet says about itself, read once and shared with the
-   *  design view rather than worked out twice. */
-  reading: DesignReading;
-  /** The Figma file this project is kept in step with, and what has moved on in
-   *  it. Null until the shell has answered. */
-  inStep: InStepState | null;
   /** What can be done with the work now it exists. Null until the shell has
    *  answered, so the band does not flash on the way in. */
   landing: LandingState | null;
@@ -273,8 +261,6 @@ type Props = {
   /** Save where the project stands right now, so it can be come back to. This
    is the commit: the one thing the hand can do with the changed set as a whole. */
   onSave: (repo?: string) => void;
-  /** Open everything about how the project looks, at one of its bands. */
-  onOpenDesign: (part: DesignPart) => void;
   /** Open the whole history, drawn as lines, for one of the projects here. */
   onOpenGraph: (repo?: string) => void;
   /** Move the project onto another of its lines of work. */
@@ -383,48 +369,14 @@ const MADE_ICONS: Readonly<Record<Artifact['kind'], ReactElement>> = {
  *  of what the work looked like; the thread is the archive. */
 const WINDOW = 6;
 
-type TabId = 'work' | 'look' | 'history';
+type TabId = 'work' | 'history';
 
-/** Three questions, in the order they get asked: what is happening, how does it
- *  look, and what can I go back to. */
+/** Two questions, in the order they get asked: what is happening, and what can
+ *  I go back to. */
 const TABS: readonly { id: TabId; name: string }[] = [
   { id: 'work', name: 'Work' },
-  { id: 'look', name: 'Look' },
   { id: 'history', name: 'History' },
 ];
-
-/** The bands of the design view, as rows you can come at them through. Each
- *  says what it holds, because a list of six nouns down a panel is a list
- *  nobody presses. */
-const LOOKS: readonly { id: DesignPart; note: string; trouble?: boolean }[] = [
-  { id: 'styles', note: 'Colour, type, spacing (move any of them)' },
-  { id: 'motion', note: 'How long things take, and how they start and stop' },
-  { id: 'drift', note: 'Written by hand, a hair off one of yours', trouble: true },
-  { id: 'legible', note: 'Pairings nobody can read', trouble: true },
-  { id: 'widths', note: 'The same page at every size' },
-  { id: 'figma', note: 'What has moved on in the file you follow', trouble: true },
-];
-
-const DESIGN_PARTS = DESIGN.parts;
-
-/** How much is in each band. Null where a number would say nothing — nobody has
- *  asked for the pictures yet, or there is no file being followed. */
-type Counts = { styles: number; motion: number; drift: number; legible: number; figma: number };
-
-function countable(view: OverviewView): Counts {
-  return {
-    styles: view.styles?.tokens.length ?? 0,
-    motion: view.reading.motion?.moves.length ?? 0,
-    drift: view.reading.drifted.length,
-    legible: view.reading.unreadable.length,
-    figma: view.inStep?.moved.length ?? 0,
-  };
-}
-
-function countOf(part: DesignPart, counts: Counts): number | null {
-  if (part === 'widths') return null;
-  return counts[part];
-}
 
 /**
  * The panel on the right: what is going on, what changed, what can be gone back
@@ -444,7 +396,6 @@ export default function Overview({
   onShowSplit,
   onLimit,
   onSave,
-  onOpenDesign,
   onOpenGraph,
   onSwitchBranch,
   onCreateBranch,
@@ -547,12 +498,8 @@ export default function Overview({
     } catch { /* private mode */ }
   }, [lookedUpOpen]);
 
-  /* A dot on the tab, not a number: the count matters once you are looking, and
-     before that it is only worth knowing there is something. */
-  const look = useMemo(() => countable(view), [view]);
-  const trouble = look.drift + look.legible + look.figma;
-  /* The same dot on Work, for the one thing on this panel that cannot move
-     without a person: something that carried on and then stopped to ask. */
+  /* A dot on Work, for the one thing on this panel that cannot move without a
+     person: something that carried on and then stopped to ask. */
   const asking = (view.away?.pieces ?? []).some((one) => one.question !== null);
 
   const shownResearch = research.slice(-WINDOW);
@@ -583,7 +530,7 @@ export default function Overview({
             }}
           >
             {one.name}
-            {(one.id === 'look' && trouble > 0) || (one.id === 'work' && asking) ? (
+            {one.id === 'work' && asking ? (
               <span className="overview__tabmark" aria-hidden="true" />
             ) : null}
           </button>
@@ -923,46 +870,6 @@ export default function Overview({
         />
       </section>
 
-      </div>
-
-      <div role="tabpanel" id="overview-panel-look" aria-labelledby="overview-tab-look" hidden={tab !== 'look'}>
-      {/* A way in rather than the thing itself. All of this used to stack up in
-          a 328px column: a palette four squares to a row, and a list of every
-          movement in the project underneath it. It opens over the work now,
-          with the width to be read. */}
-      <section className="overview__block">
-        <h2 className="overview__title">How it looks</h2>
-        <ul className="overview__ways">
-          {LOOKS.map((one) => {
-            const found = countOf(one.id, look);
-            return (
-              <li key={one.id}>
-                <button
-                  type="button"
-                  className="overview__way"
-                  onClick={() => onOpenDesign(one.id)}
-                >
-                  <span className="overview__waytext">
-                    <span className="overview__wayname">{DESIGN_PARTS[one.id]}</span>
-                    <span className="overview__waynote">{one.note}</span>
-                  </span>
-                  {found === null || found === 0 ? null : (
-                    <span
-                      className={`overview__waycount ${one.trouble && found > 0 ? 'overview__waycount--wrong' : ''}`}
-                    >
-                      {found}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        <button type="button" className="overview__do" onClick={() => onOpenDesign('styles')}>
-          Open it
-          <kbd className="overview__key">⌘D</kbd>
-        </button>
-      </section>
       </div>
 
       <div role="tabpanel" id="overview-panel-history" aria-labelledby="overview-tab-history" hidden={tab !== 'history'}>

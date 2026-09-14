@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { bridge } from '../lib/bridge';
+import { whenHidden } from '../lib/onscreen';
 import type { Desks } from '../lib/projects';
 import type { FileEntry, Where } from '../lib/ipc';
 
@@ -58,6 +59,10 @@ export function useProjectFiles(options: {
   /* When the tree was last walked, per project. */
   const readAt = useRef<Record<string, number>>({});
 
+  /** Whether the window is somewhere it can be seen. A tree nobody can look at
+   *  is a walk nobody is owed; it is taken again on the way back. */
+  const shows = useRef(true);
+
   const refresh = useCallback(
     async (path: string) => {
       if (!wantsFiles.current) return;
@@ -81,7 +86,7 @@ export function useProjectFiles(options: {
 
   const refreshSoon = useCallback(
     (path: string) => {
-      if (!wantsFiles.current) return;
+      if (!wantsFiles.current || !shows.current) return;
       const last = readAt.current[path] ?? 0;
       const now = Date.now();
       if (now - last < FILES_APART) return;
@@ -124,6 +129,21 @@ export function useProjectFiles(options: {
   const wanted = useCallback((on: boolean) => {
     wantsFiles.current = on;
   }, []);
+
+  /* Nothing is walked while the window is out of sight — during a long run that
+     is one write after another — and the tree in front is read again the moment
+     somebody can see it. */
+  useEffect(
+    () =>
+      whenHidden((hidden) => {
+        const was = shows.current;
+        shows.current = !hidden;
+        if (hidden || was) return;
+        const inFront = desksNow.current.current;
+        if (inFront !== null && wantsFiles.current) void refresh(inFront);
+      }),
+    [desksNow, refresh],
+  );
 
   /* Asked for once per project, the first time there is something to draw it
      in. */

@@ -22,7 +22,6 @@ describe('the shell reads the project, not the folder holding it', () => {
     ['CHANNEL.changesLook', /new ProjectHistory\(open\.path\)\.diffFor/],
     ['CHANNEL.changesDrop', /new ProjectHistory\(open\.path\)\.dropChanges/],
     ['CHANNEL.landing', /landingNow\(open\.path/],
-    ['CHANNEL.checkWidths', /makeAndServe\(\{ folder: open\.path/],
     ['CHANNEL.pages', /filesUnder\(open\.path\)/],
     ['CHANNEL.shareReview', /versionsOf\(open\.held\.timeline\)/],
     ['CHANNEL.repoLook', /readRepo\(open\)/],
@@ -44,16 +43,6 @@ describe('the shell reads the project, not the folder holding it', () => {
 });
 
 describe('the window names the project it is acting on', () => {
-  it('the design view reads that project’s stylesheet, not the parent’s', () => {
-    expect(APP).toContain('desk?.repoStyles[named]');
-  });
-
-  it('saving the design says so when it is refused, rather than looking dead', () => {
-    const at = APP.indexOf('bridge\n      .designCommit');
-    const block = APP.slice(at === -1 ? APP.indexOf('.designCommit(') : at, APP.indexOf('.designCommit(') + 600);
-    expect(block).toContain('troubleHere(answer.trouble)');
-  });
-
   it('the omnibar can find a commit in any of the projects', () => {
     expect(APP).toContain('const barVersions');
     expect(APP).toContain('fromRepo.current[found.version.id]');

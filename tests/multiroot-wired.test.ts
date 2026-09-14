@@ -56,7 +56,7 @@ describe('the parent never becomes a repository', () => {
     expect(notes).toContain('git -C backend status');
     expect(ADAPTER).toContain('appendSystemPrompt');
     expect(ADAPTER).toContain('options.contextNotes');
-    expect(ADAPTER).toContain('agentsMdNote');
+    expect(ADAPTER).toContain('piecesOf(');
   });
 });
 
@@ -96,7 +96,7 @@ describe('what reads and what refuses', () => {
   });
 
   it('answers each verb for the project the call names', () => {
-    for (const channel of ['CHANNEL.putBack', 'CHANNEL.nameVersion', 'CHANNEL.saveVersion', 'CHANNEL.designCommit']) {
+    for (const channel of ['CHANNEL.putBack', 'CHANNEL.nameVersion', 'CHANNEL.saveVersion']) {
       const at = MAIN.indexOf(`handle<`, MAIN.indexOf(channel) - 200);
       const block = MAIN.slice(MAIN.indexOf(channel), MAIN.indexOf(channel) + 1500);
       expect(at, channel).toBeGreaterThan(-1);
@@ -111,17 +111,6 @@ describe('what reads and what refuses', () => {
       const block = MAIN.slice(MAIN.indexOf(marker), MAIN.indexOf(marker) + 1200);
       expect(block, marker).toContain('folderFor(open, where)');
     }
-  });
-
-  /** The timeline was per project and the folder was not, so saving the design
-   *  view read one project's stylesheets and wrote into the folder above it. */
-  it('saves the design view into the project it is saving, not the folder above', () => {
-    const at = MAIN.indexOf('handle<readonly SavedVersion[]>(CHANNEL.designCommit');
-    expect(at).toBeGreaterThan(-1);
-    const block = MAIN.slice(at, MAIN.indexOf('handle<PutBack>(CHANNEL.putBack'));
-    expect(block).toContain('const folder = folderFor(open, where)');
-    expect(block).toContain('styleTokens(folder)');
-    expect(block).not.toContain('open.path');
   });
 
   /** The panel names the project on every one of these; the window has to pass
@@ -141,7 +130,6 @@ describe('what reads and what refuses', () => {
 
   it('refuses the verbs that need one repository, in the same words everywhere', () => {
     const refusals = [
-      'CHANNEL.designCommit',
       'CHANNEL.putBack',
       'CHANNEL.nameVersion',
       'CHANNEL.saveVersion',

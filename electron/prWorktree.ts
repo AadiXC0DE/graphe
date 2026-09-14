@@ -507,11 +507,20 @@ export async function preparePrWorktree(
   } else {
     const branched = await gitRun(project, ['branch', snapshot.branch, sha]);
     if (branched.code !== 0) {
-      throw refusing(
-        'collision',
-        `I fetched pull request #${String(wanted)} but could not point a branch at it.`,
-        branched.said,
-      );
+      /* Two prepares of the same head asking at once both see no branch and
+         both make one; the loser lands here. That is not a collision, it is the
+         same review being opened twice, so re-read before believing it: if the
+         branch now exists at exactly the commit this call fetched, the other
+         caller did the work and this one carries on to the checkout. */
+      const again = await run(['rev-parse', '--verify', branchRef], { cwd: project });
+      const now = (again.out ?? '').trim();
+      if (again.code !== 0 || now !== sha) {
+        throw refusing(
+          'collision',
+          `I fetched pull request #${String(wanted)} but could not point a branch at it.`,
+          branched.said,
+        );
+      }
     }
   }
 

@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { HELPER_TOTAL_MAX, MOST_AT_ONCE } from '../src/cost/fleet';
-import { MOST_APART } from '../src/agent/pi/tools';
 import {
   asResearch,
   chooseDepth,
@@ -95,11 +94,12 @@ describe('how far it goes', () => {
 });
 
 describe('a split that will actually start', () => {
-  /* A fan-out refused on the way out costs the turn and answers nothing, so the
-     number asked for is checked against the two ceilings that can refuse it. */
+  /* A fan-out refused on the way out costs the turn and answers nothing, so
+     what the ladder asks for is checked against what the machine admits. The
+     ladder's own numbers are static — the window cannot read the machine — and
+     the fleet does the clamping. */
   it('never asks for more helpers than are admitted at once', () => {
     expect(MOST_TOGETHER).toBeLessThanOrEqual(MOST_AT_ONCE.helper);
-    expect(DEEPEST_SPLIT).toBeLessThanOrEqual(MOST_APART);
     for (const one of DEPTHS) {
       expect(one.atOnce).toBeLessThanOrEqual(DEEPEST_SPLIT);
     }
@@ -139,7 +139,6 @@ describe('a split that will actually start', () => {
     // against someone re-capping `away` and stalling a second project.
     expect(MOST_AT_ONCE.helper).toBe(HELPER_TOTAL_MAX);
     expect(MOST_AT_ONCE.away).toBe(Number.POSITIVE_INFINITY);
-    expect(MOST_APART).toBe(8);
   });
 });
 

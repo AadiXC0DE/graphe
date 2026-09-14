@@ -234,8 +234,6 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Ticking one off the list', detail: short(textField(input, ['note'])) };
     case 'cancel_build':
       return { label: 'Taking the checklist off the screen' };
-    case 'score_candidates':
-      return { label: 'Choosing between the answers' };
     case 'read_map':
       return { label: 'Reading the shape of the project' };
     case 'read_diff':
@@ -252,10 +250,6 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Checking what is running' };
     case 'stop_running':
       return { label: 'Stopping what was running' };
-    case 'set_going':
-      return { label: 'Setting work going in the background', detail: short(textField(input, ['doing'])) };
-    case 'try_ways':
-      return { label: 'Making a few versions to compare', detail: short(textField(input, ['doing'])) };
     case 'mcp':
       return { label: 'Using a tool you connected', detail: short(textField(input, ['tool', 'server'])) };
     case 'connect_tool':

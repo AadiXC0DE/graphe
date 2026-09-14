@@ -92,7 +92,6 @@ describe('Escape backs out of what is in front, before it stops anything', () =>
       'graphOpen',
       'reviewsOpen',
       'helpersAt',
-      'designAt',
     ]) {
       expect(list, panel).toContain(panel);
     }
@@ -113,7 +112,7 @@ describe('Escape backs out of what is in front, before it stops anything', () =>
   it('watches the panels it reads, or it would read them stale', () => {
     const at = app.indexOf('if (event.key === "Escape") {');
     const deps = app.slice(at, app.indexOf('  ]);', at));
-    for (const panel of ['settingsOpen', 'usageOpen', 'addMore', 'graphOpen', 'designAt']) {
+    for (const panel of ['settingsOpen', 'usageOpen', 'addMore', 'graphOpen']) {
       expect(deps, panel).toContain(panel);
     }
   });

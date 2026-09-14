@@ -34,7 +34,7 @@ all and cached per project path; `readFile` was unqualified too. Both now send
 | Item | Finding | Note |
 | --- | --- | --- |
 | S08 owner-less events | One routing rule was found and left: `src/lib/projects.ts:receive` still falls back to `desks.current` for an event with no project, and to spend-only for an unknown conversation. Changing it needs the owner ids to be carried on every event, which is the phase 4/5 normalisation work below |
-| Desk/Parked normalisation | The plan's 5.1 maps of projects/workspaces/conversations/runs/views with hooks extracted from `App.tsx` were not built. The two bespoke swap implementations (`swapConversation`, `showThread`) both exist, with the same field list now, which was the transition requirement |
+| Desk/Parked normalisation | Partly, after the first draft: `showThread` is now the one navigation reducer (`src/lib/projects.ts`), `App.swapConversation` ends in a single `showOpened(opened)` that applies a shell answer in one place, and the two bespoke field lists are gone - a field can no longer be added to one path only. The full maps-and-hooks extraction the plan sketches was not built |
 | W10 different roots in one overview | `CHANNEL.overview` still resolves git/preview/artifact roots per panel call. Each now carries the conversation, so a stale answer is dropped, but the roots themselves were not unified |
 | Held singleton slots (S05) | `held.waiting/checking/pictures` are still one per project. Nothing was removed, because the replacement (per-run records) belongs with phase 7's task model |
 | U04 preview frames | Preview frame messages are still `{project, bytes}`. Not touched |

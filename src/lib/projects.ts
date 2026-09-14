@@ -102,10 +102,6 @@ export type Desk = {
   /** Each project's own timeline, by its folder name, when this folder holds
    *  several projects rather than being one. Empty every ordinary day. */
   repoVersions: Readonly<Record<string, readonly SavedVersion[]>>;
-  /** Each project's own stylesheet, by folder name. A folder holding several
-   *  projects has no stylesheet of its own, so the design view reads one of
-   *  these instead of finding nothing. */
-  repoStyles: Readonly<Record<string, Overview['styles']>>;
   /** The offer to undo the last "put back", while it is still on offer. */
   putBack: PutBack | null;
 
@@ -278,7 +274,6 @@ function blankDesk(path: string, name: string): Desk {
     overview: null,
     versions: [],
     repoVersions: {},
-    repoStyles: {},
     putBack: null,
     jobs: [],
     doing: null,
@@ -291,12 +286,6 @@ function blankDesk(path: string, name: string): Desk {
   };
 }
 
-/**
- * Bring one of a project's conversations to the front.
- *
- * The one that was in front is parked whole, so coming back to it finds it as
- * it was rather than as a thread that has to be read off disk again.
- */
 /** What somebody calls a folder: its last part, never the whole path. Used
  *  where a board is showing work from more than one at a time. */
 export function folderCalled(path: string): string {
@@ -304,21 +293,45 @@ export function folderCalled(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-export function showThread(desks: Desks, project: string, address: string): Desks {
+/**
+ * Bring one of a project's conversations to the front.
+ *
+ * The one that was in front is parked whole, so coming back to it finds it as
+ * it was rather than as a thread that has to be read off disk again.
+ *
+ * `arriving` is what the shell handed back for a conversation that was not open
+ * here: the turns as it reads them. Left out for a tab switch, which is the
+ * desk's own parked copy moving to the front.
+ *
+ * The only way a conversation is shown. A shelf row, a tab and a conversation
+ * the shell has just started all come through here, because two of these
+ * written out separately is how a field comes to be dropped by one of them.
+ */
+export function showThread(
+  desks: Desks,
+  project: string,
+  address: string | null,
+  arriving?: { turns: readonly Turn[] },
+): Desks {
   return changeDesk(desks, project, (desk) => {
-    if (desk.address === address) return desk;
-    const wanted = desk.parked[address];
-    if (wanted === undefined) return desk;
-    const { [address]: _taken, ...rest } = desk.parked;
+    if (desk.address === address && arriving === undefined) return desk;
+    const wanted = address === null ? undefined : desk.parked[address];
+    // Neither in front nor parked nor arriving: a conversation this project has
+    // never had, and nothing to show.
+    if (address !== null && wanted === undefined && arriving === undefined) return desk;
+    const rest =
+      address === null
+        ? desk.parked
+        : Object.fromEntries(Object.entries(desk.parked).filter(([one]) => one !== address));
     return {
       ...desk,
-      turns: wanted.turns,
-      doing: wanted.doing ?? null,
-      counted: wanted.counted ?? 0,
-      busy: wanted.busy ?? false,
+      turns: arriving?.turns ?? wanted?.turns ?? [],
+      doing: wanted?.doing ?? null,
+      counted: wanted?.counted ?? 0,
+      busy: wanted?.busy ?? false,
       address,
       parked:
-        desk.address === null
+        desk.address === null || desk.address === address
           ? rest
           : {
               ...rest,
@@ -329,6 +342,10 @@ export function showThread(desks: Desks, project: string, address: string): Desk
                 busy: desk.busy,
               },
             },
+      // A conversation nobody has opened here goes on the end of the row rather
+      // than being left out of it. A tab missing is worse than one out of place.
+      order:
+        address === null || desk.order.includes(address) ? desk.order : [...desk.order, address],
     };
   });
 }

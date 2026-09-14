@@ -3,10 +3,39 @@ import { bridge } from '../lib/bridge';
 import type { Conversation, NewerVersion, RecentProject } from '../lib/ipc';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
+import { continuationWords } from '../work/continuing';
 import { byDay, foldOlder, matching, needsDayLabels, needsSearch } from '../lib/shelf';
 import { keepAsking, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
 import { MOST_SHOWN } from './ProjectPicker';
 import './Sidebar.css';
+
+/** A conversation as the shelf reads it. Whether one has been put away is the
+ *  shell's to know — it fills this in from the registry on every listing — so
+ *  the shelf never has to remember what it archived itself. */
+type ShelfConversation = Conversation & { archived?: boolean };
+
+/** The words the shelf's own controls use. The three operations keep the names
+ *  they have everywhere else; only the ones invented here live here. */
+export const ACTS_WORDS = {
+  /** What the row's one control opens. Three operations on one line, so it is
+   *  the operations and not a description of them. */
+  opener: 'Continue, fork or archive',
+  archived: 'Archived',
+  archivedHint: 'Show the conversations you put away',
+  unarchiveHint: 'Back into the list',
+  /** Said under a row whose Fork cannot be pressed. A fork taken mid-turn
+   *  copies a conversation that had not finished happening. */
+  forkWaits: 'Fork waits until this conversation stops working.',
+} as const;
+
+/** What is asked of the conversations in one row, in one place. Left out
+ *  together: a shelf that can be asked to continue one but not to put it away
+ *  is a shelf with half a menu on every row. */
+type Acts = {
+  onContinueConversation: (path: string) => void;
+  onForkConversation: (path: string) => void;
+  onArchiveConversation: (path: string, on: boolean) => void;
+};
 
 type Props = {
   projects: readonly RecentProject[];
@@ -16,11 +45,22 @@ type Props = {
   /** What the agent has been given to work from, this sitting. */
   pinned: readonly Reference[];
   /** The conversations this project has had, newest first. */
-  conversations: readonly Conversation[];
+  conversations: readonly ShelfConversation[];
   /** Which one is on screen, by its own path. */
   openConversation: string | null;
   onOpenConversation: (path: string) => void;
   onNewConversation: () => void;
+  /** Start a conversation carrying one editable note about where this one got
+   *  to. Optional: a shelf that cannot yet offer it is still whole. */
+  onContinueConversation?: (path: string) => void;
+  /** And the same history in a conversation of its own. */
+  onForkConversation?: (path: string) => void;
+  /** Out of the list, or back into it. Never close, and never delete. */
+  onArchiveConversation?: (path: string, on: boolean) => void;
+  /** The conversations working right now, by their own path. A fork of one of
+   *  them is refused: a fork taken mid-turn copies something that had not
+   *  finished happening. */
+  working?: readonly string[];
   /** Start a conversation in a copy of the project, on a branch of its own.
    *  Optional: a shelf that cannot yet offer it is still whole. */
   onNewWorktree?: () => void;
@@ -41,7 +81,6 @@ type Props = {
   /** The three things the strip can still reach when it is folded. Each one is
    *  left out of the strip when it has nowhere to go. */
   onAsk?: () => void;
-  onDesign?: () => void;
   /** Work in flight, as the graph it already is. */
   onCanvas?: () => void;
   onHistory?: () => void;
@@ -80,7 +119,6 @@ type Place = {
 function placesOf(p: Props): readonly Place[] {
   return [
     { id: 'ask', name: 'Find anything', tip: 'Find anything (⌘K)', on: p.onAsk, icon: <FindIcon /> },
-    { id: 'design', name: 'Design', tip: 'Design (⌘D)', on: p.onDesign, icon: <DesignIcon /> },
     { id: 'canvas', name: 'Canvas', tip: 'Canvas', on: p.onCanvas, icon: <CanvasIcon /> },
     { id: 'history', name: 'History', tip: 'History', on: p.onHistory, icon: <HistoryIcon /> },
     {
@@ -124,6 +162,10 @@ export default function Sidebar(props: Props) {
   openConversation,
   onOpenConversation,
   onNewConversation,
+  onContinueConversation,
+  onForkConversation,
+  onArchiveConversation,
+  working = [],
   onNewWorktree,
   onDeleteConversation,
   ownCopy = false,
@@ -138,11 +180,36 @@ export default function Sidebar(props: Props) {
   /** Which row has an "are you sure" standing over it, by its own path. */
   const [asking, setAsking] = useState<string | null>(null);
   const asked = keepAsking(asking, openConversation);
+  /** Which row has its actions open, by its own path. One at a time: the shelf
+   *  is a list, and a stack of open menus over it is not. */
+  const [menuAt, setMenuAt] = useState<string | null>(null);
+  /** Whether the archived ones are showing. Shut by default: they are out of
+   *  the list because somebody put them there. */
+  const [showingArchived, setShowingArchived] = useState(false);
+  const workingHere = useMemo(() => new Set(working), [working]);
+  /* The conversations in two: the ones the days draw, and the ones somebody put
+     away. The shell marks them on their own row, so this survives a restart and
+     is right for a chat archived from another window. */
+  const [onTheList, kept] = useMemo(() => {
+    const listed: ShelfConversation[] = [];
+    const away: ShelfConversation[] = [];
+    for (const one of conversations) {
+      if (one.archived === true) away.push(one);
+      else listed.push(one);
+    }
+    return [listed, away] as const;
+  }, [conversations]);
+  const acts: Acts | null =
+    onContinueConversation === undefined ||
+    onForkConversation === undefined ||
+    onArchiveConversation === undefined
+      ? null
+      : { onContinueConversation, onForkConversation, onArchiveConversation };
 
-  const searchable = needsSearch(conversations.length);
+  const searchable = needsSearch(onTheList.length);
   const found = useMemo(
-    () => (searchable ? matching(conversations, term) : conversations),
-    [conversations, searchable, term],
+    () => (searchable ? matching(onTheList, term) : onTheList),
+    [onTheList, searchable, term],
   );
   const days = useMemo(() => {
     const at = now ?? Date.now();
@@ -261,7 +328,10 @@ export default function Sidebar(props: Props) {
             {conversations.length === 0 ? (
               <p className="shelf__none">Nothing said here yet.</p>
             ) : found.length === 0 ? (
-              <p className="shelf__none">Nothing here matches that.</p>
+              // Everything here has been archived, or the term matches nothing.
+              // The row below says where the archived ones went, so with no
+              // term there is nothing to explain.
+              term.trim() === '' ? null : <p className="shelf__none">Nothing here matches that.</p>
             ) : (
               days.map((day) => (
                 <div className="shelf__day" key={day.key}>
@@ -281,6 +351,26 @@ export default function Sidebar(props: Props) {
                             <span className="shelf__rowname">{one.title}</span>
                             <span className="shelf__rowsub">{ago(one.at)}</span>
                           </button>
+                          {acts === null ? null : (
+                            <button
+                              type="button"
+                              className="shelf__rowacts"
+                              title={ACTS_WORDS.opener}
+                              aria-label={`More for “${one.title}”`}
+                              aria-expanded={menuAt === one.path}
+                              aria-haspopup="menu"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setMenuAt((was) => (was === one.path ? null : one.path));
+                              }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <circle cx="2.5" cy="6" r="1" fill="currentColor" />
+                                <circle cx="6" cy="6" r="1" fill="currentColor" />
+                                <circle cx="9.5" cy="6" r="1" fill="currentColor" />
+                              </svg>
+                            </button>
+                          )}
                           {onDeleteConversation === undefined ? null : (
                             <button
                               type="button"
@@ -303,6 +393,24 @@ export default function Sidebar(props: Props) {
                             </button>
                           )}
                         </li>
+                        {acts === null || menuAt !== one.path ? null : (
+                          <Acts
+                            title={one.title}
+                            working={workingHere.has(one.path)}
+                            onContinue={() => {
+                              setMenuAt(null);
+                              acts.onContinueConversation(one.path);
+                            }}
+                            onFork={() => {
+                              setMenuAt(null);
+                              acts.onForkConversation(one.path);
+                            }}
+                            onArchive={() => {
+                              setMenuAt(null);
+                              acts.onArchiveConversation(one.path, true);
+                            }}
+                          />
+                        )}
                         {/* Under the row rather than another mark on it: a copy
                             of your project that nothing on screen mentions is how
                             an afternoon's work gets left behind. */}
@@ -363,6 +471,65 @@ export default function Sidebar(props: Props) {
                   </ul>
                 </div>
               ))
+            )}
+            {/* Out of the list, not out of reach: an archived conversation is
+                still a conversation, and the tab, the run and the files were
+                never touched. One labelled row keeps the way back, rather than
+                the whole column carrying the ones somebody put away. */}
+            {kept.length === 0 ? null : (
+              <>
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__archivedsays"
+                  aria-expanded={showingArchived}
+                  onClick={() => setShowingArchived((was) => !was)}
+                  title={ACTS_WORDS.archivedHint}
+                >
+                  <span className="shelf__archivedmark" aria-hidden="true">
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M2.5 4.5L6 8l3.5-3.5"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">{ACTS_WORDS.archived}</span>
+                  <span className="shelf__archivedcount">{String(kept.length)}</span>
+                </button>
+                {showingArchived ? (
+                  <ul className="shelf__list">
+                    {kept.map((one) => (
+                      <li className="shelf__convo" key={one.id}>
+                        <button
+                          type="button"
+                          className={`shelf__row ${one.path === openConversation ? 'shelf__row--here' : ''}`}
+                          onClick={() => onOpenConversation(one.path)}
+                        >
+                          <span className="shelf__rowname">{one.title}</span>
+                          <span className="shelf__rowsub">{ago(one.at)}</span>
+                        </button>
+                        {onArchiveConversation === undefined ? null : (
+                          <button
+                            type="button"
+                            className="shelf__unarchive"
+                            title={ACTS_WORDS.unarchiveHint}
+                            aria-label={`${continuationWords.unarchive} ${one.title}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onArchiveConversation(one.path, false);
+                            }}
+                          >
+                            {continuationWords.unarchive}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
             )}
           </section>
 
@@ -458,6 +625,67 @@ export default function Sidebar(props: Props) {
 }
 
 /**
+ * What can be done with one conversation, from its row.
+ *
+ * A band under the row rather than a menu floating over the list: the shelf
+ * scrolls under its own top edge, nothing has to be measured or pushed back
+ * inside the window, and it is the shape the copy offer beside it already
+ * draws in.
+ *
+ * Continue and Fork both start something new and leave this row alone; Archive
+ * takes the row out of the list and touches nothing else. Fork is refused while
+ * the conversation it would copy is still working, and the band says so rather
+ * than leaving a dead button unexplained.
+ */
+function Acts({
+  title,
+  working,
+  onContinue,
+  onFork,
+  onArchive,
+}: {
+  title: string;
+  working: boolean;
+  onContinue: () => void;
+  onFork: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <li className="shelf__acts">
+      <button
+        type="button"
+        className="shelf__actsdo"
+        title={continuationWords.hint}
+        aria-label={`${continuationWords.label} ${title}`}
+        onClick={onContinue}
+      >
+        {continuationWords.label}
+      </button>
+      <button
+        type="button"
+        className="shelf__actsdo"
+        disabled={working}
+        title={working ? ACTS_WORDS.forkWaits : continuationWords.forkHint}
+        aria-label={`${continuationWords.fork} ${title}`}
+        onClick={onFork}
+      >
+        {continuationWords.fork}
+      </button>
+      <button
+        type="button"
+        className="shelf__actsdo"
+        title={continuationWords.archiveHint}
+        aria-label={`${continuationWords.archive} ${title}`}
+        onClick={onArchive}
+      >
+        {continuationWords.archive}
+      </button>
+      {working ? <p className="shelf__actswhy">{ACTS_WORDS.forkWaits}</p> : null}
+    </li>
+  );
+}
+
+/**
  * A build newer than this one, said once and quietly.
  *
  * It used to arrive as a line in whichever conversation happened to be open,
@@ -504,19 +732,6 @@ function FindIcon({ size = 14 }: IconProps) {
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <circle cx="7" cy="7" r="4.25" stroke="currentColor" strokeWidth="1.5" />
       <path d="m10.25 10.25 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function DesignIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M8 2.25c2 2.2 3.75 4.25 3.75 6.25a3.75 3.75 0 1 1-7.5 0c0-2 1.75-4.05 3.75-6.25Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }

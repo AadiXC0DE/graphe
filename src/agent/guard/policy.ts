@@ -402,10 +402,10 @@ const SHELL_TOOLS = new Set([
 const RUNNING_TOOLS = new Set(['running', 'stoprunning', 'cancelbuild']);
 
 /** Our own bookkeeping, on screen rather than on disk: ticking one thing off
- *  the checklist somebody is watching, and choosing between answers already in
- *  hand. Neither reads a file, runs anything or reaches anywhere — and a
- *  question about either is a question in the middle of every turn. */
-const OUR_OWN_TOOLS = new Set(['stepdone', 'scorecandidates']);
+ *  the checklist somebody is watching. It reads no file, runs nothing and
+ *  reaches nowhere — and a question about it is a question in the middle of
+ *  every turn. */
+const OUR_OWN_TOOLS: Readonly<Record<string, true>> = { stepdone: true };
 const SQL_TOOLS = new Set(['sql', 'query', 'dbquery', 'runsql', 'executesql', 'database', 'db', 'migrate']);
 const NETWORK_TOOLS = new Set(['fetch', 'http', 'httprequest', 'request', 'webfetch', 'download', 'upload', 'post', 'apicall']);
 /** Search engines. Their whole job is sending words out and bringing the
@@ -2153,7 +2153,7 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
   // Nothing gets to turn the Guard off, however politely it asks.
   if (GUARD_SWITCH.test(name)) return deny(SAY.guardOff);
 
-  if (RUNNING_TOOLS.has(name) || OUR_OWN_TOOLS.has(name)) return allow();
+  if (RUNNING_TOOLS.has(name) || OUR_OWN_TOOLS[name] === true) return allow();
 
   if (SHELL_TOOLS.has(name)) {
     // A command's relative locations are only safe if the folder it starts from
@@ -2303,27 +2303,6 @@ function judgeCall(call: ToolCall, ctx: GuardFacts): Judgement {
     const outbound = asText(input);
     if (findSecret(outbound) !== null || findKnownSecret(outbound, ctx)) return deny(SAY.sendKeyOut);
     return allow();
-  }
-
-  /* Putting work on the board. Nothing happens to the project here — each piece
-     runs in a copy of its own and waits for somebody to take it — so this is one
-     question about starting work, not one question per file it will touch. */
-  if (name === 'setgoing') {
-    return ask(
-      'Set several pieces of work going at once?',
-      'Each one gets its own copy of your project and its own agent. They run in the background, four at a time.',
-      'Nothing reaches your own files until you take one.',
-      { mutates: false },
-    );
-  }
-
-  if (name === 'tryways') {
-    return ask(
-      'Make this two or three different ways?',
-      'Each way is made in its own copy of your project, so they can be compared side by side.',
-      'Keeping one throws the others away, and nothing reaches your own files until you keep one.',
-      { mutates: false },
-    );
   }
 
   if (PUBLISH_TOOLS.has(name)) {

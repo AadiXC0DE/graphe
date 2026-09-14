@@ -27,7 +27,7 @@ may still be running instead of implying it stopped. `tests/hook-budget.test.ts`
 
 | Finding | Status |
 | --- | --- |
-| A02, prompt truncation | Open. `standing.ts` still truncates the combined prompt at fixed character counts; the structured sections and progressive resource reads the plan asks for are not built |
+| ~~A02, prompt truncation~~ | **DONE after the first draft.** `src/agent/pi/prompt.ts` assembles named sections in fixed precedence (runtime, repository, skills, extensions, plan, optional memory) with caps that carry a pointer to the file rather than a silent cut; optional memory is what gives way, and the drop is stated in the prompt; a required instruction survives any budget (tested); the estimate is labelled an estimate. Project instruction files now come from Pi's own context paths, so Graphe's duplicate `<agents_md>` block is gone (`src/lib/agentsMd.ts` deleted). Advisor settings are held by one conversation at a time instead of being rewritten on every turn. 11 new tests in `tests/advisor-scope.test.ts` |
 | A03, competing continuations | Open. The board/goal/checklist loops are untouched, and phase 8's retirements are not done, so nothing was unified |
 | E06, lifecycle hooks | Open |
 | E07, admission point | Open: no typed request/admission record, and no pre-turn interception |

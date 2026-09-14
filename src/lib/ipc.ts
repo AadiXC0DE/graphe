@@ -29,7 +29,6 @@ import type { Move } from '../design/moved';
 import type { Held } from '../diff/holdshot';
 import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
-import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { Said } from '../preview/tabs';
 export type { Said };
@@ -59,7 +58,6 @@ export type {
   Move,
   Page,
   Pointed,
-  Reading,
   Recording,
   SpendLimit,
   SpendSummary,
@@ -171,6 +169,31 @@ export type ExtensionRequest = ExtensionAsk & {
   conversation: string | null;
 };
 
+/**
+ * A terminal, as the window knows it.
+ *
+ * The kind is what the header says and who owns the process. It is not a
+ * permission: every one of these is the person's own shell in their own folder,
+ * and none of them is watched by the Guard.
+ */
+export type TerminalKind = 'shell' | 'agent' | 'server';
+
+export type TerminalSession = {
+  id: string;
+  kind: TerminalKind;
+  /** The folder it started in, which is the workspace somebody selected. */
+  workspace: string;
+  /** The shell's own name, for the header: "zsh", "bash". */
+  shell: string;
+  startedAt: number;
+  exit: { code: number; signal: number | null } | null;
+};
+
+/** Output, in chunks: a terminal that printed a megabyte should not arrive as
+ *  one message. */
+export type TerminalChunk = { id: string; data: string };
+export type TerminalExit = { id: string; code: number; signal: number | null };
+
 export type WorktreePlan = {
   /** False in a folder that is not a repository, or that has nothing committed
    *  yet. `because` says which. */
@@ -191,6 +214,10 @@ export type OpenedProject = {
   path: string;
   /** The folder's own name, which is what people call their project. */
   name: string;
+  /** What a continued conversation opens with, as a draft: written from the
+   *  conversation it came from, and editable before it is sent. Absent unless
+   *  this conversation was started by continuing another. */
+  handoff?: string;
   /** The conversation this project left behind, replayed as events. The window
    *  folds them through the same reducer it runs live events through, so a
    *  project opened again comes back as the desk it was — not as an
@@ -280,13 +307,6 @@ export type Room = {
  * module that spawns processes and reads folders; this one crosses a structured
  * clone into a sandbox, and the seam between them is the point of this file.
  */
-/** A set of design edits the window is holding, to be written and saved in one
- *  go. Nothing about them touches the project until the window asks. */
-export type DesignChange = {
-  tokens: readonly { name: string; value: string }[];
-  motions: readonly { places: readonly unknown[]; change: unknown }[];
-};
-
 export type SavedVersion = {
   id: string;
   /** The same id, short. What a terminal, a review page or a colleague calls
@@ -364,22 +384,6 @@ export type VariationsOutcome =
     }
   | { kind: 'unsure'; question: string };
 
-/**
- * Somebody pointed at something in their own page.
- *
- * The whole reading travels, not a sentence about it. The shell is the only side
- * that can read the project the element came out of — its values, where each
- * component is used, what last touched the file — so it decides there and the
- * window draws what it is handed. `says` is that same reading written out for the
- * agent that gets asked to change it, so the composer message carries the element's
- * file, component and values without the person having to describe where the
- * element lives.
- */
-export type PointedAt = {
-  pointed: Pointed;
-  reading: Reading;
-  says: string;
-};
 
 /** One conversation this project has had. */
 export type Conversation = {
@@ -455,15 +459,6 @@ export type Pack = {
   version: string | null;
   installed: boolean;
   curated: boolean;
-};
-
-/** One width the page was photographed at. */
-export type Look = {
-  id: string;
-  name: string;
-  width: number;
-  shot: string | null;
-  trouble: string | null;
 };
 
 /** How the window is sitting on screen. */
@@ -1120,10 +1115,6 @@ export type Overview = {
   artifacts: readonly Artifact[];
   /** Named colours out of a palette file the agent wrote, for real swatches. */
   swatches: readonly Swatch[];
-  /** This project's design tokens, and the file they live in. */
-  /** `text` is the stylesheet as written, so what drifted from these values can
-   *  be worked out without reading the file twice. */
-  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
 };
 
 /** One project inside a folder that holds several: its name as the folder
@@ -1153,19 +1144,6 @@ export type Artifact = {
 };
 
 export type Swatch = { name: string; value: string };
-
-/** One custom property in the project's own design tokens. */
-export type StyleToken = {
-  name: string;
-  value: string;
-  kind: 'colour' | 'space' | 'size' | 'radius' | 'shadow' | 'other';
-  line: number;
-  /** The values a slider should snap to, derived from the file's own scale. */
-  steps: readonly string[];
-  /** The stylesheet it was read from, so an edit lands in the same file. Left
-   *  off (a fixture), an edit falls back to the project's primary sheet. */
-  file?: string;
-};
 
 /* -------------------------------------------------------------------------- */
 /* Staying in step with Figma                                                  */
@@ -1530,6 +1508,17 @@ export const CHANNEL = {
   checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
   worktreePlan: 'graphe:worktree-plan',
+  terminalOpen: 'graphe:terminal-open',
+  terminalScrollback: 'graphe:terminal-scrollback',
+  terminalWrite: 'graphe:terminal-write',
+  terminalResize: 'graphe:terminal-resize',
+  terminalClose: 'graphe:terminal-close',
+  terminalList: 'graphe:terminal-list',
+  terminalData: 'graphe:terminal-data',
+  terminalExit: 'graphe:terminal-exit',
+  conversationContinue: 'graphe:conversation-continue',
+  conversationFork: 'graphe:conversation-fork',
+  conversationArchive: 'graphe:conversation-archive',
   extensionAsk: 'graphe:extension-ask',
   extensionAnswer: 'graphe:extension-answer',
   worktreeNew: 'graphe:worktree-new',
@@ -1561,9 +1550,7 @@ export const CHANNEL = {
   goalClear: 'graphe:goal-clear',
   goalVerify: 'graphe:goal-verify',
   chooseDocument: 'graphe:choose-document',
-  designCommit: 'graphe:design-commit',
   shareReview: 'graphe:share-review',
-  checkWidths: 'graphe:check-widths',
   conversations: 'graphe:conversations',
   openConversation: 'graphe:open-conversation',
   closeConversation: 'graphe:close-conversation',
@@ -1937,7 +1924,7 @@ export type GrapheApi = {
   variationsServe(parts: { subject: string; variations: readonly VariationSpec[] }, where?: Where): Promise<Result<VariationsOutcome>>;
   /** Somebody clicked an element, in their own browser or in the page beside
    *  the conversation. Read against the project before it gets here. */
-  onPointed(listener: (at: PointedAt) => void): () => void;
+  onPointed(listener: (pointed: Pointed) => void): () => void;
   /** A key the native page pane swallowed. Escape only, and only because a
    *  menu that will not close traps the hand. */
   onPaneKey(listener: (press: { key: string }) => void): () => void;
@@ -1951,8 +1938,6 @@ export type GrapheApi = {
   /** Write a read-only page of what changed, for somebody who is not you.
    *  Returns where it was written, or null when the save was cancelled. */
   shareReview(where?: Where): Promise<Result<string | null>>;
-  /** Photograph the project at phone, tablet and desktop width. */
-  checkWidths(where?: Where): Promise<Result<{ looks: readonly Look[]; says: string }>>;
 
   /** The conversations this project has had, newest first. */
   conversations(where?: Where): Promise<Result<readonly Conversation[]>>;
@@ -1965,6 +1950,33 @@ export type GrapheApi = {
   ): Promise<Result<OpenedProject>>;
   /** What a New worktree would make, before anybody commits to it. */
   worktreePlan(where?: Where): Promise<Result<WorktreePlan>>;
+  /** A new conversation carrying one editable note about where this one got
+   *  to. Nothing of the transcript comes across but the files and the note. */
+  continueConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>>;
+  /** The same history in a conversation of its own. */
+  forkConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>>;
+  /** Out of the list, or back into it. Not delete, not close. */
+  archiveConversation(
+    id: string,
+    on: boolean,
+    where?: Where,
+  ): Promise<Result<readonly Conversation[]>>;
+  /** Start a shell in the workspace this call names. There is no command
+   *  argument on purpose: a terminal is keystrokes, not an execution door. */
+  terminalOpen(
+    size: { cols: number; rows: number; kind: TerminalKind },
+    where?: Where,
+  ): Promise<Result<TerminalSession>>;
+  /** What it has printed so far, for a pane opened after the fact. */
+  terminalScrollback(id: string): Promise<Result<string>>;
+  terminalWrite(id: string, data: string): Promise<Result<null>>;
+  terminalResize(id: string, cols: number, rows: number): Promise<Result<null>>;
+  terminalClose(id: string): Promise<Result<null>>;
+  terminalList(where?: Where): Promise<Result<readonly TerminalSession[]>>;
+  /** Output arriving from a terminal, chunk by chunk. */
+  onTerminalData(listener: (chunk: TerminalChunk) => void): () => void;
+  /** A terminal's process ending, once. */
+  onTerminalExit(listener: (exit: TerminalExit) => void): () => void;
   /** Something an add-on is asking. Answered through `answerExtension`, and
    *  with `extensionAnswer` in the shape its own question has. */
   onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void;
@@ -2007,14 +2019,6 @@ export type GrapheApi = {
   packages(term?: string): Promise<Result<readonly Pack[]>>;
   addPackage(id: string): Promise<Result<readonly Pack[]>>;
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
-  /** Write every design change the window has been holding and save it as one
-   *  version. `tokens` renames to real names with the value each is set to;
-   *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
-   *  written on the way to this — the design view stays untracked until asked. */
-  designCommit(
-    changes: DesignChange,
-    where?: Where,
-  ): Promise<Result<readonly SavedVersion[]>>;
   /** Follow along while that happens. Returns the function that stops. */
   onShowProgress(listener: (progress: ShowProgress) => void): () => void;
 

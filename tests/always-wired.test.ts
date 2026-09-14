@@ -81,10 +81,14 @@ describe('watching the browser, minded', () => {
   });
 
   /** By the time somebody has switched project, the one that started the
-   *  watching is no longer the one in front. */
+   *  watching is no longer the one in front — so the stream belongs to the
+   *  project rather than to whatever is in front, and it is the registry that
+   *  stops the one it started. */
   it('stops watching on the project that started it', () => {
-    expect(APP).toContain('watchTheBrowser(false, watchedProject.current)');
-    expect(APP).toContain('watchedProject.current = path');
+    const LIVE = readFileSync(new URL('../src/preview/live.ts', import.meta.url), 'utf8');
+    expect(APP).toContain('live.subscribe(');
+    expect(APP).toContain('live.deliver(frame)');
+    expect(LIVE).toContain('options.watch(project, false)');
   });
 });
 

@@ -26,6 +26,7 @@ import {
   type WorkspaceIndex,
   type WorkspaceKind,
   type WorkspaceRecord,
+  type ConversationRecord,
   type WorkspaceState,
 } from './workspace-registry';
 
@@ -499,9 +500,9 @@ function adoptWorkspaceId(
       workspaces: project.workspaces.map((id) => (id === from ? to : id)),
     };
   }
-  const conversations: Record<string, string> = {};
-  for (const [id, workspace] of Object.entries(index.conversations)) {
-    conversations[id] = workspace === from ? to : workspace;
+  const conversations: Record<string, ConversationRecord> = {};
+  for (const [id, record] of Object.entries(index.conversations)) {
+    conversations[id] = record.workspaceId === from ? { ...record, workspaceId: to } : record;
   }
   return { index: { ...index, workspaces, projects, conversations }, id: to };
 }
@@ -675,7 +676,7 @@ export async function commit(manifest: Manifest, deps: CommitDeps): Promise<Migr
     }
     const already = index.conversations[conversationId];
     if (already !== undefined) {
-      const known = workspaceById(index, already);
+      const known = workspaceById(index, already.workspaceId);
       // Somebody already decided. A migration does not overrule a live record,
       // and it does not quietly move a conversation either.
       if (known === null || known.cwd !== canonical(best.folder)) {

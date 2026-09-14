@@ -27,12 +27,13 @@ Findings: Q03 (open), E11 (open). Baseline: `2b5bccb`, app `1.0.3`.
 
 | Package | Plan says | Status |
 | --- | --- | --- |
-| `marked` 18.0.9 to 18.0.13 | patch, hostile Markdown fixtures | not started |
-| `shiki` 4.4.2 to 4.4.3 | patch, workers/grammars | not started |
-| `typebox` 1.3.12 to 1.3.30 | patch, tool-schema serialization | not started |
-| `mermaid` 11.16.1 to 11.17.2 | minor first | not started |
+| `marked` to 18.0.13 | patch | **upgraded**, Markdown/hostile-input suites green |
+| `shiki` to 4.4.3 | patch | **upgraded**, highlighting suites green |
+| `typebox` to 1.3.30 | patch | **upgraded**, tool-schema suites green |
+| `mermaid` to 11.17.2 | minor first | **upgraded**, `tests/mermaid.test.ts` green (including the hostile-label case) |
+| `@types/node` to 22.20.2 | align to build target | **upgraded** |
+| `node-pty` 1.1.0, `@xterm/xterm` 6.0.0 | new, for the terminal | **added**; N-API prebuilds load under this Electron with no rebuild, but npm drops the execute bit on `spawn-helper` - see the phase 6 handoff for the packaging requirement |
 | `react`/`react-dom`/`@types/react*` to 19.3.0 | together | not started |
-| `@types/node` to 22.20.2 | align to build target | not started |
 | `electron` 43.4.1 to 43.7.0 then 44.3.0 | packaged smoke between | not started |
 | `electron-builder`, `playwright`, `eslint`, `jsdom`, `vite`, `vitest`, `typescript`, `concurrently`, `glob`, `unpdf`, `@vitejs/plugin-react` | separate coherent groups, tested after each | not started |
 | `npm ci` / packaged-runtime import verification | re-run in CI | `npm ci` unchanged in CI; package job still runs `licenses:check && package && verify:package` |

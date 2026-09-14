@@ -4,11 +4,11 @@
 
 **Send in a team, not a prompt.**
 
-The desktop pi has been missing. A canvas of blocks you join up, helpers in parallel, jobs that
-run for hours without you, finished work that waits for a review before it touches your folder,
-and a design system it reads before it writes. Built on
+The desktop pi has been missing. Helpers in parallel, jobs that run for hours without you, a
+guard that asks in plain words before anything risky, finished work that is read and scored
+before anybody takes it, and a browser it drives itself. Built on
 [pi](https://github.com/earendil-works/pi), your keys, any model, the meter in plain sight, and
-every colour, corner and key in it yours to change.
+every key in it yours to change.
 
 <p align="center">
   <a href="https://github.com/AadiXC0DE/graphe/actions"><img src="https://img.shields.io/github/actions/workflow/status/AadiXC0DE/graphe/ci.yml?branch=main&label=CI" alt="CI"></a>
@@ -27,7 +27,7 @@ every colour, corner and key in it yours to change.
 
 <br>
 
-<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is waiting to be saved, what is running in the background, what is on a schedule, and the handover.">
+<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is running in the background, what is on a schedule, and what the sitting has cost.">
 
 </div>
 
@@ -63,12 +63,13 @@ A full coding agent with a real workspace around it, not a chat box with tools b
 
 [**pi**](https://github.com/earendil-works/pi) is a serious coding harness that deliberately ships
 without sub-agents or plan mode. Graphe is what it becomes with both, plus the window, the guard,
-the version history, the design panel, the memory, the money, and the handover.
+the version history, the memory, the money, and the pull request.
 
-One request can become a **board of pieces**, each in its own copy of the project, four running
-at once, the rest waiting, whether or not you're watching. Reviewer, researcher, and a builder
-that writes inside a copy of its own. Set a job going and close the window: it carries on, and you
-come back to a board of what finished, what's waiting, and what it cost.
+One request can go wide as **helpers**, each with its own role and its own context, the read-only
+ones unable to touch anything and the builder working in a copy of the project it can only reach
+inside. A chat works in your project folder; ask for a worktree and it gets a copy of its own to
+work in beside the rest. Set a job going and close the window: it carries on, and you come back to
+what finished, what is waiting, and what it cost.
 
 ---
 
@@ -76,21 +77,16 @@ come back to a board of what finished, what's waiting, and what it cost.
 
 | | |
 |---|---|
-| **Finished work waits for you** | Nothing reaches your folder unasked: an entry arrives on a list with its diff, and you take it, keep yours, send it back or throw it away, file by file |
-| **Made yours** | One accent and every surface derived from it in OKLCH and measured before it lands, four presets, any font on the machine, every chord rebindable, and `graphe.css` for anything the builder does not offer |
-| **One thing decides when it carries on** | A checklist, a goal, a finished board piece, an add-on asking for a turn and a run that fell over are five reasons through one door, counted against one budget and named out loud |
+| **Made yours** | Light and dark, following the system; every chord rebindable from one registry the palette and the keyboard both read, and `graphe.css` for anything the builder does not offer |
+| **One thing decides when it carries on** | A checklist, a goal, a helper that finished, an add-on asking for a turn and a run that fell over are five reasons through one door, counted against one budget and named out loud |
 | **Works in parallel, and keeps working** | Helpers run side by side, each in its own context; jobs outlast your attention |
-| **One request, many pieces** | The plan puts the list on the board; each piece gets its own copy and its own agent |
-| **A run drawn as blocks** | The canvas: every step left to right, what waits for what, joined up and left to go |
+| **One request, many helpers** | Each gets its own role and its own context: reviewer, researcher and helper read; the builder writes, in a copy it can only reach inside |
 | **One goal, kept working toward** | A sentence that says what done means; it checks after every round and starts the next itself |
-| **A helper that builds** | A fourth kind that writes, in a copy of the project it can only reach inside |
-| **Try it two or three ways** | Goes at the same thing finish side by side, with what each cost, keep one, throw the rest away |
-| **Reads your design system first** | Colours, spacing and type read as a spec before a file is touched; Figma frames come in as pictures |
-| **Every width, checked** | Phone, tablet, desktop and wide, photographed, so you never decide from one size |
+| **A copy, when you ask for one** | A chat works in your project folder; a worktree gives it a copy of its own to build in, with its own branch, and a merge back when you say so |
 | **A review with a verdict** | A pull request is read in a copy of its own, so nothing you have open moves. Ships, needs work, or do not land, findings ranked with file and line, and one press posts them |
 | **The bill, before it lands** | An estimate before a big job, a running total, a ceiling that ends it, in your currency, not tokens |
 | **Memory between sittings** | Facts kept per project on your machine, ranked by meaning, loaded at the next start |
-| **A browser, beside the conversation** | The running project lives in the window next to the agent building it, servers that stay up, comments on the page like a design |
+| **A browser, beside the conversation** | The running project lives in the window next to the agent building it, servers that stay up, and a comment on any element that reaches the agent with the line it was written on |
 | **A browser it can drive anywhere** | Any address, not just your own site: opens it, reads it, presses things, types into them, on from the first turn |
 | **Works the computer itself** | For the tools that are not websites: a picture of the screen, then presses, typing and drags on it |
 | **A folder of several projects** | `backend/` and `frontend/` beside each other: each with its own lines of work, versions and preview |
@@ -99,7 +95,6 @@ come back to a board of what finished, what's waiting, and what it cost.
 | **Skills off the shelf** | `@skill` brings in craft you installed; `/command` expands a prompt you wrote |
 | **Money, in your currency** | Every turn accounted for, and a split that separates your work from our own retries |
 | **How far a change reaches** | It names the files a change would touch, and what it would take, before it makes it |
-| **One name, changed everywhere** | `formatBytes` becomes `formatFileSize` in every file that uses it, previewed first, with a restore point |
 | **A second model for the hard parts** | Whatever is answering does the work; a stronger one is asked before a plan and before it calls something done |
 
 Every one of these is in the window the moment you open a folder, nothing to install, nothing
@@ -151,16 +146,16 @@ lowered.
 ## How a sitting goes
 
 1. **Point it at a project.** Open a folder and it is one, recent ones sit on a shelf with what each cost last time.
-2. **Say what you want, however you have it.** Type it, paste a screenshot, drop in a Figma frame. There is no syntax to learn.
+2. **Say what you want, however you have it.** Type it, paste a screenshot, point at a file. There is no syntax to learn.
 3. **Big jobs come back as a plan.** A numbered plan, an estimate, and a wait for "Go ahead". Small jobs just get done.
 4. **It works where you can see it.** The file tree marks what changed; the rail names what it's doing right now.
-5. **You look, then you decide.** Before and after, at phone, desktop and wide. Let it in, or set it aside, setting aside keeps the work reachable.
-6. **Hand it to your team.** A write-up with the pictures in it, a properly named line of work, and a request ready for whoever reviews.
+5. **You look, then you decide.** The diff is there file by file: take the whole thing, or take the three hunks you wanted.
+6. **Open a pull request.** A properly named line of work, a title that matches it, and the change described in the body.
 
 <div align="center">
 
-<img src="site/assets/web/app-design-dark.webp" width="49%" alt="The design view, reading the project's own tokens.css: every colour named with its value beside it.">
 <img src="site/assets/web/app-history-dark.webp" width="49%" alt="The history view: every saved moment drawn as lines, with short ids, parents and the names on each.">
+<img src="site/assets/web/app-skills-dark.webp" width="49%" alt="The skills view: craft installed off the shelf, each one described, ready to bring into a request.">
 
 </div>
 
@@ -170,7 +165,7 @@ lowered.
 
 The agent runtime is [**pi**](https://github.com/earendil-works/pi), an excellent, genuinely open
 agent harness. Graphe is the layer around it: sub-agents and plan mode, plus the window, the guard,
-the version history, the design panel, the memory, the money, and the handover. One module owns
+the version history, the memory, the money, and the pull request. One module owns
 every pi import, so an upgrade breaks one file rather than fifty.
 
 **Graphe is not a fork.** It depends on pi as a published package, so pi's improvements arrive by
@@ -207,9 +202,9 @@ npm run package      # macOS release: dmg + zip, arm64 and x64 (see RELEASING.md
 |---|---|
 | **Local-first** | Runs on your machine. No account, no server, no telemetry. Your code never leaves your disk |
 | **Bring your own model** | Anthropic, OpenAI, Google, OpenRouter and the rest, on your own key. Nothing is metered by us, because there is no us in the middle |
-| **Real git underneath** | Version history is ordinary commits with readable messages. The word "commit" never appears in the interface |
+| **Real git underneath** | Version history is ordinary commits with readable messages, and the interface uses git's own words for them: branch, commit, changes, pull request |
 | **Guarded execution** | Every action checked before it runs; nothing outside your project folder, ever |
-| **Design-aware work** | Screenshots, Figma links, annotations and visual review in the same conversation |
+| **Page and screen** | The running page beside the conversation, a browser it drives anywhere, and the computer itself when the work is not a website |
 | **Skills and starting points** | Reuse good ways of working without turning the interface into a terminal |
 
 ```
@@ -217,7 +212,7 @@ src/
 ├── agent/       the agent runtime and the safety guard
 ├── components/  the interface
 ├── cost/        spend tracking, estimates, limits
-├── design/      reading a design system as a spec
+├── design/      the window's own colours and type
 ├── history/     the version timeline over real git
 ├── projects/    shelves and recent work
 ├── shell/       conversations and their checkouts
@@ -235,7 +230,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releasing: [RELEASING.md](RELE
 
 | | |
 |---|---|
-| `~/Library/Application Support/Graphe` | Checkouts and board copies of your projects, conversation transcripts, the version timeline's working copies, logs, preferences and the recent-projects shelf. Credentials Graphe holds are sealed by the login keychain, never written in the clear |
+| `~/Library/Application Support/Graphe` | Checkouts and copies of your projects, conversation transcripts, the version timeline's working copies, logs, preferences and the recent-projects shelf. Credentials Graphe holds are sealed by the login keychain, never written in the clear |
 | `~/.pi/agent` | The agent runtime's own folder: the provider you connected, installed add-ons, and the project memory |
 | Your project folder | Ordinary git. Every version Graphe makes is a real commit in your repository |
 
@@ -278,7 +273,7 @@ uninstall them.
 
 These are load-bearing, not decoration. Pull requests are measured against them.
 
-- **Never put the user's lack in the subject of a sentence.** The subject is their design and their
+- **Never put the user's lack in the subject of a sentence.** The subject is their work and their
   judgment; the machinery is the object being handled.
 - **Every destructive action snapshots first,** and no confirmation can be globally switched off.
 - **The technical truth is always one click away, and never in the way.**

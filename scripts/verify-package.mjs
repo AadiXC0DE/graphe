@@ -96,6 +96,27 @@ for (const bundle of bundles) {
     fault(`${PI} is NOT in the bundle — the app cannot think`);
   }
 
+  /* The terminal's pty helper: unpacked, and executable. The execute bit is the
+     whole reason this check exists — npm can install the prebuilt binary without
+     it, and a terminal that silently will not start is the kind of thing nobody
+     notices until they need it. */
+  const ptyDir = join(app, 'Contents/Resources/app.asar.unpacked/node_modules/node-pty');
+  const helpers = join(ptyDir, 'prebuilds');
+  if (await exists(join(ptyDir, 'package.json'))) {
+    const arch = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+    const helper = join(helpers, arch, 'spawn-helper');
+    if (!(await exists(helper))) {
+      fault(`node-pty is in the bundle but ${arch}/spawn-helper is not`);
+    } else {
+      const mode = (await stat(helper)).mode & 0o111;
+      if (mode === 0) fault('node-pty spawn-helper is not executable — the terminal will not start');
+      else pass('node-pty is in the bundle with an executable helper');
+    }
+  } else {
+    // Not a fault while the app ships without it: the terminal says so itself.
+    console.log('  note: node-pty is not in this bundle, so the terminal is unavailable');
+  }
+
   /* The window's own build. */
   for (const needed of ['app.asar', 'app.asar.unpacked']) {
     if (!(await exists(join(app, 'Contents/Resources', needed)))) fault(`Resources/${needed} missing`);

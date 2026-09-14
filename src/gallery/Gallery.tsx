@@ -14,8 +14,6 @@ import InLine from '../components/InLine';
 import Message from '../components/Message';
 import Steps from '../components/Steps';
 import EvidenceReel from '../components/EvidenceReel';
-import Inspector from '../components/Inspector';
-import type { Reading } from '../preview/inspect';
 import SeeFirst from '../components/SeeFirst';
 import type { Held } from '../diff/holdshot';
 import type { Recording } from '../diff/flow';
@@ -29,7 +27,6 @@ import Landing from '../components/Landing';
 import { gateOf, USUAL } from '../design/gate';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
-import DesignView from '../components/DesignView';
 import HistoryView from '../components/HistoryView';
 import Overview from '../components/Overview';
 import Sidebar from '../components/Sidebar';
@@ -55,9 +52,6 @@ import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
 import { findMoved, saysInStep, type Design } from '../design/moved';
-import { readDesign } from '../design/reading';
-import { findDrift } from '../design/drift';
-import { readMotion } from '../motion/read';
 import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
 
@@ -283,68 +277,6 @@ const REMEMBERED: readonly RecentProject[] = [
     branch: null,
   },
 ];
-
-/** A stylesheet with enough in it that every band of the design view has
- *  something real to say: values to move, movement to watch, and two near-misses
- *  written by hand. */
-const STYLESHEET = `:root {
-  --accent: #b8492c;
-  --text: #1a1a19;
-  --text-muted: #a3a3a0;
-  --bg: #fbfbfa;
-  --space-3: 12px;
-  --space-4: 16px;
-  --radius-md: 10px;
-  --dur-ui: 200ms;
-}
-
-.card {
-  padding: 15px;
-  border-radius: var(--radius-md);
-  transition: transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
-}
-
-.card:hover {
-  transform: translateY(-2px);
-}
-
-.badge {
-  background: #b8492d;
-  transition: opacity 140ms ease;
-}
-`;
-
-const STYLES = {
-  file: 'src/styles/tokens.css',
-  text: STYLESHEET,
-  tokens: [
-    { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 2, steps: [] },
-    { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 3, steps: [] },
-    { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 4, steps: [] },
-    { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 5, steps: [] },
-    {
-      name: '--space-3',
-      value: '12px',
-      kind: 'space' as const,
-      line: 6,
-      steps: ['8px', '12px', '16px', '24px'],
-    },
-    {
-      name: '--space-4',
-      value: '16px',
-      kind: 'space' as const,
-      line: 7,
-      steps: ['8px', '12px', '16px', '24px'],
-    },
-    {
-      name: '--radius-md',
-      value: '10px',
-      kind: 'radius' as const,
-      line: 8,
-      steps: ['6px', '10px', '14px'],
-    },
-  ],
-};
 
 const TIMELINE: readonly SavedVersion[] = [
   {
@@ -574,50 +506,6 @@ const IN_STEP = {
 /** A piece of work finished and waiting to be looked at, with both of the
  *  things that can send anywhere reachable. The state worth drawing, because it
  *  is the one where every press in the band means something. */
-/** What comes back from pointing at a button on a real React 19 dev server:
- *  the component and the line, its tokens, one value a hair off one of them,
- *  and an honest note about what could not be worked out. */
-const POINTED: Reading = {
-  title: 'A button: “Start a project”',
-  made: {
-    how: 'stack',
-    sure: 'likely',
-    component: 'Welcome',
-    where: { file: 'src/components/Welcome.tsx', line: 84, column: 11 },
-    alsoIn: ['src/components/Landing.tsx', 'src/gallery/Gallery.tsx'],
-    screens: ['/', '/pricing'],
-    find: 'Welcome',
-    says: 'Made by Welcome, at src/components/Welcome.tsx:84.',
-  },
-  using: [
-    { what: 'the background', name: '--accent', value: '#b8492c', says: 'The background is your --accent.' },
-    { what: 'the corners', name: '--radius-sm', value: '6px', says: 'The corners are your --radius-sm.' },
-  ],
-  adrift: [
-    {
-      what: 'the space inside',
-      wrote: '13px',
-      mine: { name: '--space-3', value: '12px' },
-      confidence: 'likely',
-      says: 'The space inside is 13px, a hair off your --space-3.',
-      detail: '13px vs 12px',
-    },
-  ],
-  changed: {
-    name: 'Made the first screen ask one question',
-    when: NOW - 3 * 3_600_000,
-    says: 'Last changed 3 hours ago, in “Made the first screen ask one question”.',
-  },
-  widths: {
-    all: [
-      { id: 'phone', name: 'Phone', width: 390, height: 844, here: false },
-      { id: 'tablet', name: 'Tablet', width: 834, height: 1112, here: true },
-      { id: 'desktop', name: 'Desktop', width: 1440, height: 900, here: false },
-    ],
-    says: 'Shown at Tablet.',
-  },
-  unsure: ['I could not tell which of your text sizes this is using.'],
-};
 
 /** Work waiting in a copy, photographed before it is let in — including one
  *  width that would not build, because that is half of these. */
@@ -1125,19 +1013,6 @@ const OVERVIEW_VIEW = {
     { name: 'brand', value: '#b8492c' },
     { name: 'ink', value: '#1a1a19' },
   ],
-  styles: {
-    file: 'src/styles/tokens.css',
-    tokens: [
-      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
-      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
-      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
-      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
-      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
-    ],
-    text: ':root { --accent: #b8492c; }',
-  },
-  reading: readDesign(null),
-  inStep: IN_STEP,
   landing: LANDING,
   going: null,
   landed: null,
@@ -1316,21 +1191,6 @@ export default function Gallery() {
               The row carries the <em>last</em> step rather than a description of all of them, which
               is what keeps “never a spinner without a sentence” true while the chain is still
               running: the newest thing is the thing being done now.
-            </p>
-          </Section>
-
-          <Section
-            title="Point at anything and be told what it is"
-            note="A click already knew the selector, the label, the markup and the computed styles, and threw all of it away into one sentence. This is the designer's version of DevTools: which component made it, which of your tokens it is using, which values are a hair off one of them, when it last changed, and what it looks like at the other sizes."
-          >
-            <div className="gallery__rail">
-              <Inspector reading={POINTED} onAsk={noop} onWidth={noop} />
-            </div>
-            <p className="gallery__caption">
-              The chain degrades rather than failing: on a React 19 dev server it names the component
-              and the line; on a production build it falls back through the selector, the markup and
-              the visible text until it has something the agent can go and find. What it could not
-              work out is written down rather than left out.
             </p>
           </Section>
 
@@ -1891,19 +1751,6 @@ export default function Gallery() {
                     { name: 'brand', value: '#b8492c' },
                     { name: 'ink', value: '#1a1a19' },
                   ],
-                  styles: {
-                    file: 'src/styles/tokens.css',
-                    tokens: [
-                      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
-                      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
-                      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
-                      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
-                      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
-                    ],
-                    text: ':root { --accent: #b8492c; }',
-                  },
-                  reading: readDesign(null),
-                  inStep: IN_STEP,
                   landing: LANDING,
                   going: null,
                   landed: null,
@@ -1923,7 +1770,6 @@ export default function Gallery() {
                 onShowSplit={noop}
             onLimit={noop}
             onSave={noop}
-                onOpenDesign={noop}
                 onSwitchBranch={() => {}}
                 onCreateBranch={() => {}}
                 onFetch={fetched}
@@ -1974,7 +1820,6 @@ export default function Gallery() {
                 onShowSplit={noop}
                 onLimit={noop}
                 onSave={noop}
-                onOpenDesign={noop}
                 onSwitchBranch={noop}
                 onCreateBranch={noop}
                 onFetch={fetched}
@@ -2160,51 +2005,6 @@ vite v6.0.5 building for production...
               Three failures, one shape. The first sentence is what happened, the second is the
               likeliest reason and admits to being a guess, and the button is the single most
               useful thing left to do. No card here ever says “error”, and none of them shakes.
-            </p>
-          </Section>
-
-          <Section
-            title="Design"
-            note="Everything about how the project looks, over the conversation rather than squeezed into a 328px column. A grid, so a palette is a palette and a hundred movements are a list you can find something in. ⌘D opens it; Esc leaves."
-          >
-            <div className="gallery__sheet">
-              <DesignView
-                at="styles"
-                data={{
-                  styles: STYLES,
-                  motion: readMotion(STYLESHEET),
-                  drifted: findDrift(STYLESHEET, STYLES.tokens),
-                  unreadable: readDesign(STYLES).unreadable,
-                  fixing: null,
-                  looks: [],
-                  looksSay: '',
-                  checkingWidths: false,
-                  workingAt: null,
-                  inStep: IN_STEP,
-                  lookingAtFigma: false,
-                  busy: false,
-                  showMe: false,
-                }}
-                changes={0}
-                onSave={noop}
-                onDiscard={noop}
-                onClose={noop}
-                onNudge={noop}
-                onNudgeMotion={noop}
-                onFixColour={noop}
-                onCheckWidths={noop}
-                onWorkAt={noop}
-                onFollowDesign={noop}
-                onLookAgain={noop}
-                onBuildIn={noop}
-                onCaughtUp={noop}
-                onStopFollowing={noop}
-              />
-            </div>
-            <p className="gallery__caption">
-              Each band keeps its own empty state rather than disappearing, so pressing a chip
-              never lands on nothing. The two long ones, every movement and every near-miss, draw a
-              screenful and offer the rest, because each row here is a live demonstration.
             </p>
           </Section>
 

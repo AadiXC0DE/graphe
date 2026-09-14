@@ -75,8 +75,8 @@ import {
   type InStep,
   type ModelChoice,
   type OpenedProject,
+  type TerminalSession,
   type WorktreePlan,
-  type Look,
   type Overview,
   type Pack,
   type PlainPreference,
@@ -1228,11 +1228,6 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
-    designCommit(): Promise<Result<readonly SavedVersion[]>> {
-      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
-      return Promise.resolve(done(previewVersions(path)));
-    },
-
 
     /** A conversation that grows the way a real one does, so the ring beside
      *  the box has something to draw and the tidy button something to do. */
@@ -1619,22 +1614,6 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
-    checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>> {
-      return Promise.resolve(
-        done({
-          // The sizes a project like this one designs at rather than three
-          // stock ones, which is what the app finds in its stylesheets.
-          looks: [
-            { id: 'phone', name: 'Phone', width: 390, shot: null, trouble: null },
-            { id: 'tablet', name: 'Tablet', width: 768, shot: null, trouble: null },
-            { id: 'laptop', name: 'Laptop', width: 1024, shot: null, trouble: null },
-            { id: 'desktop', name: 'Desktop', width: 1440, shot: null, trouble: null },
-          ],
-          says: 'There is no folder underneath a browser tab, so there is nothing to photograph.',
-        }),
-      );
-    },
-
     conversations(): Promise<Result<readonly Conversation[]>> {
       return Promise.resolve(
         done([
@@ -1665,6 +1644,51 @@ let previewPlanMode = false;
           ownCopy: typeof workspace === 'string' && workspace !== '',
         }),
       );
+    },
+
+    terminalOpen(): Promise<Result<TerminalSession>> {
+      return Promise.resolve(previewFail<TerminalSession>());
+    },
+
+    terminalScrollback(): Promise<Result<string>> {
+      return Promise.resolve(previewFail<string>());
+    },
+
+    terminalWrite(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalResize(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalClose(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalList(): Promise<Result<readonly TerminalSession[]>> {
+      return Promise.resolve(done<readonly TerminalSession[]>([]));
+    },
+
+    onTerminalData(): () => void {
+      // A browser tab has no shell to attach to.
+      return () => undefined;
+    },
+
+    onTerminalExit(): () => void {
+      return () => undefined;
+    },
+
+    continueConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
+    forkConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
+    archiveConversation(): Promise<Result<readonly Conversation[]>> {
+      return Promise.resolve(previewFail<readonly Conversation[]>());
     },
 
     onExtensionAsk(): () => void {
@@ -2601,17 +2625,26 @@ function connect(): Bridge {
     onPaneKey: (listener) => api.onPaneKey(listener),
     pages: (where) => api.pages(where),
     shareReview: (where) => api.shareReview(where),
-    checkWidths: (where) => api.checkWidths(where),
     conversations: (where) => api.conversations(where),
     openConversation: (path, workspace, where) => api.openConversation(path, workspace, where),
     worktreePlan: (where) => api.worktreePlan(where),
+    terminalOpen: (size, where) => api.terminalOpen(size, where),
+    terminalScrollback: (id) => api.terminalScrollback(id),
+    terminalWrite: (id, data) => api.terminalWrite(id, data),
+    terminalResize: (id, cols, rows) => api.terminalResize(id, cols, rows),
+    terminalClose: (id) => api.terminalClose(id),
+    terminalList: (where) => api.terminalList(where),
+    onTerminalData: (listener) => api.onTerminalData(listener),
+    onTerminalExit: (listener) => api.onTerminalExit(listener),
+    continueConversation: (source, where) => api.continueConversation(source, where),
+    forkConversation: (source, where) => api.forkConversation(source, where),
+    archiveConversation: (id, on, where) => api.archiveConversation(id, on, where),
     onExtensionAsk: (listener) => api.onExtensionAsk(listener),
     answerExtension: (requestId, answer, where) => api.answerExtension(requestId, answer, where),
     worktreeNew: (wanted, where) => api.worktreeNew(wanted, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
-    designCommit: (changes, where) => api.designCommit(changes, where),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
     onWindowState: (listener) => api.onWindowState(listener),

@@ -79,7 +79,7 @@ import { readTokenUsage } from './tokens';
 import { limitReached } from '../src/cost/phrasing';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
-import { ProjectHistory, type LastChange } from '../src/history/repo';
+import { ProjectHistory } from '../src/history/repo';
 import {
   cannotOpen,
   everythingIn,
@@ -131,10 +131,11 @@ import {
   type WorktreePlan,
   type ExtensionAnswer,
   type ExtensionAsk,
+  type TerminalKind,
+  type TerminalSession,
   type WentOnline,
   type Overview,
   type RepoOverview,
-  type PointedAt,
   type Preferences,
   type PromptOptions,
   type PutBack,
@@ -153,7 +154,6 @@ import {
   type AlwaysDoes,
   type Workflow,
   type SavedVersion,
-  type DesignChange,
   type ShowOutcome,
   type VariationSpec,
   type VariationsOutcome,
@@ -256,6 +256,8 @@ import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { WorkspaceLocks } from './services/workspace-locks';
 import { moveToTrash } from './services/trash';
+import { Terminals } from './services/terminal';
+import { handoffMessage } from '../src/work/continuing';
 import {
   MARKER_FILE,
   LOCK_FILE,
@@ -264,13 +266,16 @@ import {
   readMarker,
 } from './services/migration-service';
 import {
+  addConversation,
   addWorkspace,
+  conversationById,
   attachConversation,
   canonical,
   emptyIndex,
   ensureProject,
   parseIndex,
   serializeIndex,
+  updateConversation,
   workspaceById,
   workspaceForConversation,
   type WorkspaceIndex,
@@ -337,14 +342,11 @@ import {
 } from '../src/work/goal';
 import { openingFor, openingIn, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
-import { readTokens, steps, writeToken } from '../src/design/tokens';
-import { writeMotionAll } from '../src/motion/read';
 import { createReader, parseFigmaUrl } from '../src/design/figma';
 import { follow, throughFigma, type ReadDesign } from '../src/design/follow';
 import { findMoved, saysInStep, NOTHING_FOLLOWED, type Held as HeldDesign } from '../src/design/moved';
 import { FollowedFile } from '../src/projects/followed';
-import { lookAtEveryWidth } from '../src/diff/capture';
-import { readsWell, sizesFor, type Look } from '../src/design/widths';
+import { sizesFor } from '../src/design/widths';
 import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
 import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import {
@@ -416,13 +418,6 @@ import type { Serving } from '../src/preview/serve';
 import { lookAt, makeAndServe, ShowError, showSays } from '../src/preview/show';
 import { canBeShown, readTheFolder } from '../src/preview/detect';
 import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
-import {
-  read as readPointed,
-  saysReading,
-  type Material,
-  type Change as Touched,
-} from '../src/preview/inspect';
-import { readUsage } from '../src/design/usage';
 import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
 import { dropShots, holdCamera, keepShots } from '../src/diff/holdcamera';
 import { howMuchBy, nextAccepted } from '../src/design/gate';
@@ -1546,7 +1541,7 @@ holdPage({
 ipcMain.on(CHANNEL.pagePointed, (event, pointed: Pointed) => {
   if (pageView === null || event.sender !== pageView.webContents) return;
   if (pageProject === null) return;
-  sayPointed(pageProject, pointed);
+  sayPointed(pointed);
 });
 
 /** Where the window was last, and how big. Always the same 1100×780 before
@@ -3334,82 +3329,6 @@ const TOKEN_FILES = [
   'styles/globals.css',
 ];
 
-/**
- * The project's own tokens, and where they live.
- *
- * Whichever candidate file holds the most of them wins — a project with both a
- * token file and a globals file keeps its tokens in one of them, and counting
- * is a better guess than an ordering we made up.
- */
-/** Every stylesheet the project keeps, with its name, so a read can say which
- *  file a token came from. Token files first, then the style folders — the same
- *  breadcrumb `styleSheets` follows, but paired with names for aggregation. */
-async function tokenSheets(root: string): Promise<readonly { name: string; css: string }[]> {
-  const names = [...TOKEN_FILES];
-  for (const folder of STYLE_FOLDERS) {
-    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
-    for (const name of inside) {
-      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
-    }
-  }
-  const out: { name: string; css: string }[] = [];
-  const seen = new Set<string>();
-  for (const name of names) {
-    if (out.length >= MOST_SHEETS || seen.has(name)) continue;
-    seen.add(name);
-    const css = await readFile(join(root, name), 'utf8').catch(() => null);
-    if (css !== null) out.push({ name, css });
-  }
-  return out;
-}
-
-/**
- * The project's design tokens, gathered from every stylesheet it keeps.
- *
- * A project's visual language is rarely one file — tokens live in `globals.css`
- * and `variables.css` and the component sheets together. This reads them all,
- * keeps the first declaration of each name (which is the one that wins on
- * `:root`), and remembers which file each came from so an edit to it lands in
- * the right place. `file`/`text` name the sheet with the most tokens, which is
- * where the live editing preview writes.
- */
-async function styleTokens(
-  root: string,
-): Promise<
-  { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[]; text: string } | null
-> {
-  const sheets = await tokenSheets(root);
-  // Raw reads named by file, then the first declaration of each name kept — the
-  // one that wins on :root — so a value restated per theme is not repeated.
-  const byName = new Map<string, { raw: ReturnType<typeof readTokens>[number]; file: string }>();
-  for (const sheet of sheets) {
-    for (const raw of readTokens(sheet.css)) {
-      if (byName.has(raw.name)) continue;
-      byName.set(raw.name, { raw, file: sheet.name });
-    }
-  }
-  if (byName.size === 0) return null;
-  const raws = [...byName.values()].map((one) => one.raw);
-  const withSteps: import('../src/lib/ipc').StyleToken[] = [...byName.values()].map((one) => ({
-    ...one.raw,
-    steps: steps(one.raw, raws),
-    file: one.file,
-  }));
-  // The sheet holding the most tokens is the one the panel edits live.
-  const counts = new Map<string, number>();
-  for (const one of withSteps) counts.set(one.file ?? '', (counts.get(one.file ?? '') ?? 0) + 1);
-  let bestName = withSteps[0]?.file ?? '';
-  let bestCount = -1;
-  for (const [name, count] of counts) {
-    if (name !== '' && count > bestCount) {
-      bestName = name;
-      bestCount = count;
-    }
-  }
-  const text = sheets.find((one) => one.name === bestName)?.css ?? '';
-  return { file: bestName, tokens: withSteps, text };
-}
-
 /** Folders a project keeps its stylesheets in, looked in one level down. */
 const STYLE_FOLDERS = ['src/styles', 'styles', 'src/css', 'css', 'app', 'src'];
 
@@ -3450,70 +3369,6 @@ async function styleSheets(root: string): Promise<readonly string[]> {
 /* Pointing at something                                                       */
 /* -------------------------------------------------------------------------- */
 
-/**
- * What the project knows, for a click to be read against.
- *
- * Only this process can answer any of it — the project's own values, every
- * place each component is used, what last touched each file — and reading the
- * components alone is a few hundred milliseconds of somebody's folder. A click
- * is answered while they watch, and none of this changes between two clicks in
- * the same minute.
- */
-const knows = new Map<string, { at: number; material: Material }>();
-const STILL_KNOWN = 60_000;
-
-/**
- * The same change under both spellings a page can hand back.
- *
- * A file arrives from the page as its address there, and the two shapes that
- * come out of that are the project-relative path and the whole path with the
- * leading slash gone. History knows only the first, so the second is written
- * down beside it rather than guessed at afterwards.
- */
-function changesByPath(root: string, changes: ReadonlyMap<string, LastChange>): Map<string, Touched> {
-  const whole = root.split(sep).filter((one) => one !== '').join('/');
-  const found = new Map<string, Touched>();
-  for (const [path, one] of changes) {
-    const change: Touched = { name: one.name, when: one.when, id: one.id };
-    found.set(path, change);
-    found.set(`${whole}/${path}`, change);
-  }
-  return found;
-}
-
-async function whatIsKnown(folder: string): Promise<Material> {
-  const already = knows.get(folder);
-  if (already !== undefined && Date.now() - already.at < STILL_KNOWN) return already.material;
-
-  const [styles, sheets, usage, changes] = await Promise.all([
-    styleTokens(folder).catch(() => null),
-    styleSheets(folder).catch(() => [] as readonly string[]),
-    readUsage(folder).catch(() => null),
-    new ProjectHistory(folder).lastChangeByFile().catch(() => new Map<string, LastChange>()),
-  ]);
-
-  const material: Material = {
-    tokens: styles?.tokens ?? [],
-    usage,
-    changes: changesByPath(folder, changes),
-    widths: sizesFor(sheets),
-  };
-  knows.set(folder, { at: Date.now(), material });
-  return material;
-}
-
-/** One click, read against the project it came out of. `says` is the same click
- *  as the one line the composer would have made somebody type. */
-async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | null> {
-  try {
-    const material = await whatIsKnown(folder);
-    const reading = readPointed(pointed, material);
-    return { pointed, reading, says: saysReading(reading) };
-  } catch {
-    return null;
-  }
-}
-
 /** Who is watching which browser, so a second press or a closed project ends
  *  the right one. */
 const watching = new Map<string, { stop: boolean }>();
@@ -3536,6 +3391,14 @@ function watchTheBrowser(project: string, keeps: string | null): void {
   watching.set(project, mine);
   void (async () => {
     while (!mine.stop) {
+      // A window that has gone is one nothing can be drawn in, and a picture
+      // nobody can be shown is a browser composited and encoded for nobody.
+      // Ends here rather than at the next quit: a window closed mid-watch left
+      // the loop running for the rest of the session.
+      if (mainWindow === null || mainWindow.isDestroyed()) {
+        if (watching.get(project) === mine) stopWatching(project);
+        return;
+      }
       const bytes = await browserFrame(project, undefined, keeps).catch(() => null);
       if (mine.stop) return;
       if (bytes !== null && mainWindow !== null && !mainWindow.isDestroyed()) {
@@ -3546,11 +3409,9 @@ function watchTheBrowser(project: string, keeps: string | null): void {
   })();
 }
 
-function sayPointed(folder: string, pointed: Pointed): void {
-  void readingOf(folder, pointed).then((at) => {
-    if (at === null || mainWindow === null || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send(CHANNEL.pointed, at);
-  });
+function sayPointed(pointed: Pointed): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.pointed, pointed);
 }
 
 /** Where every project's conversations are kept. */
@@ -3621,6 +3482,13 @@ function sayIfCeilingIsBlind(project: string, at: string | undefined): void {
   send(project, { type: 'message-delta', text: `\n\n${says}` }, at);
   send(project, { type: 'message-end' }, at);
 }
+
+/** Said when a terminal is written to after it has ended or was never here. */
+const NO_TERMINAL: Trouble = {
+  what: 'That terminal is not open any more.',
+  because: 'It ended, or the window it belonged to is gone. Open a new one from the same place.',
+  actionLabel: 'Got it',
+};
 
 /** Said when a conversation is asked about a checkout it does not have. Naming
  *  it plainly beats acting on one belonging to somebody else. */
@@ -3848,7 +3716,13 @@ async function conversationsInProject(
       // a checkout still belongs to the project that owns the checkout.
       const cwd = one.cwd === null ? '' : canonical(one.cwd);
       return cwd !== '' && (cwd === root || cwd === under || cwd.startsWith(`${under}${sep}`));
-    }),
+    }).map((one) => ({
+      ...one,
+      // Whether somebody put it away is the shell's to know, not Pi's.
+      archived:
+        conversationById(index, one.path)?.archived === true ||
+        conversationById(index, one.id)?.archived === true,
+    })),
   };
 }
 
@@ -4078,6 +3952,7 @@ async function noteWhereItWorks(
   open: { path: string; held: Held },
   address: string,
   folder: string | null,
+  lineage: { from: string; kind: 'continue' | 'fork' } | null = null,
 ): Promise<void> {
   const home =
     folder === null
@@ -4088,9 +3963,26 @@ async function noteWhereItWorks(
           open.held.checkouts.get(address)?.branch ?? null,
           null,
         );
-  await noteConversationWorkspace(address, home.workspaceId);
   const durable = checkoutKey(open.held, address);
-  if (durable !== address) await noteConversationWorkspace(durable, home.workspaceId);
+  const found = open.held.sessions.find(address);
+  await loadWorkspaceIndex();
+  // The record first, then the link: a conversation exists from the moment it
+  // starts, so its folder is answerable before Pi has written a word of it.
+  for (const id of durable === address ? [address] : [address, durable]) {
+    const added = addConversation(workspaceIndex, {
+      conversationId: id,
+      workspaceId: home.workspaceId,
+      title: found?.name ?? '',
+      lineage,
+      now: Date.now(),
+    });
+    workspaceIndex = updateConversation(added.index, id, {
+      sessionFile: found?.held.conversation ?? null,
+      updatedAt: Date.now(),
+      ...(lineage === null ? {} : { lineage }),
+    });
+  }
+  await saveWorkspaceIndex();
 }
 
 /**
@@ -4227,6 +4119,43 @@ function freshCheckoutName(held: Held, project: string): string {
     (name) => existsSync(join(worktreesFolder(project), name)),
   );
   return join(worktreesFolder(project), chosen.name);
+}
+
+/** The first thing a person asked, from the transcript. Null when the
+ *  transcript has no words of theirs in it yet. */
+function firstThingAsked(history: readonly AgentEvent[]): string | null {
+  for (const one of history) {
+    if (one.type === 'user-said' && one.text.trim() !== '') return one.text;
+  }
+  return null;
+}
+
+/** The last thing the agent said: where the conversation had got to. */
+function lastThingSaid(history: readonly AgentEvent[]): string | null {
+  let said: string[] = [];
+  for (const one of history) {
+    if (one.type === 'user-said') {
+      said = [];
+      continue;
+    }
+    if (one.type === 'message-delta') said.push(one.text);
+    if (one.type === 'message-end') said = [said.join('')];
+  }
+  const text = said.join('').trim();
+  return text === '' ? null : text;
+}
+
+/** Write down where a conversation came from. A link, never a copy. */
+async function rememberLineage(
+  open: { path: string; held: Held },
+  address: string,
+  lineage: { from: string; kind: 'continue' | 'fork' },
+): Promise<void> {
+  await loadWorkspaceIndex();
+  for (const id of new Set([address, checkoutKey(open.held, address)])) {
+    workspaceIndex = updateConversation(workspaceIndex, id, { lineage });
+  }
+  await saveWorkspaceIndex();
 }
 
 /** A conversation just started, in the shape the window opens one. */
@@ -5055,9 +4984,11 @@ async function startConversationUnlocked(
       // long-lived install accumulates transcripts (pictures included, which are
       // the bulk of it). Both want the "forget this conversation" action B1.1
       // asks for, which is not built yet.
-      ...(asked !== undefined
-        ? { sessionPath: asked }
-        : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
+      ...(how.kind === 'fresh' && how.forkFrom !== undefined
+        ? { sessionDir: sessionsFolder(), forkFrom: how.forkFrom }
+        : asked !== undefined
+          ? { sessionPath: asked }
+          : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
       ...(providerAuthPath === null ? {} : { authPath: providerAuthPath }),
     });
   } catch (cause) {
@@ -5833,6 +5764,26 @@ const runsHere = new Map<string, { key: string; runId: string }>();
 const waitingForTheFolder = new Map<string, { key: string; runId: string; text: string }>();
 
 let runsSoFar = 0;
+
+/**
+ * Every terminal this app has open.
+ *
+ * Output is forwarded to the window as it arrives, chunk by chunk: a terminal
+ * is a stream, not a document, and buffering it until something asks would make
+ * a build log arrive in one lump at the end.
+ */
+const terminals = new Terminals(
+  (chunk) => {
+    const win = mainWindow;
+    if (win === null || win.isDestroyed()) return;
+    win.webContents.send(CHANNEL.terminalData, chunk);
+  },
+  (exit) => {
+    const win = mainWindow;
+    if (win === null || win.isDestroyed()) return;
+    win.webContents.send(CHANNEL.terminalExit, exit);
+  },
+);
 
 /**
  * Take a message out of the folder's queue.
@@ -8025,89 +7976,9 @@ function register(): void {
       preview: open.held.serving?.address ?? null,
       artifacts: made,
       swatches,
-      styles: await styleTokens(cwd),
     });
   });
 
-  handle<readonly SavedVersion[]>(CHANNEL.designCommit, async (_event, args) => {
-    const [changes] = args;
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
-    const timeline = await timelineFor(open, where);
-    if (timeline === null) return fail(SEVERAL_PROJECTS);
-    // The folder the timeline belongs to. In a folder holding several projects
-    // these are not the same place, and writing one project's tokens into the
-    // folder above it is a change nobody asked for and nobody would find.
-    const folder = folderFor(open, where);
-    const given = changes as Partial<DesignChange>;
-    const tokens = Array.isArray(given.tokens)
-      ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
-      : [];
-    const motions = Array.isArray(given.motions)
-      ? given.motions.filter(
-          (one) => Array.isArray(one.places) && typeof one.change === 'object' && one.change !== null,
-        )
-      : [];
-    // The whole design view is one saved moment. Anything sent here is written
-    // back where each token lived and then kept as a single version — the
-    // window holds the edits so nothing is committed on a slide.
-    const styles = await styleTokens(folder);
-    if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
-    try {
-      // Apply edits per file, so a token that came from a component sheet is
-      // written where it lives, not into whichever sheet holds the most. The
-      // source is looked up by name from the read, because the window only
-      // sends a name and a value.
-      const perFile = new Map<string, string>();
-      const edits = new Map<string, { name: string; value: string }[]>();
-      const whereLives = new Map<string, string>();
-      if (styles !== null) {
-        for (const one of styles.tokens) whereLives.set(one.name, one.file ?? styles.file);
-      }
-      for (const one of tokens) {
-        const file = whereLives.get(one.name) ?? styles?.file;
-        if (file === undefined) continue;
-        edits.set(file, [...(edits.get(file) ?? []), { name: one.name, value: one.value }]);
-      }
-      const writeFileEdits = async (
-        file: string,
-        list: readonly { name: string; value: string }[],
-      ): Promise<void> => {
-        const where = join(folder, file);
-        let css = await readFile(where, 'utf8');
-        let wrote = false;
-        for (const one of list) {
-          const next = writeToken(css, one.name, one.value);
-          if (next !== css) {
-            css = next;
-            wrote = true;
-          }
-        }
-        if (wrote) perFile.set(where, css);
-      };
-      for (const [file, list] of edits) await writeFileEdits(file, list);
-      // Motion edits land in the primary stylesheet.
-      if (styles !== null && motions.length > 0) {
-        const where = join(folder, styles.file);
-        let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
-        for (const one of motions) {
-          const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
-          if (next !== css) {
-            css = next;
-            perFile.set(where, css);
-          }
-        }
-      }
-      for (const [where, css] of perFile) await writeAtomically(where, css);
-      await timeline.snapshot({ boundary: 'user-asked', by: 'you' });
-      return done(await versionsOf(timeline));
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause);
-      return fail(plainTrouble(raw, detailsOf(cause)));
-    }
-  });
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
     const [versionId] = args;
@@ -8531,31 +8402,6 @@ function register(): void {
     }
   });
 
-  handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async (_event, args) => {
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_TO_SHOW);
-    const widthFolder = folderFor(open, where);
-    if (widthFolder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
-      return fail(SEVERAL_PROJECTS);
-    }
-    let ready;
-    try {
-      ready = await makeAndServe({ folder: widthFolder, says: () => undefined });
-    } catch (cause) {
-      return fail(couldNotShow(cause));
-    }
-    if (ready.kind !== 'showing') return done({ looks: [], says: ready.question });
-    try {
-      // The sizes this project designs at, out of its own stylesheets. Three
-      // sizes it has never written a line about answer somebody else's question.
-      const sizes = sizesFor(await styleSheets(widthFolder));
-      const looks = await lookAtEveryWidth(ready.serving.address, sizes);
-      return done({ looks, says: readsWell(looks).says });
-    } finally {
-      await ready.serving.stop().catch(() => undefined);
-    }
-  });
 
   handle<string | null>(CHANNEL.shareReview, async (_event, args) => {
     const asked = whereIn(args);
@@ -9414,6 +9260,177 @@ function register(): void {
   });
 
   /**
+   * Continue in a new chat.
+   *
+   * A new conversation with a new identity, in the same workspace, opening with
+   * one editable note about where the last one got to. Nothing of the old
+   * transcript comes across: what carries the work is the files, which are the
+   * same files, and the note, which a person can change before it is sent.
+   */
+  handle<OpenedProject>(CHANNEL.conversationContinue, async (_event, args) => {
+    const [source] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const from = conversationAt(open.held, {
+      ...(typeof source === 'string' && source !== '' ? { conversation: source } : {}),
+    });
+    if (from === null) return fail(NO_SUCH_ENTRY);
+    // What it was asked and where it got to are read off the transcript it is
+    // holding; a conversation that is not live has no transcript to read.
+    const note = handoffMessage({
+      from: from.held.name ?? open.name,
+      objective: firstThingAsked(from.held.history),
+      gotTo: lastThingSaid(from.held.history),
+      files: [...open.held.looking.files].slice(-12).reverse(),
+      folder: folderFor(open, { conversation: from.path }),
+      project: open.name,
+    });
+    const home = await recordedWorkspace(from.path);
+    const started = await startConversation(
+      open,
+      home === null ? { kind: 'fresh' } : openingIn(home.workspaceId),
+    );
+    if (!started.ok) return started;
+    await rememberLineage(open, started.value.address, { from: from.path, kind: 'continue' });
+    return done({ ...openedFrom(open, started.value), handoff: note });
+  });
+
+  /**
+   * Fork this conversation.
+   *
+   * Pi's own fork: the same history written into a conversation of its own, so
+   * both carry on from the same words and neither is a copy of the other's
+   * folder. Refused while the source is still working — a fork taken mid-turn
+   * is a fork of something that had not finished happening.
+   */
+  handle<OpenedProject>(CHANNEL.conversationFork, async (_event, args) => {
+    const [source] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const from = conversationAt(open.held, {
+      ...(typeof source === 'string' && source !== '' ? { conversation: source } : {}),
+    });
+    if (from === null) return fail(NO_SUCH_ENTRY);
+    if (from.held.working || from.held.listening) {
+      return fail({
+        what: 'That conversation is still working.',
+        because: 'A fork made mid-turn would copy a conversation that had not finished happening. Stop it first, or wait.',
+        actionLabel: 'Got it',
+      });
+    }
+    const transcript = from.held.conversation;
+    if (transcript === null) {
+      return fail({
+        what: 'There is nothing to fork yet.',
+        because: 'This conversation has not been written down, so there is no history to copy.',
+        actionLabel: 'Got it',
+      });
+    }
+    const home = await recordedWorkspace(from.path);
+    const started = await startConversation(
+      open,
+      home === null
+        ? { kind: 'fresh', forkFrom: transcript }
+        : { kind: 'fresh', workspace: home.workspaceId, forkFrom: transcript },
+    );
+    if (!started.ok) return started;
+    await rememberLineage(open, started.value.address, { from: from.path, kind: 'fork' });
+    return done(openedFrom(open, started.value));
+  });
+
+  /**
+   * Archive a conversation, or put it back in the list.
+   *
+   * Archive is not delete and not close: the transcript stays, the views stay,
+   * and only the list stops showing it. Nothing here touches a folder.
+   */
+  handle<readonly Conversation[]>(CHANNEL.conversationArchive, async (_event, args) => {
+    const [id, on] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '' || typeof on !== 'boolean') {
+      return fail(NO_SUCH_ENTRY);
+    }
+    await loadWorkspaceIndex();
+    workspaceIndex = updateConversation(workspaceIndex, id, { archived: on, updatedAt: Date.now() });
+    await saveWorkspaceIndex();
+    const listed = await conversationsInProject(open.path);
+    if (!listed.ok) return fail(NOTHING_OPEN);
+    return done(listed.value);
+  });
+
+  /**
+   * A terminal in the workspace this call names.
+   *
+   * The folder comes from the same resolver every other call uses, so it is the
+   * workspace somebody selected and never a path off the wire. Nothing about
+   * the call can choose a command: what starts is the person's own shell.
+   */
+  handle<TerminalSession>(CHANNEL.terminalOpen, async (_event, args) => {
+    const [size] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const asked = (size ?? {}) as { cols?: unknown; rows?: unknown; kind?: unknown };
+    const kind: TerminalKind =
+      asked.kind === 'agent' || asked.kind === 'server' ? asked.kind : 'shell';
+    const made = terminals.open({
+      workspace: folderFor(open, where),
+      kind,
+      cols: typeof asked.cols === 'number' ? asked.cols : 80,
+      rows: typeof asked.rows === 'number' ? asked.rows : 24,
+    });
+    if (!made.ok) {
+      const state = terminals.available();
+      return fail({
+        what: 'I could not start a terminal here.',
+        because: state.yes === false ? state.because : made.because,
+        actionLabel: 'Got it',
+      });
+    }
+    return done(made.session);
+  });
+
+  handle<string>(CHANNEL.terminalScrollback, (_event, args) => {
+    const [id] = args;
+    return Promise.resolve(done(typeof id === 'string' ? terminals.scrollback(id) : ''));
+  });
+
+  handle<null>(CHANNEL.terminalWrite, (_event, args) => {
+    const [id, data] = args;
+    if (typeof id !== 'string' || typeof data !== 'string') return Promise.resolve(fail(NO_TERMINAL));
+    if (data.length > 64 * 1024) return Promise.resolve(fail(NO_TERMINAL));
+    return Promise.resolve(terminals.write(id, data) ? done(null) : fail(NO_TERMINAL));
+  });
+
+  handle<null>(CHANNEL.terminalResize, (_event, args) => {
+    const [id, cols, rows] = args;
+    if (typeof id !== 'string' || typeof cols !== 'number' || typeof rows !== 'number') {
+      return Promise.resolve(fail(NO_TERMINAL));
+    }
+    return Promise.resolve(terminals.resize(id, cols, rows) ? done(null) : fail(NO_TERMINAL));
+  });
+
+  handle<null>(CHANNEL.terminalClose, (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string') return Promise.resolve(fail(NO_TERMINAL));
+    terminals.close(id);
+    return Promise.resolve(done(null));
+  });
+
+  handle<readonly TerminalSession[]>(CHANNEL.terminalList, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done<readonly TerminalSession[]>([]));
+    const folder = canonical(open.path);
+    return Promise.resolve(
+      done(terminals.list().filter((one) => canonical(one.workspace).startsWith(folder))),
+    );
+  });
+
+  /**
    * What a New worktree would make, before anybody commits to it.
    *
    * Read only: no folder, no branch and no counter is spent, so asking twice
@@ -9724,7 +9741,7 @@ function register(): void {
         says: tell,
         // Every serving can be pointed at; the page only listens once the
         // address says so, which is what the button does.
-        onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
+        onPointed: sayPointed,
       });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
@@ -9773,7 +9790,7 @@ function register(): void {
         const outcome = await makeAndServe({
           folder: one.folder,
           says: tell,
-          onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
+          onPointed: sayPointed,
         });
         if (outcome.kind === 'unsure') {
           // One variation that cannot be read holds nothing up: it is skipped,
@@ -12082,6 +12099,9 @@ if (!app.requestSingleInstanceLock()) {
     // that went away. Nothing above them to report to, nothing to stop them, and
     // they spend until they are done.
     await endStrays().catch(() => 0);
+    // And the shells this app started: they are the person's, but they are
+    // children of this process, and leaving them orphaned is not tidying up.
+    terminals.closeAll();
     // And servers. A helper is known by its filename; a server is whatever
     // somebody asked for, so it is known only because we wrote it down.
     await endStrayServers().catch(() => 0);

@@ -44,11 +44,15 @@ import {
   type OpenedProject,
   type Overview,
   type WorktreePlan,
+  type TerminalChunk,
+  type TerminalExit,
+  type TerminalKind,
+  type TerminalSession,
   type ExtensionRequest,
   type ExtensionAnswer,
   type InStep,
   type Page,
-  type PointedAt,
+  type Pointed,
   type PlainPreference,
   type Preferences,
   type PromptAttachment,
@@ -62,7 +66,6 @@ import {
   type RepoLook,
   type RecentProject,
   type Conversation,
-  type Look,
   type Pack,
   type Result,
   type AddonReport,
@@ -81,7 +84,6 @@ import {
   type NewerVersion,
   type StorageNow,
   type SavedVersion,
-  type DesignChange,
   type ShowOutcome,
   type VariationSpec,
   type VariationsOutcome,
@@ -738,9 +740,9 @@ const api: GrapheApi = {
     ) as Promise<Result<VariationsOutcome>>;
   },
 
-  onPointed(listener: (at: PointedAt) => void): () => void {
-    const forward = (_source: IpcRendererEvent, at: PointedAt): void => {
-      listener(at);
+  onPointed(listener: (pointed: Pointed) => void): () => void {
+    const forward = (_source: IpcRendererEvent, pointed: Pointed): void => {
+      listener(pointed);
     };
     ipcRenderer.on(CHANNEL.pointed, forward);
     return () => {
@@ -766,12 +768,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.shareReview, named(where)) as Promise<Result<string | null>>;
   },
 
-  checkWidths(where?: Where): Promise<Result<{ looks: readonly Look[]; says: string }>> {
-    return ipcRenderer.invoke(CHANNEL.checkWidths, named(where)) as Promise<
-      Result<{ looks: readonly Look[]; says: string }>
-    >;
-  },
-
   conversations(where?: Where): Promise<Result<readonly Conversation[]>> {
     return ipcRenderer.invoke(CHANNEL.conversations, named(where)) as Promise<Result<readonly Conversation[]>>;
   },
@@ -791,6 +787,80 @@ const api: GrapheApi = {
       wanted,
       named(where),
     ) as Promise<Result<OpenedProject>>;
+  },
+
+  terminalOpen(
+    size: { cols: number; rows: number; kind: TerminalKind },
+    where?: Where,
+  ): Promise<Result<TerminalSession>> {
+    return ipcRenderer.invoke(CHANNEL.terminalOpen, size, named(where)) as Promise<
+      Result<TerminalSession>
+    >;
+  },
+
+  terminalScrollback(id: string): Promise<Result<string>> {
+    return ipcRenderer.invoke(CHANNEL.terminalScrollback, id) as Promise<Result<string>>;
+  },
+
+  terminalWrite(id: string, data: string): Promise<Result<null>> {
+    if (typeof data !== 'string') return Promise.resolve(refuse<null>('Nothing to type.'));
+    return ipcRenderer.invoke(CHANNEL.terminalWrite, id, data) as Promise<Result<null>>;
+  },
+
+  terminalResize(id: string, cols: number, rows: number): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.terminalResize, id, cols, rows) as Promise<Result<null>>;
+  },
+
+  terminalClose(id: string): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.terminalClose, id) as Promise<Result<null>>;
+  },
+
+  terminalList(where?: Where): Promise<Result<readonly TerminalSession[]>> {
+    return ipcRenderer.invoke(CHANNEL.terminalList, named(where)) as Promise<
+      Result<readonly TerminalSession[]>
+    >;
+  },
+
+  onTerminalData(listener: (chunk: TerminalChunk) => void): () => void {
+    const forward = (_event: IpcRendererEvent, chunk: TerminalChunk): void => {
+      listener(chunk);
+    };
+    ipcRenderer.on(CHANNEL.terminalData, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.terminalData, forward);
+    };
+  },
+
+  onTerminalExit(listener: (exit: TerminalExit) => void): () => void {
+    const forward = (_event: IpcRendererEvent, exit: TerminalExit): void => {
+      listener(exit);
+    };
+    ipcRenderer.on(CHANNEL.terminalExit, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.terminalExit, forward);
+    };
+  },
+
+  continueConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>> {
+    return ipcRenderer.invoke(CHANNEL.conversationContinue, source ?? null, named(where)) as Promise<
+      Result<OpenedProject>
+    >;
+  },
+
+  forkConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>> {
+    return ipcRenderer.invoke(CHANNEL.conversationFork, source ?? null, named(where)) as Promise<
+      Result<OpenedProject>
+    >;
+  },
+
+  archiveConversation(
+    id: string,
+    on: boolean,
+    where?: Where,
+  ): Promise<Result<readonly Conversation[]>> {
+    return ipcRenderer.invoke(CHANNEL.conversationArchive, id, on, named(where)) as Promise<
+      Result<readonly Conversation[]>
+    >;
   },
 
   onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void {
@@ -855,27 +925,6 @@ const api: GrapheApi = {
     }
     return ipcRenderer.invoke(CHANNEL.removePackage, id) as Promise<Result<readonly Pack[]>>;
   },
-
-  designCommit(
-    changes: DesignChange,
-    where?: Where,
-  ): Promise<Result<readonly SavedVersion[]>> {
-    const tokens = changes.tokens;
-    const motions = changes.motions;
-    if (!Array.isArray(tokens) || !Array.isArray(motions)) {
-      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
-    }
-    if (tokens.some((one) => typeof one?.name !== 'string' || typeof one?.value !== 'string')) {
-      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not tell what to change.'));
-    }
-    if (motions.some((one) => !Array.isArray(one?.places) || typeof one?.change !== 'object' || one.change === null)) {
-      return Promise.resolve(refuse<readonly SavedVersion[]>('I could not change that.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.designCommit, changes, named(where)) as Promise<
-      Result<readonly SavedVersion[]>
-    >;
-  },
-
 
   onWindowState(listener: (state: WindowState) => void): () => void {
     const forward = (_source: IpcRendererEvent, state: WindowState): void => {

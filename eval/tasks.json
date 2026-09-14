@@ -72,18 +72,6 @@
     "kind": "integration"
   },
   {
-    "id": "try-ways-taste",
-    "title": "try_ways for taste, not correctness; human keeps one",
-    "check": "attempts.test.ts",
-    "kind": "unit"
-  },
-  {
-    "id": "auto-selection",
-    "title": "Automated selection among N where right answer exists",
-    "check": "correctness.test.ts",
-    "kind": "integration"
-  },
-  {
     "id": "gate-drift",
     "title": "Visual gate measures drift against last human-agreed picture",
     "check": "gate.test.ts:drift",

@@ -65,6 +65,40 @@ export type ProjectRecord = {
   workspaces: readonly string[];
 };
 
+/**
+ * A conversation, as the registry keeps it.
+ *
+ * Pi owns what was said; this owns the relationships and the facts a window
+ * needs before anything has been said — which folder it is in, what it was
+ * called, where it came from, and what somebody last chose for it. A draft with
+ * no transcript yet is a real record here, not a null id: "new" is a thing that
+ * exists from the moment somebody presses it.
+ */
+export type ConversationRecord = {
+  conversationId: string;
+  projectId: string;
+  workspaceId: string;
+  /** Pi's own id and file, once it has written one. */
+  sessionId: string | null;
+  sessionFile: string | null;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  /** Where this came from, when it was made by continuing or forking another
+   *  conversation. A link, never a copy of its history. */
+  lineage: { from: string; kind: 'continue' | 'fork' } | null;
+  /** The transcript branch somebody was last looking at. */
+  branchLeaf: string | null;
+  /** What this conversation chose for itself, over the global defaults. */
+  overrides: {
+    model: { providerId: string; modelId: string } | null;
+    thinking: string | null;
+    plan: boolean | null;
+  };
+  version: 1;
+};
+
 export type WorkspaceIndex = {
   version: 1;
   projects: Readonly<Record<string, ProjectRecord>>;
@@ -72,9 +106,9 @@ export type WorkspaceIndex = {
    *  the id is what everything else is keyed by. */
   byRoot: Readonly<Record<string, string>>;
   workspaces: Readonly<Record<string, WorkspaceRecord>>;
-  /** Conversation id to workspace id. The one line that answers "which files
-   *  am I changing" without asking which tab is in front. */
-  conversations: Readonly<Record<string, string>>;
+  /** Conversation id to its record. The one line that answers "which files am
+   *  I changing" without asking which tab is in front. */
+  conversations: Readonly<Record<string, ConversationRecord>>;
 };
 
 export const INDEX_VERSION = 1;
@@ -129,11 +163,32 @@ export function parseIndex(text: string): { index: WorkspaceIndex; problem: stri
   for (const [root, id] of Object.entries(asRecord(one.byRoot))) {
     if (typeof id === 'string' && projects[id] !== undefined) byRoot[root] = id;
   }
-  const conversations: Record<string, string> = {};
-  for (const [conversation, workspace] of Object.entries(asRecord(one.conversations))) {
-    if (typeof workspace === 'string' && workspaces[workspace] !== undefined) {
-      conversations[conversation] = workspace;
+  const conversations: Record<string, ConversationRecord> = {};
+  for (const [conversation, held] of Object.entries(asRecord(one.conversations))) {
+    // The first version of this index stored the workspace id alone. A profile
+    // written by it opens with the same link and nothing else known.
+    if (typeof held === 'string') {
+      if (workspaces[held] !== undefined) {
+        conversations[conversation] = {
+          conversationId: conversation,
+          projectId: workspaces[held]?.projectId ?? '',
+          workspaceId: held,
+          sessionId: null,
+          sessionFile: null,
+          title: '',
+          createdAt: 0,
+          updatedAt: 0,
+          archived: false,
+          lineage: null,
+          branchLeaf: null,
+          overrides: { model: null, thinking: null, plan: null },
+          version: 1,
+        };
+      }
+      continue;
     }
+    const record = readConversation(conversation, held, workspaces);
+    if (record !== null) conversations[conversation] = record;
   }
   return { index: { version: INDEX_VERSION, projects, byRoot, workspaces, conversations }, problem: null };
 }
@@ -370,8 +425,72 @@ export function workspaceForConversation(
   index: WorkspaceIndex,
   conversationId: string,
 ): WorkspaceRecord | null {
-  const id = index.conversations[conversationId];
-  return id === undefined ? null : workspaceById(index, id);
+  const record = index.conversations[conversationId];
+  return record === undefined ? null : workspaceById(index, record.workspaceId);
+}
+
+export function conversationById(
+  index: WorkspaceIndex,
+  conversationId: string,
+): ConversationRecord | null {
+  return index.conversations[conversationId] ?? null;
+}
+
+/** Every conversation of a project, archived ones included: hiding is the
+ *  window's decision, not the store's. */
+export function conversationsOfProject(
+  index: WorkspaceIndex,
+  projectId: string,
+): readonly ConversationRecord[] {
+  return Object.values(index.conversations)
+    .filter((one) => one.projectId === projectId)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export type NewConversation = {
+  conversationId: string;
+  workspaceId: string;
+  title?: string;
+  lineage?: { from: string; kind: 'continue' | 'fork' } | null;
+  now: number;
+};
+
+/**
+ * Write a conversation down.
+ *
+ * Made before the first word, so the folder it will work in is answerable from
+ * the moment it exists rather than from the moment Pi writes a transcript. An
+ * id that is already known keeps everything it had: pressing New twice is two
+ * conversations, but re-opening one is not a second record.
+ */
+export function addConversation(
+  index: WorkspaceIndex,
+  wanted: NewConversation,
+): { index: WorkspaceIndex; conversation: ConversationRecord; made: boolean } {
+  const workspace = index.workspaces[wanted.workspaceId];
+  if (workspace === undefined) throw new Error('no such workspace');
+  const known = index.conversations[wanted.conversationId];
+  if (known !== undefined) return { index, conversation: known, made: false };
+  const record: ConversationRecord = {
+    conversationId: wanted.conversationId,
+    projectId: workspace.projectId,
+    workspaceId: wanted.workspaceId,
+    sessionId: null,
+    sessionFile: null,
+    title: wanted.title ?? '',
+    createdAt: wanted.now,
+    updatedAt: wanted.now,
+    archived: false,
+    lineage: wanted.lineage ?? null,
+    branchLeaf: null,
+    overrides: { model: null, thinking: null, plan: null },
+    version: 1,
+  };
+  return {
+    index: { ...index, conversations: { ...index.conversations, [record.conversationId]: record } },
+    conversation: record,
+    made: true,
+  };
 }
 
 export function attachConversation(
@@ -380,16 +499,61 @@ export function attachConversation(
   workspaceId: string,
 ): WorkspaceIndex {
   if (index.workspaces[workspaceId] === undefined) throw new Error('no such workspace');
-  const was = index.conversations[conversationId];
-  if (was === workspaceId) return index;
-  return { ...index, conversations: { ...index.conversations, [conversationId]: workspaceId } };
+  const known = index.conversations[conversationId];
+  const projectId = index.workspaces[workspaceId]?.projectId ?? '';
+  if (known === undefined) {
+    return {
+      ...index,
+      conversations: {
+        ...index.conversations,
+        [conversationId]: {
+          conversationId,
+          projectId,
+          workspaceId,
+          sessionId: null,
+          sessionFile: null,
+          title: '',
+          createdAt: 0,
+          updatedAt: 0,
+          archived: false,
+          lineage: null,
+          branchLeaf: null,
+          overrides: { model: null, thinking: null, plan: null },
+          version: 1,
+        },
+      },
+    };
+  }
+  if (known.workspaceId === workspaceId) return index;
+  return {
+    ...index,
+    conversations: {
+      ...index.conversations,
+      [conversationId]: { ...known, workspaceId, projectId },
+    },
+  };
+}
+
+/** Change part of a conversation's record. Unknown ids are left alone: a
+ *  conversation nobody wrote down is not one to invent. */
+export function updateConversation(
+  index: WorkspaceIndex,
+  conversationId: string,
+  change: Partial<Omit<ConversationRecord, 'conversationId' | 'version'>>,
+): WorkspaceIndex {
+  const known = index.conversations[conversationId];
+  if (known === undefined) return index;
+  return {
+    ...index,
+    conversations: { ...index.conversations, [conversationId]: { ...known, ...change } },
+  };
 }
 
 /** Conversations filed under a workspace, for the "what would I lose" question
  *  a deletion has to answer before it deletes. */
 export function conversationsIn(index: WorkspaceIndex, workspaceId: string): readonly string[] {
   return Object.entries(index.conversations)
-    .filter(([, id]) => id === workspaceId)
+    .filter(([, one]) => one.workspaceId === workspaceId)
     .map(([conversation]) => conversation)
     .sort();
 }
@@ -442,6 +606,42 @@ function readWorkspace(value: unknown): WorkspaceRecord | null {
     createdBy: text(one['createdBy']),
     createdAt: typeof one['createdAt'] === 'number' ? one['createdAt'] : 0,
     verifiedAt: typeof one['verifiedAt'] === 'number' ? one['verifiedAt'] : null,
+  };
+}
+
+function readConversation(
+  conversationId: string,
+  value: unknown,
+  workspaces: Readonly<Record<string, WorkspaceRecord>>,
+): ConversationRecord | null {
+  const one = asRecord(value);
+  const workspaceId = text(one['workspaceId']);
+  if (workspaceId === null || workspaces[workspaceId] === undefined) return null;
+  const overrides = asRecord(one['overrides']);
+  const model = asRecord(overrides['model']);
+  const providerId = text(model['providerId']);
+  const modelId = text(model['modelId']);
+  const lineage = asRecord(one['lineage']);
+  const from = text(lineage['from']);
+  const kind = lineage['kind'] === 'fork' ? 'fork' : lineage['kind'] === 'continue' ? 'continue' : null;
+  return {
+    conversationId,
+    projectId: text(one['projectId']) ?? workspaces[workspaceId]?.projectId ?? '',
+    workspaceId,
+    sessionId: text(one['sessionId']),
+    sessionFile: text(one['sessionFile']),
+    title: typeof one['title'] === 'string' ? one['title'] : '',
+    createdAt: typeof one['createdAt'] === 'number' ? one['createdAt'] : 0,
+    updatedAt: typeof one['updatedAt'] === 'number' ? one['updatedAt'] : 0,
+    archived: one['archived'] === true,
+    lineage: from !== null && kind !== null ? { from, kind } : null,
+    branchLeaf: text(one['branchLeaf']),
+    overrides: {
+      model: providerId !== null && modelId !== null ? { providerId, modelId } : null,
+      thinking: text(overrides['thinking']),
+      plan: typeof overrides['plan'] === 'boolean' ? overrides['plan'] : null,
+    },
+    version: 1,
   };
 }
 

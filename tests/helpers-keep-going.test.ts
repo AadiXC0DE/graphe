@@ -110,7 +110,6 @@ describe('a press that closes something does not stop the run', () => {
       'changesOpen',
       'asking',
       'helpersAt',
-      'designAt',
     ]) {
       expect(list, panel).toContain(panel);
     }

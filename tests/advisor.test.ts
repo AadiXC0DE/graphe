@@ -438,7 +438,7 @@ describe('the plan the advisor reads', () => {
     expect(MAIN).not.toContain("const asked = [text, papers, plan ?? ''].filter");
     expect(MAIN).toContain('const asked = [text, papers].filter');
     const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
-    expect(ADAPTER).toContain("name: 'graphe-standing'");
+    expect(ADAPTER).toContain("name: 'graphe-prompt'");
     expect(ADAPTER).toContain("api.on('before_agent_start'");
   });
 

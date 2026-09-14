@@ -137,6 +137,16 @@ export function canSignIn(): boolean {
 
 const MAX_RESULT_CHARACTERS = 20_000;
 
+/** How long one call to a server's tool may take before the caller is told it
+ *  did not answer.
+ *
+ * A server that takes the request and holds it forever used to leave a spinner
+ * running for the rest of the sitting: `callTool` has no timer of its own, and
+ * the catch below it only runs on a rejection. Two minutes is far longer than
+ * any local tool here needs and short enough that a wedged server is a fact
+ * rather than a mystery. */
+const CALL_PATIENCE_MS = 120_000;
+
 function toolResultText(text: string): { content: [{ type: 'text'; text: string }]; details: Record<string, never> } {
   return { content: [{ type: 'text', text }], details: {} };
 }
@@ -373,7 +383,16 @@ export class McpRegistry {
       return `The ${serverName} connection has no tool named "${toolName}". Its tools: ${names}.`;
     }
     try {
-      const result = await session.client.callTool({ name: toolName, arguments: arguments_ });
+      const result = await Promise.race([
+        session.client.callTool({ name: toolName, arguments: arguments_ }),
+        new Promise<never>((_resolve, reject) => {
+          const bell = setTimeout(
+            () => reject(new Error(`${serverName} did not answer within two minutes`)),
+            CALL_PATIENCE_MS,
+          );
+          (bell as unknown as { unref?: () => void }).unref?.();
+        }),
+      ]);
       if (result.isError === true) {
         const text = textOf(result as { content?: unknown });
         // A tool that lives inside another app does not fail like other tools:

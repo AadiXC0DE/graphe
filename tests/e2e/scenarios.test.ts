@@ -673,13 +673,14 @@ describe('S-16 a house-rules file nobody could carry whole', () => {
   });
 
   it('is held where it is read rather than after the prompt is assembled', () => {
-    const adapter = readFileSync(
-      fileURLToPath(new URL('../../src/agent/pi/adapter.ts', import.meta.url)),
+    const prompt = readFileSync(
+      fileURLToPath(new URL('../../src/agent/pi/prompt.ts', import.meta.url)),
       'utf8',
     );
-    expect(adapter).toContain(
-      'withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed)',
-    );
+    // Every instruction file is its own repository section, capped by path, so
+    // the rest of it is one named read away rather than cut off mid-sentence.
+    expect(prompt).toContain('most: AGENTS_BUDGET');
+    expect(prompt).toContain("of: 'repository'");
   });
 });
 

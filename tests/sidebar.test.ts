@@ -47,7 +47,6 @@ function draw(over: Record<string, unknown> = {}): HTMLDivElement {
         open: true,
         onToggle: NOTHING,
         onAsk: NOTHING,
-        onDesign: NOTHING,
         onCanvas: NOTHING,
         onHistory: NOTHING,
         onReviews: NOTHING,

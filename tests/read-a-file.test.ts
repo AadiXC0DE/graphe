@@ -51,7 +51,10 @@ describe('taking the column', () => {
   /* Hidden, not unmounted: coming back would find the conversation where it
      was. Held at false, so nothing is hidden today. */
   it('hides the conversation rather than throwing its place away', () => {
-    expect(app).toContain('<div className="thread" hidden={readingWhole && reading !== null}>');
+    // The thread is now the virtualised rows; the rule is unchanged: hidden,
+    // never unmounted, so coming back finds the conversation where it was.
+    expect(app).toContain('<ThreadRows');
+    expect(app).toContain('hidden={readingWhole && reading !== null}');
     expect(app).toContain('const [readingWhole] = useState(false);');
   });
 

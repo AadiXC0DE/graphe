@@ -21,6 +21,14 @@ import { join } from 'node:path';
 
 import { app } from 'electron';
 
+import { applyProfile } from './profile';
+
+/* Which profile this launch reads and writes, before anything else asks for a
+   path: a test run points GRAPHE_PROFILE (or `--profile`) at a disposable
+   folder, and everything downstream — sessions, the registry, checkpoints,
+   logs, the compile cache below — follows from `app.getPath('userData')`. */
+applyProfile(app);
+
 try {
   // Beside the app's other data, never inside the bundle: a packaged app's own
   // folder is a read-only archive, and a cache it cannot write is a slower

@@ -61,8 +61,8 @@ wired into the shell. The remaining consumers are listed in the phase 5 handoff.
 
 | Item | Status | Owner |
 | --- | --- | --- |
-| Disposable application profile for tests | Not done. The shell still resolves everything under `app.getPath('userData')`; the fixtures and the migration runner take paths, so the seam exists, but no `--profile` switch or `GRAPHE_PROFILE` override was added | phase 1, retry |
-| Electron smoke suite with a real window | Not done. `tests/e2e/scenarios.test.ts` is still the in-process scripted harness; its CI job is still named `e2e` | phase 10 |
+| Disposable application profile for tests | **Done.** `electron/profile.ts` resolves `GRAPHE_PROFILE` > `--profile=<path>` > the app's own folder, refuses a relative override, and `applyProfile` sets Electron's `userData` before anything asks for a path (called from `electron/boot.ts`). 9 tests in `tests/electron/profile.test.ts` | — |
+| Electron smoke suite with a real window | **Done.** `tests/electron/smoke.test.ts` drives a real Electron window through Playwright against a built renderer and a disposable profile: boot, first screen, the profile being written (workspaces.json, the migration marker, logs), opening a project by pressing its row, a turn with no credential landing in the conversation and naming the tab, and a second conversation from the sidebar. `npm run test:electron` builds both halves and fails on the step that broke; a new `Electron smoke` CI job runs it on macOS | — |
 | The nine phase 1.2 regressions | Partly. Covered by new tests: untrusted extension discovery (marker), extension asks (host + card), waiting panel ownership, listing honesty, workspace identity. Not covered by an automated test: "New B sees A's uncommitted edit", "selecting B changes nothing of A's", "A's image does not appear in B", "delayed A results after B selection", "restart resumes an isolated conversation's cwd". Each needs a real Electron run | phase 10 |
 | Legacy unqualified-call counter | Not done | phase 5 |
 

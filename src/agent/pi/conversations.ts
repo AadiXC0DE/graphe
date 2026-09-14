@@ -16,6 +16,9 @@ export type Conversation = {
    *  transcript old enough not to carry one. This is what decides which project
    *  a conversation belongs to when it worked in a checkout of it. */
   cwd: string | null;
+  /** Whether somebody has put it away. Pi knows nothing about this: the shell
+   *  fills it in from the registry, which is where the decision lives. */
+  archived?: boolean;
 };
 
 /** Long enough to recognise the thought, short enough to scan a column of them. */
@@ -90,7 +93,7 @@ export type Opening =
   /** A conversation that does not exist yet. `workspace` names the workspace it
    *  starts in; leaving it out means the project's own folder. A new chat never
    *  picks a workspace by counting the conversations already open. */
-  | { kind: 'fresh'; workspace?: string };
+  | { kind: 'fresh'; workspace?: string; forkFrom?: string };
 
 export function openingFor(asked: unknown, fresh = false): Opening {
   if (typeof asked === 'string' && asked.trim() !== '') return { kind: 'carry-on', path: asked };

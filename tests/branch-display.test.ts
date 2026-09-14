@@ -14,7 +14,9 @@ describe('the branch panel describes the addressed conversation', () => {
     expect(block).toContain('const cwd = folderFor(open, where)');
     expect(block).toContain('readGitStatusWithLines(cwd)');
     expect(block).toContain('readBranches(cwd)');
-    expect(block).toContain('styleTokens(cwd)');
+    // The project's own style sheet is no longer read here: the panel that
+    // showed it was retired, and the folder this call is about is decided by
+    // the same resolver everything else uses.
     expect(block).not.toContain('readGitStatusWithLines(open.path)');
   });
 

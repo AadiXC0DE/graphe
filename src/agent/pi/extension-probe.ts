@@ -271,6 +271,40 @@ export async function probe(path: string): Promise<CapabilityCard | null> {
   return cardFrom(taken());
 }
 
+/** How many add-ons are read at once.
+ *
+ * Each one is imported and called, which for a real extension means a package
+ * load, sometimes a bundled build, sometimes a few hundred milliseconds of work
+ * in somebody's factory. One after another, a folder carrying six of them paid
+ * all six before a turn could start. Four at a time pays the slowest few, and
+ * going wider than this only makes a slow disk slower.
+ */
+export const PROBED_AT_ONCE = 4;
+
+/** Run one job per item, at most `atOnce` of them in flight, answers in order. */
+async function mapAtMost<A, B>(
+  items: readonly A[],
+  atOnce: number,
+  job: (item: A) => Promise<B>,
+): Promise<B[]> {
+  const out = new Array<B>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(atOnce, items.length)) },
+    async (): Promise<void> => {
+      for (;;) {
+        const at = next;
+        next += 1;
+        const item = items[at];
+        if (item === undefined) return;
+        out[at] = await job(item);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
+}
+
 /**
  * What each of these extensions will do, skipping the ones we may not run.
  *
@@ -278,6 +312,10 @@ export async function probe(path: string): Promise<CapabilityCard | null> {
  * whole point of the permission is that reading one means importing the file
  * and calling its factory, which is running it: an untrusted extension gets
  * `null` here, which the policy treats as unknown rather than as harmless.
+ *
+ * The cache is read once for the whole batch and written once at the end, so
+ * the add-ons that have not changed do no work at all and the ones that have
+ * cannot overwrite each other's answers on the way to the file.
  */
 export async function cardsFor(
   paths: readonly string[],
@@ -285,12 +323,38 @@ export async function cardsFor(
   mayRun: (path: string) => boolean,
   runtime: RuntimeTag,
 ): Promise<Map<string, CapabilityCard | null>> {
-  const cards = new Map<string, CapabilityCard | null>();
-  for (const where of paths) {
-    cards.set(
+  const file = join(cacheDir, 'cards.json');
+  const held = await readCards(file);
+  const runnable = paths.filter((where) => mayRun(where));
+  const done = new Map<string, { card: CapabilityCard | null; stored: Card | null }>();
+
+  await mapAtMost(runnable, PROBED_AT_ONCE, async (where) => {
+    done.set(
       where,
-      mayRun(where) ? await cachedProbe(where, cacheDir, runtime).catch(() => null) : null,
+      await cardFor(where, held, runtime).catch(() => ({ card: null, stored: null })),
     );
+  });
+
+  const cards = new Map<string, CapabilityCard | null>();
+  const store: Record<string, Card> = { ...held };
+  let changed = false;
+  for (const where of paths) {
+    const one = done.get(where);
+    cards.set(where, one === undefined ? null : one.card);
+    if (one !== undefined && one.stored !== null) {
+      store[where] = one.stored;
+      changed = true;
+    }
+  }
+  if (changed) {
+    try {
+      // Written beside itself and moved into place: two sessions probing at
+      // once used to be able to leave half a file behind, which read as "no
+      // cards".
+      await writeAtomically(file, `${JSON.stringify(store, null, 2)}\n`);
+    } catch {
+      // Probing again next launch costs a moment; failing to open does not.
+    }
   }
   return cards;
 }
@@ -360,6 +424,25 @@ async function fingerprintOf(path: string): Promise<string | null> {
   return hash.digest('hex');
 }
 
+/** One add-on's card, against a cache somebody else has already read: the
+ *  remembered answer when the code and the runtime are the ones it was read
+ *  from, and a probe when they are not. */
+async function cardFor(
+  where: string,
+  held: Record<string, Card>,
+  runtime: RuntimeTag,
+): Promise<{ card: CapabilityCard | null; stored: Card | null }> {
+  const fingerprint = await fingerprintOf(where);
+  if (fingerprint === null) return { card: null, stored: null };
+  const key = `${runtime}\u0000${fingerprint}`;
+  const remembered = held[where];
+  if (remembered !== undefined && remembered.fingerprint === key) {
+    return { card: remembered.card, stored: null };
+  }
+  const card = await probe(where);
+  return { card, stored: { fingerprint: key, card } };
+}
+
 /**
  * The same answer without running anybody's code again.
  *
@@ -372,25 +455,17 @@ export async function cachedProbe(
   cacheDir: string,
   runtime: RuntimeTag = 'unknown',
 ): Promise<CapabilityCard | null> {
-  const fingerprint = await fingerprintOf(path);
-  if (fingerprint === null) return null;
-  const key = `${runtime}\u0000${fingerprint}`;
-
   const file = join(cacheDir, 'cards.json');
-  const cards = await readCards(file);
-  const held = cards[path];
-  if (held !== undefined && held.fingerprint === key) return held.card;
-
-  const card = await probe(path);
-  cards[path] = { fingerprint: key, card };
-  try {
-    // Written beside itself and moved into place: two sessions probing at once
-    // used to be able to leave half a file behind, which read as "no cards".
-    await writeAtomically(file, `${JSON.stringify(cards, null, 2)}\n`);
-  } catch {
-    // Probing again next launch costs a moment; failing to open does not.
+  const held = await readCards(file);
+  const one = await cardFor(path, held, runtime).catch(() => ({ card: null, stored: null }));
+  if (one.stored !== null) {
+    try {
+      await writeAtomically(file, `${JSON.stringify({ ...held, [path]: one.stored }, null, 2)}\n`);
+    } catch {
+      // Probing again next launch costs a moment; failing to open does not.
+    }
   }
-  return card;
+  return one.card;
 }
 
 /* -------------------------------------------------------------------------- */

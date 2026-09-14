@@ -13,7 +13,11 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  addConversation,
   addWorkspace,
+  conversationById,
+  conversationsOfProject,
+  updateConversation,
   attachConversation,
   canonical,
   conversationsIn,
@@ -207,6 +211,86 @@ describe('which workspace a conversation works in', () => {
   });
 });
 
+describe('a conversation', () => {
+  const project = (root: string) => {
+    const ensured = ensureProject(emptyIndex(), root);
+    const added = addWorkspace(ensured.index, {
+      projectId: ensured.project.projectId,
+      path: root,
+      kind: 'local',
+      managed: false,
+      now: NOW,
+    });
+    return { index: added.index, projectId: ensured.project.projectId, workspaceId: added.workspace.workspaceId };
+  };
+
+  it('exists from the moment it is made, before anything has been said', () => {
+    const root = scratch();
+    const { index, projectId, workspaceId } = project(root);
+    const made = addConversation(index, { conversationId: 'chat-1', workspaceId, now: NOW });
+    expect(made.made).toBe(true);
+    expect(made.conversation.projectId).toBe(projectId);
+    expect(made.conversation.sessionFile).toBeNull();
+    expect(made.conversation.archived).toBe(false);
+    expect(workspaceForConversation(made.index, 'chat-1')?.workspaceId).toBe(workspaceId);
+  });
+
+  it('is not made twice, and keeps what it already had', () => {
+    const root = scratch();
+    const { index, workspaceId } = project(root);
+    const first = addConversation(index, { conversationId: 'chat-1', workspaceId, title: 'One', now: NOW });
+    const withTitle = updateConversation(first.index, 'chat-1', { title: 'Renamed' });
+    const second = addConversation(withTitle, {
+      conversationId: 'chat-1',
+      workspaceId,
+      title: 'Ignored',
+      now: NOW + 1000,
+    });
+    expect(second.made).toBe(false);
+    expect(second.conversation.title).toBe('Renamed');
+  });
+
+  it('carries a lineage link and the choice of the chat that made it', () => {
+    const root = scratch();
+    const { index, workspaceId } = project(root);
+    const made = addConversation(index, {
+      conversationId: 'chat-2',
+      workspaceId,
+      lineage: { from: 'chat-1', kind: 'continue' },
+      now: NOW,
+    });
+    expect(made.conversation.lineage).toEqual({ from: 'chat-1', kind: 'continue' });
+    const chosenModel = updateConversation(made.index, 'chat-2', {
+      overrides: { model: { providerId: 'p', modelId: 'm' }, thinking: 'high', plan: true },
+    });
+    expect(conversationById(chosenModel, 'chat-2')?.overrides.model?.modelId).toBe('m');
+  });
+
+  it('is left alone by an update for a conversation nobody wrote down', () => {
+    const root = scratch();
+    const { index } = project(root);
+    expect(updateConversation(index, 'never', { title: 'x' })).toBe(index);
+  });
+
+  it('is listed for its project, newest first, archived ones included', () => {
+    const root = scratch();
+    const { index, projectId, workspaceId } = project(root);
+    const one = addConversation(index, { conversationId: 'a', workspaceId, now: NOW });
+    const two = addConversation(one.index, { conversationId: 'b', workspaceId, now: NOW + 5 });
+    const archived = updateConversation(two.index, 'b', { archived: true, updatedAt: NOW + 9 });
+    const listed = conversationsOfProject(archived, projectId);
+    expect(listed.map((one) => one.conversationId)).toEqual(['b', 'a']);
+    expect(listed[0]?.archived).toBe(true);
+  });
+
+  it('is filed under its workspace for the "what would I lose" question', () => {
+    const root = scratch();
+    const { index, workspaceId } = project(root);
+    const made = addConversation(index, { conversationId: 'a', workspaceId, now: NOW });
+    expect(conversationsIn(made.index, workspaceId)).toEqual(['a']);
+  });
+});
+
 describe('a stored index', () => {
   it('survives a round trip', () => {
     const root = scratch();
@@ -254,8 +338,53 @@ describe('a stored index', () => {
     );
     expect(read.problem).toBeNull();
     expect(Object.keys(read.index.workspaces)).toEqual(['w1']);
-    expect(read.index.conversations).toEqual({ 'chat-1': 'w1' });
+    // The link survives the damaged row next to it, now as a record.
+    expect(read.index.conversations['chat-1']?.workspaceId).toBe('w1');
     expect(workspaceById(read.index, 'w1')?.cwd).toBe('/here');
+  });
+
+  it('upgrades an index whose conversations were bare workspace ids', () => {
+    const read = parseIndex(
+      JSON.stringify({
+        version: 1,
+        projects: { p1: { projectId: 'p1', root: '/here', aliases: [], workspaces: ['w1'] } },
+        byRoot: { '/here': 'p1' },
+        workspaces: {
+          w1: {
+            workspaceId: 'w1',
+            projectId: 'p1',
+            kind: 'local',
+            cwd: '/here',
+            displayPath: '/here',
+            managed: false,
+            state: 'ready',
+            createdAt: NOW,
+          },
+        },
+        conversations: { 'chat-1': 'w1' },
+      }),
+    );
+    expect(read.problem).toBeNull();
+    const record = conversationById(read.index, 'chat-1');
+    expect(record?.workspaceId).toBe('w1');
+    expect(record?.projectId).toBe('p1');
+    expect(record?.sessionFile).toBeNull();
+    expect(workspaceForConversation(read.index, 'chat-1')?.cwd).toBe('/here');
+  });
+
+  it('drops a conversation that points at a workspace which is not there', () => {
+    const read = parseIndex(
+      JSON.stringify({
+        version: 1,
+        projects: {},
+        byRoot: {},
+        workspaces: {},
+        conversations: {
+          a: { conversationId: 'a', workspaceId: 'gone', projectId: 'p', title: '', createdAt: 1 },
+        },
+      }),
+    );
+    expect(Object.keys(read.index.conversations)).toEqual([]);
   });
 
   it('treats an unknown state as one needing recovery', () => {

@@ -394,7 +394,6 @@ export default function DiffView({
   const [topAt, setTopAt] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const heights = useRef<number[]>([]);
 
   const { entries } = useMemo(
     () => entriesOf(files, reading, budget),
@@ -424,25 +423,13 @@ export default function DiffView({
 
   const said = useMemo(() => commentsByLine(comments ?? []), [comments]);
 
-  const { first, last, before, after, measure: mark } = useWindowed(folded.length, {
+  const keys = useMemo(() => folded.map((one) => one.key), [folded]);
+  const { first, last, before, after, measure, sizes } = useWindowed(keys, {
     scroller,
     list,
     guess: GUESS_ROW,
     over: OVER_ROWS,
   });
-
-  const measure = useCallback(
-    (index: number, el: HTMLElement | null) => {
-      if (el !== null && el.offsetHeight > 0) heights.current[index] = el.offsetHeight;
-      mark(index, el);
-    },
-    [mark],
-  );
-
-  // A different arrangement is a different set of heights.
-  useEffect(() => {
-    heights.current = [];
-  }, [folded]);
 
   const [painted, setPainted] = useState<ReadonlyMap<string, Painted>>(() => new Map());
   const asked = useRef<Set<string>>(new Set());
@@ -460,24 +447,13 @@ export default function DiffView({
   useEffect(() => {
     const pane = scroller.current;
     if (pane === null) return;
-    const settle = (): void => {
-      let top = 0;
-      let index = 0;
-      while (index < folded.length) {
-        const tall = heights.current[index];
-        const step = tall === undefined || tall <= 0 ? GUESS_ROW : tall;
-        if (top + step > pane.scrollTop) break;
-        top += step;
-        index += 1;
-      }
-      setTopAt(index);
-    };
+    const settle = (): void => setTopAt(sizes.rowsAbove(pane.scrollTop));
     pane.addEventListener('scroll', settle, { passive: true });
     settle();
     return () => pane.removeEventListener('scroll', settle);
     // The window sliding means rows have been measured, and the arithmetic
     // above reads those heights.
-  }, [folded, first, last]);
+  }, [sizes, first, last]);
 
   /* Only the pieces somebody is looking at are coloured. The highlighter is a
      large late import and a diff can hold a thousand hunks; asking it for all
@@ -529,13 +505,8 @@ export default function DiffView({
     }
     const pane = scroller.current;
     if (pane === null) return;
-    let top = 0;
-    for (let step = 0; step < index; step += 1) {
-      const tall = heights.current[step];
-      top += tall === undefined || tall <= 0 ? GUESS_ROW : tall;
-    }
-    pane.scrollTop = top;
-  }, [at, folded]);
+    pane.scrollTop = sizes.offsetOf(index);
+  }, [at, folded, sizes]);
 
   const here = fileAt(folded, topAt);
   const rows = useMemo(() => fileRows(files, dropped ?? new Set<string>()), [files, dropped]);
@@ -556,14 +527,9 @@ export default function DiffView({
       if (index < 0) return;
       const pane = scroller.current;
       if (pane === null) return;
-      let top = 0;
-      for (let step = 0; step < index; step += 1) {
-        const tall = heights.current[step];
-        top += tall === undefined || tall <= 0 ? GUESS_ROW : tall;
-      }
-      pane.scrollTop = top;
+      pane.scrollTop = sizes.offsetOf(index);
     },
-    [folded],
+    [folded, sizes],
   );
 
   /* `n` and `p` move a file at a time, `[` folds the list, `e` opens the fold
@@ -910,13 +876,8 @@ export default function DiffView({
         <div className="diffview__body scroll--auto" ref={scroller}>
           <div className="diffview__list" ref={list}>
             <div style={{ height: before }} aria-hidden="true" />
-            {folded.slice(first, last).map((entry, offset) => (
-              <div
-                key={entry.key}
-                ref={(el) => {
-                  measure(first + offset, el);
-                }}
-              >
+            {folded.slice(first, last).map((entry) => (
+              <div key={entry.key} ref={(el) => measure(entry.key, el)}>
                 {drawEntry(entry)}
               </div>
             ))}

@@ -84,6 +84,24 @@ jobs:
       - run: npm ci
       - run: npx vitest run tests/e2e
 
+  electron-smoke:
+    name: Electron smoke
+    # The only job that runs the shipped shell in a real window: a built
+    # renderer, a built main process, and a profile thrown away afterwards. A
+    # window needs a desktop, which is what the product's own platform gives.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Builds both halves itself, so it fails on the app rather than on a
+      # missing artifact from another job.
+      - run: npm run test:electron
+
   package:
     name: Package
     # A build nobody packages is a build that fails on the day of a release.

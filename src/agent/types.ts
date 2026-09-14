@@ -217,6 +217,25 @@ export type SittingUsage = {
  */
 export type SettledHow = 'finished' | 'stopped' | 'failed' | 'asked-person' | 'blocked-by-addon';
 
+/**
+ * How a step ended, when it did not end by finishing.
+ *
+ * `stopped` is somebody pressing Stop, `interrupted` is a record that ends
+ * before the result — the app was closed, or it crashed — and `failed` is the
+ * step itself coming back with an error. Only a replay can tell the last two
+ * apart from the record alone, and it has to: a step that never finished is not
+ * a step that failed, and it is certainly not one that succeeded.
+ */
+export type StepEnding = 'failed' | 'stopped' | 'interrupted';
+
+/**
+ * Something a step handed back that a line in the feed cannot draw: a file an
+ * add-on's tool returned, a second picture, the tail of a long output. `what`
+ * is one line for a person and `where` is where the whole of it lives, so
+ * nothing the transcript holds comes back as nothing.
+ */
+export type KeptThing = { what: string; where: string };
+
 /** One press offered under a notice. `id` is what comes back. */
 export type NoticeAction = { id: string; label: string };
 
@@ -226,8 +245,20 @@ export type AgentEvent =
   | { type: 'tool-start'; call: ToolCall }
   /** A step that finished. `shown` is a picture the step took — of a page, of
    *  the screen — which the conversation draws under the line, because a
-   *  picture nobody sees is a picture nobody asked for. */
-  | { type: 'tool-end'; id: string; ok: boolean; detail?: string; shown?: ImageCard }
+   *  picture nobody sees is a picture nobody asked for.
+   *
+   *  `detail` is what the step has to say for itself: a note it wrote, or the
+   *  first of what it printed. `ending` is how it did not finish, when it did
+   *  not. `kept` is everything a line has no room for, named. */
+  | {
+      type: 'tool-end';
+      id: string;
+      ok: boolean;
+      detail?: string;
+      shown?: ImageCard;
+      ending?: StepEnding;
+      kept?: readonly KeptThing[];
+    }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
@@ -316,6 +347,16 @@ export type AgentEvent =
    * has no idea it is running.
    */
   | { type: 'extension-turn'; from: string; text: string }
+  /**
+   * A message an add-on put into the record, in its own name.
+   *
+   * Pi stores these with the extension that wrote them and whether they asked
+   * to be shown at all, and a reopened conversation has to keep both: the words
+   * are not the person's and not ours, and an add-on that asked to be invisible
+   * asked for a reason. A message that asked to be shown and has nothing in it
+   * a line can draw is not sent at all.
+   */
+  | { type: 'extension-said'; from: string; text: string; shown?: ImageCard; kept?: readonly KeptThing[] }
   /**
    * Something about the app, not about this conversation.
    *

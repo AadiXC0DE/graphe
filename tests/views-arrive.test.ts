@@ -1,7 +1,7 @@
 /** The window went black for a frame the first time any view opened.
  *
  * Twenty views are `lazy`, and the only Suspense boundaries were the two around
- * the whole conversation with `fallback={null}`. Pressing Design suspended that
+ * the whole conversation with `fallback={null}`. Pressing Canvas suspended that
  * root boundary, React unmounted the entire tree, and the body background was
  * all that painted until the chunk landed.
  *
@@ -54,7 +54,7 @@ const lineAt = (at: number): string => `src/App.tsx:${String(app.slice(0, at).sp
 /** The setters that put a screen on top of the conversation, opening calls only:
  *  passing `null` or an updater takes one away, which suspends nothing. */
 const OPENS =
-  /set(?:SettingsOpen|GraphOpen|ReviewsOpen|ReviewQueueOpen|SkillsOpen|UsageOpen|AddMore)\(true\)|set(?:DesignAt|HelpersAt|CanvasAt)\((?!null\)|\(was\))/g;
+  /set(?:SettingsOpen|GraphOpen|ReviewsOpen|ReviewQueueOpen|SkillsOpen|UsageOpen|AddMore)\(true\)|set(?:HelpersAt|CanvasAt)\((?!null\)|\(was\))/g;
 
 /** The views that are only fetched when something asks for them. */
 function lazyViews(source: string): string[] {
@@ -82,15 +82,15 @@ describe('opening a view', () => {
   });
 
   it('closes the other screens through the same door', () => {
-    const at = app.indexOf("if (screen !== 'design') setDesignAt(null);");
+    const at = app.indexOf("if (screen !== 'graph') setGraphOpen(false);");
     expect(at).toBeGreaterThan(0);
     expect(inTransition(at)).toBe(true);
   });
 
   /* Not a transition any more, and the reason is the bug that took three goes.
      React holds a transition until it is ready and then commits them in the
-     order they were made, so pressing Design and then Skills before Design has
-     arrived put Design up for a moment on the way to Skills, and nothing can
+     order they were made, so pressing Canvas and then Skills before Canvas has
+     arrived put Canvas up for a moment on the way to Skills, and nothing can
      call a transition off. The wait is held by the window instead: the code is
      fetched, and only then is the screen changed, by the newest press alone. */
   it('holds the wait itself rather than handing it to a transition', () => {
@@ -193,17 +193,16 @@ describe('warming the views', () => {
 });
 
 describe('a screen closes only the others', () => {
-  /* Each line names its own screen. Design named the chat's, which was
-     invisible while the close and the open ran in one breath and the open came
-     second; a frame apart, it closed the design view it had just opened and the
-     press did nothing at all. */
+  /* Each line names its own screen. Naming the chat's was invisible while the
+     close and the open ran in one breath and the open came second; a frame
+     apart, it closed the screen it had just opened and the press did nothing at
+     all. */
   it('never closes the screen being opened', () => {
     const at = app.indexOf("const goToScreen = useCallback(");
     const body = app.slice(at, at + 2200);
     const closes = [...body.matchAll(/if \(screen !== '([a-z-]+)'(?: && screen !== '[a-z-]+')?\) set(\w+)\(/g)];
     expect(closes.length).toBeGreaterThan(8);
     const owns: Record<string, string> = {
-      design: 'DesignAt',
       graph: 'GraphOpen',
       reviews: 'ReviewsOpen',
       review: 'ReviewQueueOpen',

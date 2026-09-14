@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-466 packages, generated 2026-09-13 from package-lock.json 3c5710221c1c5f2b.
+471 packages, generated 2026-09-14 from package-lock.json 35539a6ff7b7cfa6.
 
 ## Summary
 
@@ -66,7 +66,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [@mariozechner/clipboard](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mariozechner/clipboard-darwin-arm64](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mariozechner/clipboard-darwin-universal](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
-| [@mermaid-js/parser](https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme) | 1.2.0 | MIT |
+| [@mermaid-js/parser](https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme) | 1.2.1 | MIT |
 | [@modelcontextprotocol/sdk](https://modelcontextprotocol.io) | 1.30.0 | MIT |
 | [@nodable/entities](https://github.com/nodable/val-parsers) | 2.1.0 | MIT |
 | [@protobufjs/aspromise](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
@@ -78,13 +78,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@protobufjs/path](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/pool](https://github.com/dcodeIO/protobuf.js) | 1.1.0 | BSD-3-Clause |
 | [@protobufjs/utf8](https://github.com/protobufjs/protobuf.js) | 1.1.2 | BSD-3-Clause |
-| [@shikijs/core](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/engine-javascript](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/langs](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/primitive](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/themes](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/types](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
+| [@shikijs/core](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/engine-javascript](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/langs](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/primitive](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/themes](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/types](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
 | [@shikijs/vscode-textmate](https://github.com/shikijs/vscode-textmate) | 10.0.2 | MIT |
 | [@silvia-odwyer/photon-node](https://silvia-odwyer.github.io/photon/) | 0.3.4 | Apache-2.0 |
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript/tree/main/packages/core) | 3.24.3 | Apache-2.0 |
@@ -131,12 +131,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@types/geojson](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/geojson) | 7946.0.16 | MIT |
 | [@types/hast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast) | 3.0.5 | MIT |
 | [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdast) | 4.0.4 | MIT |
-| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.1 | MIT |
+| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.2 | MIT |
 | [@types/retry](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.12.0 | MIT |
 | [@types/trusted-types](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types) | 2.0.7 | MIT |
 | [@types/unist](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist) | 3.0.3 | MIT |
-| [@ungap/structured-clone](https://github.com/ungap/structured-clone#readme) | 1.3.3 | ISC |
+| [@ungap/structured-clone](https://github.com/ungap/structured-clone#readme) | 1.4.0 | ISC |
 | [@upsetjs/venn.js](https://github.com/upsetjs/venn.js) | 2.0.0 | MIT |
+| [@xterm/xterm](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
 | [abbrev](http://github.com/isaacs/abbrev-js) | 1.1.1 | ISC |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
 | [adm-zip](https://github.com/cthackers/adm-zip) | 0.5.18 | MIT |
@@ -259,6 +260,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [fast-uri](https://github.com/fastify/fast-uri) | 3.1.5 | BSD-3-Clause |
 | [fast-xml-builder](https://github.com/NaturalIntelligence/fast-xml-builder) | 1.2.0 | MIT |
 | [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) | 5.7.3 | MIT |
+| [fastdom](https://github.com/wilsonpage/fastdom) | 1.0.12 | MIT |
 | [fetch-blob](https://github.com/node-fetch/fetch-blob#readme) | 3.2.0 | MIT |
 | [finalhandler](https://github.com/pillarjs/finalhandler) | 2.1.1 | MIT |
 | [flatbuffers](https://google.github.io/flatbuffers/) | 25.9.23 | Apache-2.0 |
@@ -329,14 +331,14 @@ not modified their source. Their names and marks belong to their respective owne
 | [lru-cache](https://github.com/isaacs/node-lru-cache) | 11.4.0 | BlueOak-1.0.0 |
 | [make-dir](https://github.com/sindresorhus/make-dir) | 3.1.0 | MIT |
 | [marked](https://marked.js.org) | 16.4.2 | MIT |
+| [marked](https://marked.js.org) | 18.0.13 | MIT |
 | [marked](https://marked.js.org) | 18.0.5 | MIT |
-| [marked](https://marked.js.org) | 18.0.9 | MIT |
 | [matcher](https://github.com/sindresorhus/matcher) | 3.0.0 | MIT |
 | [math-intrinsics](https://github.com/es-shims/math-intrinsics#readme) | 1.1.0 | MIT |
 | [mdast-util-to-hast](https://github.com/syntax-tree/mdast-util-to-hast) | 13.2.1 | MIT |
 | [media-typer](https://github.com/jshttp/media-typer) | 1.1.1 | MIT |
 | [merge-descriptors](https://github.com/sindresorhus/merge-descriptors) | 2.0.0 | MIT |
-| [mermaid](https://github.com/mermaid-js/mermaid) | 11.16.1 | MIT |
+| [mermaid](https://github.com/mermaid-js/mermaid) | 11.17.2 | MIT |
 | [micromark-util-character](https://github.com/micromark/micromark/tree/main/packages/micromark-util-character) | 2.1.1 | MIT |
 | [micromark-util-encode](https://github.com/micromark/micromark/tree/main/packages/micromark-util-encode) | 2.0.1 | MIT |
 | [micromark-util-sanitize-uri](https://github.com/micromark/micromark/tree/main/packages/micromark-util-sanitize-uri) | 2.0.1 | MIT |
@@ -354,9 +356,11 @@ not modified their source. Their names and marks belong to their respective owne
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [nan](https://github.com/nodejs/nan) | 2.28.0 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.0.0 | MIT |
+| [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
 | [node-domexception](https://github.com/jimmywarting/node-domexception#readme) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/bitinn/node-fetch) | 2.7.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
+| [node-pty](https://github.com/microsoft/node-pty) | 1.1.0 | MIT |
 | [nopt](https://github.com/npm/nopt) | 5.0.0 | ISC |
 | [npmlog](https://github.com/npm/npmlog) | 5.0.1 | ISC |
 | [object-assign](https://github.com/sindresorhus/object-assign) | 4.1.1 | MIT |
@@ -422,7 +426,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [sharp](https://sharp.pixelplumbing.com) | 0.34.5 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
-| [shiki](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
+| [shiki](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
 | [side-channel](https://github.com/ljharb/side-channel#readme) | 1.1.1 | MIT |
 | [side-channel-list](https://github.com/ljharb/side-channel-list#readme) | 1.0.1 | MIT |
 | [side-channel-map](https://github.com/ljharb/side-channel-map#readme) | 1.0.1 | MIT |
@@ -435,6 +439,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [sql.js](http://github.com/sql-js/sql.js) | 1.14.2 | MIT |
 | [standardwebhooks](https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript) | 1.1.1 | MIT |
 | [statuses](https://github.com/jshttp/statuses) | 2.0.2 | MIT |
+| [strictdom](https://github.com/wilsonpage/strictdom) | 1.0.1 | MIT |
 | [string_decoder](https://github.com/nodejs/string_decoder) | 1.3.0 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 4.2.3 | MIT |
 | [stringify-entities](https://github.com/wooorm/stringify-entities) | 4.0.4 | MIT |
@@ -451,7 +456,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD |
 | [type-fest](https://github.com/sindresorhus/type-fest) | 0.13.1 | (MIT OR CC0-1.0) |
 | [type-is](https://github.com/jshttp/type-is) | 2.1.0 | MIT |
-| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.12 | MIT |
+| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.30 | MIT |
 | [typebox](https://github.com/sinclairzx81/typebox) | 1.3.7 | MIT |
 | [undici](https://undici.nodejs.org) | 8.9.0 | MIT |
 | [undici-types](https://undici.nodejs.org) | 6.21.0 | MIT |
@@ -1041,7 +1046,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @mermaid-js/parser 1.2.0
+### @mermaid-js/parser 1.2.1
 
 <https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme>
 
@@ -1160,7 +1165,7 @@ Licence: BSD-3-Clause
 [object Object]
 ```
 
-### @shikijs/core 4.4.2
+### @shikijs/core 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1170,7 +1175,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/engine-javascript 4.4.2
+### @shikijs/engine-javascript 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1180,7 +1185,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/engine-oniguruma 4.4.2
+### @shikijs/engine-oniguruma 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1190,7 +1195,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/langs 4.4.2
+### @shikijs/langs 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1200,7 +1205,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/primitive 4.4.2
+### @shikijs/primitive 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1210,7 +1215,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/themes 4.4.2
+### @shikijs/themes 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1220,7 +1225,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/types 4.4.2
+### @shikijs/types 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1690,7 +1695,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @types/node 22.20.1
+### @types/node 22.20.2
 
 <https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node>
 
@@ -1730,7 +1735,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @ungap/structured-clone 1.3.3
+### @ungap/structured-clone 1.4.0
 
 <https://github.com/ungap/structured-clone#readme>
 
@@ -1743,6 +1748,16 @@ Licence: ISC
 ### @upsetjs/venn.js 2.0.0
 
 <https://github.com/upsetjs/venn.js>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
+### @xterm/xterm 6.0.0
+
+<https://github.com/xtermjs/xterm.js>
 
 Licence: MIT
 
@@ -2973,6 +2988,15 @@ Licence: MIT
 [object Object]
 ```
 
+### fastdom 1.0.12
+
+<https://github.com/wilsonpage/fastdom>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
+
 ### fetch-blob 3.2.0
 
 <https://github.com/node-fetch/fetch-blob#readme>
@@ -3667,7 +3691,7 @@ Licence: MIT
 [object Object]
 ```
 
-### marked 18.0.5
+### marked 18.0.13
 
 <https://marked.js.org>
 
@@ -3677,7 +3701,7 @@ Licence: MIT
 [object Object]
 ```
 
-### marked 18.0.9
+### marked 18.0.5
 
 <https://marked.js.org>
 
@@ -3737,7 +3761,7 @@ Licence: MIT
 [object Object]
 ```
 
-### mermaid 11.16.1
+### mermaid 11.17.2
 
 <https://github.com/mermaid-js/mermaid>
 
@@ -3915,6 +3939,16 @@ Licence: MIT
 [object Object]
 ```
 
+### node-addon-api 7.1.1
+
+<https://github.com/nodejs/node-addon-api>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
 ### node-domexception 1.0.0
 
 <https://github.com/jimmywarting/node-domexception#readme>
@@ -3938,6 +3972,16 @@ Licence: MIT
 ### node-fetch 3.3.2
 
 <https://github.com/node-fetch/node-fetch>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
+### node-pty 1.1.0
+
+<https://github.com/microsoft/node-pty>
 
 Licence: MIT
 
@@ -4589,7 +4633,7 @@ Licence: MIT
 [object Object]
 ```
 
-### shiki 4.4.2
+### shiki 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -4717,6 +4761,15 @@ Licence: MIT
 ```
 [object Object]
 ```
+
+### strictdom 1.0.1
+
+<https://github.com/wilsonpage/strictdom>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
 
 ### string_decoder 1.3.0
 
@@ -4877,7 +4930,7 @@ Licence: MIT
 [object Object]
 ```
 
-### typebox 1.3.12
+### typebox 1.3.30
 
 <https://github.com/sinclairzx81/typebox>
 

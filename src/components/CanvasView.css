@@ -1831,8 +1831,6 @@
     opacity: 1;
   }
 }
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   /* Still there, because it is the only thing separating a block that is going

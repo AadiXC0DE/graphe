@@ -64,6 +64,7 @@ import {
   type FoundAccount,
   type GrapheSession,
   listAllConversations,
+  notePackagedApp,
   packageHost,
   type Conversation,
   type OurAuthInteraction,
@@ -89,7 +90,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
-import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
+import { browserFolder, browserFrame, forgetLogins, sessionFor } from '../src/agent/pi/computer';
 import {
   ALWAYS_TEMPLATE,
   alwaysFile,
@@ -135,6 +136,7 @@ import {
   type TerminalSession,
   type WentOnline,
   type Overview,
+  type Artifact,
   type RepoOverview,
   type Preferences,
   type PromptOptions,
@@ -198,7 +200,7 @@ import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
-import { packageShelf, type Pack } from '../src/agent/pi/packages';
+import { packageShelf, reloadWords, type Pack } from '../src/agent/pi/packages';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { promptFor, workflowWords } from '../src/work/workflows';
@@ -274,8 +276,10 @@ import {
   emptyIndex,
   ensureProject,
   parseIndex,
+  projectAtPath,
   serializeIndex,
   updateConversation,
+  verdictOn,
   workspaceById,
   workspaceForConversation,
   type WorkspaceIndex,
@@ -541,6 +545,12 @@ const DEV_SERVER = process.env['GRAPHE_DEV_SERVER_URL'] ?? 'http://localhost:527
  *  `npm run build && GRAPHE_LOAD=build npx electron .` */
 const isDev = !app.isPackaged && process.env['GRAPHE_LOAD'] !== 'build';
 
+/* Only the shell knows how this copy was built, and the adapter needs it: the
+   scripted model a test run may ask for is refused in a shipped app. Said here
+   rather than read there, because importing Electron to ask would take the
+   adapter out of every test that loads it. */
+notePackagedApp(app.isPackaged);
+
 /* -------------------------------------------------------------------------- */
 /* What people are told when something does not work                          */
 /* -------------------------------------------------------------------------- */
@@ -741,6 +751,15 @@ const PICKER_FAILED: Trouble = {
 const NOTHING_TO_SHOW: Trouble = {
   what: 'There is nothing to look at yet.',
   because: 'Open the folder your project lives in and I will get it ready for you.',
+  actionLabel: 'Got it',
+};
+
+/** A call about the page that names a project the page does not belong to. The
+ *  page is one view for the whole window, so acting on it would reach somebody
+ *  else's page. */
+const NOT_THIS_PAGE: Trouble = {
+  what: 'That page is not the one on screen.',
+  because: 'The page beside the conversation belongs to another project, so I left it alone.',
   actionLabel: 'Got it',
 };
 
@@ -1075,6 +1094,31 @@ function dropPageView(): void {
     mainWindow.contentView.removeChildView(view);
   }
   view.webContents.close();
+}
+
+/**
+ * The project a page command names, or null when the call is about a page this
+ * shell is not the one for.
+ *
+ * One view and one watcher are shared by the whole window, so a call that names
+ * a project other than the one the page belongs to — or names nothing at all —
+ * is a call about a page that is not this one: pointing, hiding or recording it
+ * would reach somebody else's page. Naming a project while no page is up is
+ * what starts one, and answers with that project's own path.
+ */
+function pageNamed(where: Where): string | null {
+  if (where.project === undefined) return null;
+  const open = projectAt(where);
+  if (open === null) return null;
+  if (pageProject !== null && pageProject !== open.path) {
+    /* The project the page belongs to may have been closed while its page was
+       up. A view nobody owns any more must not hold the page hostage: it goes,
+       and this call is then about a page that is not up yet. Nothing else would
+       ever drop it — the one call that could is the one being refused. */
+    if (!workspaces.open.some((one) => one.path === pageProject)) dropPageView();
+    else return null;
+  }
+  return open.path;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2317,6 +2361,45 @@ async function readRepoOverview(one: DetectedRepo): Promise<RepoOverview | null>
   return { name: one.rel, path: one.path, git: { ...git, branches: await readBranches(one.path) } };
 }
 
+/**
+ * The things a turn made that are in this folder.
+ *
+ * A relative path is spelled from the folder the agent was working in, so it is
+ * read from the folder this answer is about. A file that is not there — one
+ * written in another conversation's copy, or in the project while this chat
+ * works in its own checkout — is not this panel's to show, and is left out
+ * rather than offered as something it never wrote.
+ */
+async function artifactsIn(folder: string, files: Iterable<string>): Promise<readonly Artifact[]> {
+  const made = artifactsAmong([...files]);
+  const there = await Promise.all(
+    made.map(async (one) => {
+      const found = await stat(resolve(folder, one.path)).catch(() => null);
+      return found !== null && found.isFile() ? one : null;
+    }),
+  );
+  return there.filter((one): one is Artifact => one !== null);
+}
+
+/**
+ * The preview address a panel may show for the folder it is about.
+ *
+ * Nothing served there is nothing to show: a preview of another conversation's
+ * own copy, or of some other project, is not this panel's page to open. A folder
+ * that holds several projects is the one case where the answer is not the
+ * folder's own: the repositories it names below are where a preview of it can be
+ * served from, and each of those is identified by name.
+ */
+function previewForPanel(
+  serving: Serving | null,
+  folder: string,
+  named: readonly RepoOverview[] | undefined,
+): string | null {
+  if (serving === null) return null;
+  if (serving.folder === folder) return serving.address;
+  return (named ?? []).some((one) => one.path === serving.folder) ? serving.address : null;
+}
+
 /** What the agent is told about a folder holding several projects: the names,
  *  and where each one stands, because a command run from the parent lands in
  *  no repository at all and the agent has no other way of knowing that. */
@@ -3373,6 +3456,26 @@ async function styleSheets(root: string): Promise<readonly string[]> {
  *  the right one. */
 const watching = new Map<string, { stop: boolean }>();
 
+/** The epoch each preview's pictures are in: one more each time the window asks
+ *  to look again. A picture taken before a reload, or by a browser that has been
+ *  started over, is in an earlier one, and the window drops it rather than
+ *  drawing it as the picture now. */
+const previewEpochs = new Map<string, number>();
+
+/**
+ * What the pictures of one project's browser are of.
+ *
+ * The preview's own name is the browsing session's, which is the same for as
+ * long as this folder is the one being looked at, and a different folder is a
+ * different preview. The epoch is one more than the last time the window looked.
+ */
+function previewOf(project: string): { preview: string; epoch: number } {
+  const preview = sessionFor(project);
+  const epoch = (previewEpochs.get(preview) ?? 0) + 1;
+  previewEpochs.set(preview, epoch);
+  return { preview, epoch };
+}
+
 function stopWatching(project: string): void {
   const going = watching.get(project);
   if (going !== undefined) going.stop = true;
@@ -3384,9 +3487,17 @@ function stopWatching(project: string): void {
  *
  * One at a time rather than on a timer: a picture that takes longer than the
  * gap would otherwise pile up behind itself until there is nothing left to
- * take a picture with.
+ * take a picture with. Every picture says which preview it is of.
  */
-function watchTheBrowser(project: string, keeps: string | null): void {
+function watchTheBrowser(
+  project: string,
+  folder: string,
+  keeps: string | null,
+  of: { preview: string; epoch: number },
+): void {
+  // Asking again replaces what was running: two loops would send pictures of
+  // two different pages, with no way to tell which is which.
+  stopWatching(project);
   const mine = { stop: false };
   watching.set(project, mine);
   void (async () => {
@@ -3399,12 +3510,17 @@ function watchTheBrowser(project: string, keeps: string | null): void {
         if (watching.get(project) === mine) stopWatching(project);
         return;
       }
-      const bytes = await browserFrame(project, undefined, keeps).catch(() => null);
+      /* Photographed in `folder` — the browser the conversation's own tools are
+         driving — and sent under `project`, which is what the window subscribed
+         with. The two are the same folder until a chat works in a copy. */
+      const bytes = await browserFrame(folder, undefined, keeps).catch(() => null);
       if (mine.stop) return;
       if (bytes !== null && mainWindow !== null && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(CHANNEL.browserFrame, { project, bytes });
+        mainWindow.webContents.send(CHANNEL.browserFrame, { ...of, project, bytes });
       }
-      await new Promise((go) => setTimeout(go, bytes === null ? 2000 : 700));
+      const bide = Promise.withResolvers<void>();
+      setTimeout(bide.resolve, bytes === null ? 2000 : 700);
+      await bide.promise;
     }
   })();
 }
@@ -3531,10 +3647,37 @@ function childRepoFor(open: Workspace<Held>, where: Where): DetectedRepo | null 
   return childNamed(open.held.childRepos, where.repo);
 }
 
-/** The folder a call means: a conversation's own copy, one of the projects
- *  inside a folder that holds several, or the folder itself. */
+/**
+ * The folder the registry already knows a conversation works in.
+ *
+ * Read out of the index in memory so a sync caller need not wait for it, and
+ * null before it has been read at all. Only ever a workspace of the project the
+ * call names: a conversation of another project must not pull this answer into
+ * a folder the call never mentioned.
+ */
+function recordedFolderNow(open: Workspace<Held>, where: Where): string | null {
+  if (where.conversation === undefined || !workspaceIndexLoaded) return null;
+  const record = workspaceForConversation(workspaceIndex, where.conversation);
+  if (record === null) return null;
+  if (record.state === 'deleted' || record.state === 'deleting') return null;
+  const project = projectAtPath(workspaceIndex, canonical(open.path));
+  return project !== null && project.projectId === record.projectId ? record.cwd : null;
+}
+
+/** The folder a call means, in the order it means them: a conversation's own
+ *  copy, one of the projects inside a folder that holds several, the folder the
+ *  registry wrote down for the conversation, then the folder itself.
+ *
+ * The registry is the part that stops a call about a conversation nobody has
+ * open — put down, evicted, or asked about before it was resumed — from being
+ * answered with whichever folder happens to be in front. */
 function folderFor(open: Workspace<Held>, where: Where): string {
-  return checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path;
+  return (
+    checkoutEntryFor(open, where)?.folder ??
+    childRepoFor(open, where)?.path ??
+    recordedFolderNow(open, where) ??
+    open.path
+  );
 }
 
 /** The saved work behind that folder. A child project's is opened the first
@@ -3750,6 +3893,9 @@ async function migrateWorkspacesOnce(): Promise<void> {
   if (!mine) return;
   try {
     const index = await loadWorkspaceIndex();
+    // A newer app's profile is not this build's to migrate: the run would write
+    // a marker and an index over something it cannot read.
+    if (workspaceIndexTooNew) return;
     const remembered = await rememberedProjects().catch(() => []);
     const projects = await Promise.all(
       remembered.map(async (one) => {
@@ -3832,6 +3978,15 @@ function workspaceIndexFile(): string {
 
 let workspaceIndex: WorkspaceIndex = emptyIndex();
 let workspaceIndexLoaded = false;
+/**
+ * The profile on disk was written by a newer app than this one.
+ *
+ * It is read and never written: going back to an older build must not tidy a
+ * newer profile away or overwrite it with less than it holds. The shell keeps
+ * running without persisting the registry until the newer app is back. See
+ * RELEASING.md, "Rolling back".
+ */
+let workspaceIndexTooNew = false;
 let writingWorkspaceIndex: Promise<void> = Promise.resolve();
 
 /**
@@ -3839,7 +3994,8 @@ let writingWorkspaceIndex: Promise<void> = Promise.resolve();
  *
  * A file that cannot be read is moved aside, with the reason in the log, rather
  * than replaced. What is in it is the record of where somebody's work was, and
- * deciding on their behalf what it said is worse than starting empty.
+ * deciding on their behalf what it said is worse than starting empty. A file
+ * from a newer app is not moved anywhere: it is left exactly as it is.
  */
 async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
   if (workspaceIndexLoaded) return workspaceIndex;
@@ -3849,6 +4005,15 @@ async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
   if (text === null) return workspaceIndex;
   const read = parseIndex(text);
   if (read.problem !== null) {
+    const verdict = verdictOn(read);
+    if (verdict === 'leave-alone') {
+      workspaceIndexTooNew = true;
+      log.line('warn', 'workspace index is from a newer app; leaving it as it is', {
+        problem: read.problem,
+        file,
+      });
+      return workspaceIndex;
+    }
     const kept = `${file}.unreadable-${String(Date.now())}`;
     await rename(file, kept).catch(() => undefined);
     log.line('warn', 'workspace index was unreadable; kept aside', { problem: read.problem, kept });
@@ -3859,8 +4024,10 @@ async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
 }
 
 /** Written in the order it was asked for, so two saves cannot interleave and
- *  leave the file holding half of each. */
+ *  leave the file holding half of each. Nothing is written at all while the
+ *  profile on disk belongs to a newer app. */
 function saveWorkspaceIndex(): Promise<void> {
+  if (workspaceIndexTooNew) return Promise.resolve();
   const text = serializeIndex(workspaceIndex);
   writingWorkspaceIndex = writingWorkspaceIndex
     .then(() => writeAtomically(workspaceIndexFile(), text))
@@ -4864,11 +5031,27 @@ async function startConversationUnlocked(
 ): Promise<Result<Started>> {
   const held = open.held;
   const asked = how.kind === 'carry-on' ? how.path : undefined;
+  /** The permission rung the conversation being replaced was on, if one was. */
+  let rungBefore: HowFar | null = null;
   if (asked !== undefined) {
     const already = conversationAt(held, { conversation: asked });
-    if (already !== null) {
+    if (already !== null && already.held.activationPending === null) {
       held.sessions.resume(already.path);
       return done({ session: already.held, address: already.path });
+    }
+    if (already !== null) {
+      /*
+       * An add-on changed while this conversation was open, so the session
+       * holding it is out of date rather than busy being somebody's. It is put
+       * down and built again at the same address: the transcript is the file it
+       * was already writing to, the model, permissions and workspace are the
+       * same records this call reads for any conversation, and the window's own
+       * draft belongs to the conversation rather than to the session that
+       * happened to be open when it was typed.
+       */
+      rungBefore = already.held.howFar;
+      await already.held.stop().catch(() => undefined);
+      held.sessions.close(already.path);
     }
   }
 
@@ -5006,6 +5189,11 @@ async function startConversationUnlocked(
   // something, and a new name for the same thread would lose it.
   const address = keep ?? addressOf(session);
   from.address = address;
+  // How far the agent may go is held on the session, so a conversation built
+  // again — a reload after an add-on changed, most of all — would come back at
+  // the cautious default rather than at what somebody chose for it. Put back
+  // before anything can be asked of this session.
+  if (rungBefore !== null) session.goAsFarAs(rungBefore);
   if (checkout !== null) {
     held.checkouts.set(address, checkout);
     await saveCheckouts(open.path, held).catch(() => undefined);
@@ -7944,28 +8132,34 @@ function register(): void {
     if (open === null) {
       return done({ git: null, preview: null, artifacts: [], swatches: [], styles: null });
     }
-    const made = artifactsAmong([...open.held.looking.files]);
-    // A palette is only a palette once its colours have been read, and it is the
-    // one artifact worth opening a file for.
-    const palette = made.find((one) => one.kind === 'palette') ?? null;
-    const swatches =
-      palette === null
-        ? []
-        : paletteFrom(await readFile(join(open.path, palette.path), 'utf8').catch(() => ''));
     // A parallel conversation works in its own checkout. The right panel must
     // describe the folder its agent is actually changing, not always the
     // project's primary checkout — otherwise a successful `git switch` looks
     // like it never happened.
     // The same folder the design view saves into, so what is shown and what is
     // written are never two different projects.
+    //
+    // This one folder is the whole answer: the branch, the files behind the
+    // artifacts, the palette and the preview address are all read out of it, so
+    // one panel can never describe two folders at once.
     const cwd = folderFor(open, where);
-    // Several projects in one folder: each child answers where it lives; the parent answers nothing.
+    // Several projects in one folder: each child answers where it lives, so the
+    // panel can say which repositories the folder holds. The parent has no
+    // repository of its own, and nothing at the parent is served.
     const many = open.held.childRepos.length >= SEVERAL_CHILDREN;
     const repos = many
       ? (await Promise.all(open.held.childRepos.map(readRepoOverview))).filter(
           (one): one is RepoOverview => one !== null,
         )
       : undefined;
+    const made = await artifactsIn(cwd, open.held.looking.files);
+    // A palette is only a palette once its colours have been read, and it is the
+    // one artifact worth opening a file for.
+    const palette = made.find((one) => one.kind === 'palette') ?? null;
+    const swatches =
+      palette === null
+        ? []
+        : paletteFrom(await readFile(join(cwd, palette.path), 'utf8').catch(() => ''));
     const git = many ? null : await readGitStatusWithLines(cwd);
     return done({
       git:
@@ -7973,7 +8167,7 @@ function register(): void {
           ? null
           : { ...git, branches: await readBranches(cwd) },
       ...(repos === undefined ? {} : { repos }),
-      preview: open.held.serving?.address ?? null,
+      preview: previewForPanel(open.held.serving, cwd, repos),
       artifacts: made,
       swatches,
     });
@@ -8043,25 +8237,29 @@ function register(): void {
   /** Everything the project holds. Nothing open is an empty list rather than a
    *  failure: the panel simply has nothing to draw. */
   handle<readonly FileEntry[]>(CHANNEL.projectFiles, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return done([]);
+    // The folder the conversation works in, not the project root: a chat in its
+    // own copy is shown the files it is actually changing.
+    const folder = folderFor(open, where);
     const children = open.held.childRepos;
     // A folder holding several projects has no git of its own to ask; each
     // child is asked where it lives, and its files are spelled the way the
     // parent's listing spells them — `backend/src/app.ts` — so the markers
-    // land on the right rows.
-    const [walked, ...childStatuses] = await Promise.all([
-      everythingIn(open.path, insideFolder),
-      ...(children.length >= SEVERAL_CHILDREN
-        ? children.map((one) => readGitStatus(one.path))
-        : [readGitStatus(open.path)]),
-    ]);
-    const changed =
-      children.length >= SEVERAL_CHILDREN
-        ? changedAcross(
-            children.map((one, at) => ({ rel: one.rel, files: childStatuses[at]?.files ?? [] })),
+    // land on the right rows. Only while the listing is the parent folder
+    // itself: a named child or a chat's own copy is marked from its own status.
+    const several = children.length >= SEVERAL_CHILDREN && folder === open.path;
+    const [walked, changed] = await Promise.all([
+      everythingIn(folder, insideFolder),
+      several
+        ? Promise.all(children.map((one) => readGitStatus(one.path))).then((statuses) =>
+            changedAcross(
+              children.map((one, at) => ({ rel: one.rel, files: statuses[at]?.files ?? [] })),
+            ),
           )
-        : (childStatuses[0]?.files ?? []);
+        : readGitStatus(folder).then((status) => status?.files ?? []),
+    ]);
     return done(markChanged(walked.files, changed));
   });
 
@@ -8075,7 +8273,9 @@ function register(): void {
     if (typeof path !== 'string' || path.trim() === '') {
       return fail(cannotShowFile(cannotOpen.gone));
     }
-    const where = await fileInProject(open.path, path);
+    // Out of the conversation's own folder, so a chat working in a copy opens
+    // the version it is changing rather than the project's.
+    const where = await fileInProject(folderFor(open, whereIn(args)), path);
     if (where.full === undefined) return fail(cannotShowFile(where.because));
 
     const found = await stat(where.full).catch(() => null);
@@ -9560,9 +9760,34 @@ function register(): void {
   let shelf: Awaited<ReturnType<typeof openShelf>> | null = null;
   const openShelf = async () => {
     const folder = workspaces.current?.path ?? app.getPath('home');
-    return packageShelf(await packageHost(await defaultAgentDir(), folder));
+    const built = packageShelf(await packageHost(await defaultAgentDir(), folder));
+    // Every change reports itself while it happens: an install is a minute of
+    // npm, and a minute of nothing is what a person reads as broken.
+    built.watching((progress) => tell({ says: progress.says, done: progress.done }));
+    return built;
   };
   const theShelf = async () => (shelf ??= await openShelf());
+
+  /**
+   * Every conversation that was open when the add-ons changed.
+   *
+   * A session is built with the add-ons that were installed at the moment it
+   * opened — their factories ran, their tools were registered into it. Nothing
+   * about a change afterwards reaches one that is already going, so each of
+   * them is told, and each of them will be built again the next time somebody
+   * opens it.
+   */
+  function markActivationPending(says: string): void {
+    // Every open conversation in every open project: an add-on is installed for
+    // the whole app, so a session in another project is just as much built from
+    // the set of add-ons that no longer matches.
+    for (const open of workspaces.open) {
+      for (const one of open.held.sessions.open) {
+        one.held.markActivationPending(says);
+        send(open.path, { type: 'notice', what: says }, one.path);
+      }
+    }
+  }
 
   handle<InStep>(CHANNEL.inStep, async (_event, args) => {
     const open = projectAt(whereIn(args));
@@ -9667,6 +9892,7 @@ function register(): void {
     if (!added.ok) {
       return fail({ what: 'I could not add that.', because: added.why, actionLabel: 'Got it' });
     }
+    markActivationPending(reloadWords(added.change));
     return done(await shelved.mine());
   });
 
@@ -9674,7 +9900,8 @@ function register(): void {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
     const shelved = await theShelf();
-    await shelved.remove(id);
+    const change = await shelved.remove(id);
+    markActivationPending(reloadWords(change));
     return done(await shelved.mine());
   });
 
@@ -9818,14 +10045,20 @@ function register(): void {
      what it needs to list them in a `/` menu and to hold the typed words. */
   handle<boolean>(CHANNEL.watchBrowser, async (_event, args) => {
     const [on] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null || typeof on !== 'boolean') return done(false);
-    stopWatching(open.path);
+    /* The folder the conversation works in: a chat in a copy drives that copy's
+       browser, and the pictures are of the browser it drives. They are sent to
+       the window under the project it asked about, which is what it subscribed
+       with — the two are the same folder until a chat works in a copy. */
+    const folder = folderFor(open, where);
+    stopWatching(folder);
     if (!on) return done(false);
     const keeps = keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path)
-      ? browserFolder(await defaultAgentDir(), open.path)
+      ? browserFolder(await defaultAgentDir(), folder)
       : null;
-    watchTheBrowser(open.path, keeps);
+    watchTheBrowser(open.path, folder, keeps, previewOf(folder));
     return done(true);
   });
 
@@ -11849,6 +12082,12 @@ function register(): void {
     const [address, bounds] = args;
     const again = args[2] === true;
     const box = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    /* One view for the whole window, so the call says which project's page this
+       is. A call that names another one, or none, is about a page that is not
+       this one — refused rather than pointed at whichever page happens to be
+       up. */
+    const named = pageNamed(whereIn(args));
+    if (named === null) return fail(NOT_THIS_PAGE);
     // No box and no press means there is nowhere to draw it, which is how the
     // pane says it has closed. No box *with* a press means "the same place,
     // again" — the one thing the reload button asks for.
@@ -11867,7 +12106,7 @@ function register(): void {
     }
     const view = makePageView();
     if (view === null) return done(null);
-    pageProject = projectAt(whereIn(args))?.path ?? null;
+    pageProject = named;
     if (box !== null) {
       view.setBounds({
         x: Math.round(box.x as number),
@@ -11889,15 +12128,22 @@ function register(): void {
   });
 
   /* A sheet, a menu or a modal would be painted under a native view, so the
-     window says when one is open and the page steps out of the way. */
+     window says when one is open and the page steps out of the way. The call
+     names the project whose page it is: a call about another project's page is
+     refused rather than hiding the one on screen. */
   handle<null>(CHANNEL.pageHidden, (_event, args) => {
     const [hidden] = args;
+    if (pageNamed(whereIn(args)) === null) return Promise.resolve(fail(NOT_THIS_PAGE));
     pageView?.setVisible(hidden !== true);
     return Promise.resolve(done(null));
   });
 
+  /* Recording is of the page on screen, so the call names the project whose
+     page that is — the same refusal as the other three, and there is no page to
+     watch without one. */
   handle<null>(CHANNEL.watchStart, async (_event, args) => {
     const [says] = args;
+    if (pageNamed(whereIn(args)) === null) return fail(NOT_THIS_PAGE);
     const view = pageView;
     if (view === null) {
       return fail({
@@ -11923,7 +12169,8 @@ function register(): void {
     return done(null);
   });
 
-  handle<Recording | null>(CHANNEL.watchStop, async () => {
+  handle<Recording | null>(CHANNEL.watchStop, async (_event, args) => {
+    if (pageNamed(whereIn(args)) === null) return fail(NOT_THIS_PAGE);
     const run = (await pageWatching?.stop().catch(() => null)) ?? null;
     pageWatching = null;
     return done(run);

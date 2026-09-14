@@ -75,7 +75,10 @@ describe('watching the browser, minded', () => {
   it('takes the next one only once the last has arrived', () => {
     const at = MAIN.indexOf('function watchTheBrowser');
     expect(at).toBeGreaterThan(-1);
-    const block = MAIN.slice(at, at + 900);
+    // The whole function, up to the next one, rather than a fixed window: how
+    // long the comments inside it are is not what this is about.
+    const after = MAIN.indexOf('\nfunction ', at + 1);
+    const block = MAIN.slice(at, after === -1 ? undefined : after);
     expect(block).toContain('while (!mine.stop)');
     expect(block).toContain('await browserFrame(');
   });

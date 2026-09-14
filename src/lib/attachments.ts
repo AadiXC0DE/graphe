@@ -240,6 +240,12 @@ export const ATTACH_WORDS = {
     links.length === 1
       ? `The design I am talking about is here: ${links[0] ?? ''}`
       : `The designs I am talking about are here:\n${links.map((one) => `- ${one}`).join('\n')}`,
+  /** Named by the message that did not go, so somebody knows which picture to
+   *  take out and try again rather than which one went missing quietly. */
+  notRead: (names: readonly string[]): string =>
+    names.length === 1
+      ? `I could not read ${names[0] ?? 'that file'}, so it did not go with the message.`
+      : `I could not read these, so they did not go with the message: ${names.join(', ')}.`,
 } as const;
 
 /**

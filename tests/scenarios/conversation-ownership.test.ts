@@ -1,12 +1,17 @@
-/** T02, T23, T53: what belongs to a conversation and what belongs to the project.
+/** T02, T23, T26, T53: what belongs to a conversation and what belongs to the
+ *  project.
  *
  * Two of these are the reason phase 5 exists: a reference brought into one chat
  * must not appear in a fresh one, and a cost must be charged once to the run
- * that incurred it. T23's required result is not what the code does, so its test
- * fails on purpose and names the finding.
+ * that incurred it. Both hold now.
+ *
+ * The rest are the same question asked of a write that arrives late: a sentence
+ * taken back out of the queue, a card written from a notice, and a send the
+ * shell refused. Each of them belongs to the conversation it was made in, not
+ * to whichever one is on screen when the answer lands.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -27,12 +32,22 @@ import {
 } from '../../electron/services/workspace-registry';
 import {
   changeDesk,
+  changeThread,
+  conversationIn,
   noDesks,
   openDesk,
+  putBackTheBox,
   receive,
   showThread,
+  spokenIn,
+  tookBackTheLine,
+  tookTheBox,
   type Desk,
+  type Desks,
+  type Reference,
 } from '../../src/lib/projects';
+import { said } from '../../src/lib/thread';
+import type { Attachment } from '../../src/components/Attachments';
 import type { TaskObservation } from '../../src/cost/estimate';
 import { gitIn, gitRepo, type Built } from '../helpers/fixtures';
 
@@ -108,25 +123,223 @@ describe('T02: a conversation with a long history, closed and reopened', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('T23: a reference brought into one chat, then a fresh chat opened', () => {
-  /* Phase 10.2 requires: "B Context empty; explicit shared context labeled".
-     What the code does: `references` is a field of the project's `Desk`, and
-     `showThread` carries the project's fields across a change of conversation,
-     so the fresh chat opens holding the other chat's references. The test is
-     written to fail and is expected to keep failing until references are owned
-     by the conversation (finding S01, phase 4.5). */
-  it.fails('shows the fresh conversation nothing that was brought into the other one', () => {
-    const first = showThread(openDesk(noDesks, { path: PROJECT, name: 'atlas' }), PROJECT, 'chat-a');
-    const withReference = changeDesk(first, PROJECT, (desk) => ({
-      ...desk,
-      references: [
-        { id: 'r1', kind: 'image', name: 'the mock.png', note: 'brought in for the header' },
-      ],
-    }));
+  const MOCK: Reference = {
+    id: 'r1',
+    kind: 'image',
+    name: 'the mock.png',
+    note: 'brought in for the header',
+  };
+  const SHOT: Attachment = { id: 's1', kind: 'image', name: 'a screenshot.png', note: 'PNG' };
+  const NOTE: Attachment = { id: 's2', kind: 'document', name: 'the brief.pdf', note: 'PDF' };
 
-    const second = showThread(withReference, PROJECT, 'chat-b');
-    const fresh = second.byPath[PROJECT];
+  /** One project, two conversations open, and the first of them holding
+   *  everything a chat can hold that the project cannot. */
+  function twoChats(): Desks {
+    let desks = openDesk(noDesks, { path: PROJECT, name: 'atlas' });
+    // A conversation this project has not had comes with what the shell read
+    // for it, which is the only way one is ever opened.
+    desks = showThread(desks, PROJECT, 'chat-a', { turns: [] });
+    desks = changeThread(desks, { project: PROJECT, address: 'chat-a' }, (one) => ({
+      ...one,
+      references: [MOCK],
+      attachments: [SHOT, NOTE],
+      draft: 'make the hero tighter',
+      plans: 'research',
+    }));
+    return showThread(desks, PROJECT, 'chat-b', { turns: [] });
+  }
+
+  it('shows the fresh conversation nothing that was brought into the other one', () => {
+    const fresh = twoChats().byPath[PROJECT];
     expect(fresh?.address).toBe('chat-b');
     expect(fresh?.references).toEqual([]);
+    expect(fresh?.attachments).toEqual([]);
+    expect(fresh?.draft).toBe('');
+    expect(fresh?.plans).toBe('auto');
+  });
+
+  /* A reference is something a chat was given, and the project has no list of
+     its own to take it away to: the only place it is held is the conversation
+     that was sent it, on screen or parked. */
+  it('keeps a reference with the chat it was brought into, and nowhere else', () => {
+    const there = twoChats();
+    const desk = there.byPath[PROJECT];
+    expect(desk?.references).toEqual([]);
+    expect(conversationIn(desk!, 'chat-a').references).toEqual([MOCK]);
+
+    const fresh = showThread(there, PROJECT, 'chat-b', { turns: [] }).byPath[PROJECT];
+    expect(fresh?.references).toEqual([]);
+    expect(conversationIn(fresh!, 'chat-b').references).toEqual([]);
+  });
+
+  it('gives each chat back its own references, draft and box', () => {
+    const there = twoChats();
+    const inB: Desk | undefined = there.byPath[PROJECT];
+    expect(inB?.references).toEqual([]);
+
+    const backToA = showThread(
+      changeThread(there, { project: PROJECT, address: 'chat-b' }, (one) => ({
+        ...one,
+        references: [{ id: 'r2', kind: 'figma', name: 'Landing v4', note: 'the frame' }],
+        attachments: [{ id: 's3', kind: 'image', name: 'b.png', note: 'PNG' }],
+        draft: 'and the footer',
+      })),
+      PROJECT,
+      'chat-a',
+    );
+    const a = conversationIn(backToA.byPath[PROJECT]!, 'chat-a');
+    expect(a.references).toEqual([MOCK]);
+    expect(a.attachments).toEqual([SHOT, NOTE]);
+    expect(a.draft).toBe('make the hero tighter');
+    expect(a.plans).toBe('research');
+
+    const again = showThread(backToA, PROJECT, 'chat-b');
+    const b = conversationIn(again.byPath[PROJECT]!, 'chat-b');
+    expect(b.references?.map((one) => one.name)).toEqual(['Landing v4']);
+    expect(b.attachments).toEqual([{ id: 's3', kind: 'image', name: 'b.png', note: 'PNG' }]);
+    expect(b.draft).toBe('and the footer');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('T26: an upload that finishes after the window has moved on', () => {
+  const A_PICTURE: Attachment = { id: 'a1', kind: 'image', name: 'hero.png', note: 'PNG' };
+  const LATE: Attachment = { id: 'a2', kind: 'image', name: 'footer.png', note: 'PNG' };
+  const B_PICTURE: Attachment = { id: 'b1', kind: 'image', name: 'logo.svg', note: 'SVG' };
+  const A = { project: PROJECT, address: 'chat-a' };
+  const B = { project: PROJECT, address: 'chat-b' };
+
+  /** A's send accepted one picture, then the window moved to B, which has a
+   *  sentence and a picture of its own in its box. */
+  function movedOn(): Desks {
+    let desks = openDesk(noDesks, { path: PROJECT, name: 'atlas' });
+    desks = showThread(desks, PROJECT, 'chat-a', { turns: [] });
+    desks = changeThread(desks, A, (one) => ({ ...one, attachments: [A_PICTURE] }));
+    desks = showThread(desks, PROJECT, 'chat-b', { turns: [] });
+    return changeThread(desks, B, (one) => ({
+      ...one,
+      attachments: [B_PICTURE],
+      draft: 'about the footer',
+    }));
+  }
+
+  it('takes only the accepted picture, and only out of the chat that sent it', () => {
+    const after = tookTheBox(movedOn(), A, [A_PICTURE]);
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').attachments).toEqual([]);
+    // B's box and B's sentence are B's: an upload for A settles nothing here.
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').attachments).toEqual([B_PICTURE]);
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').draft).toBe('about the footer');
+  });
+
+  it('keeps what was put in the box while the send was still going', () => {
+    const dropped = changeThread(movedOn(), A, (one) => ({
+      ...one,
+      attachments: [...(one.attachments ?? []), LATE],
+    }));
+    const after = tookTheBox(dropped, A, [A_PICTURE]);
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').attachments).toEqual([LATE]);
+  });
+
+  it('gives a refused send its sentence back without touching the other chat', () => {
+    const after = putBackTheBox(movedOn(), A, 'make the hero tighter');
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').draft).toBe('make the hero tighter');
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').draft).toBe('about the footer');
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').attachments).toEqual([B_PICTURE]);
+  });
+
+  /* The sentence somebody started while the first one was still going is the
+     one they are in the middle of. It stays, and it stays first: the refusal
+     goes back behind it rather than on top of it. What makes that true is the
+     box reporting what is in it as it is typed — see tests/draft-kept.test.ts,
+     which is the other half of this. */
+  it('puts a refused sentence back behind what was typed while it was on its way', () => {
+    const typed = changeThread(movedOn(), A, (one) => ({ ...one, draft: 'and the footer' }));
+    const after = putBackTheBox(typed, A, 'make the hero tighter');
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').draft).toBe(
+      'and the footer\n\nmake the hero tighter',
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('T26b: a line taken back out of the queue', () => {
+  const A = { project: PROJECT, address: 'chat-a' };
+  const QUEUED = 'and the footer';
+
+  /** Two conversations open, the second one in front, and a second thought
+   *  queued behind the first one's run. */
+  function queued(): Desks {
+    let desks = openDesk(noDesks, { path: PROJECT, name: 'atlas' });
+    desks = showThread(desks, PROJECT, 'chat-a', {
+      turns: [said('you', 'make the hero tighter'), said('you', QUEUED)],
+    });
+    desks = showThread(desks, PROJECT, 'chat-b', { turns: [said('you', 'the pricing page')] });
+    return changeThread(desks, A, (one) => ({ ...one, draft: 'about the header' }));
+  }
+
+  /* Taking a line back is a round trip through the shell. The words belong to
+     the conversation that queued them — the one the press was made in — not to
+     whichever chat is on screen when the shell answers. */
+  it('comes off the thread that queued it, not the one in front', () => {
+    const after = tookBackTheLine(queued(), A, [QUEUED]);
+    expect(
+      conversationIn(after.byPath[PROJECT]!, 'chat-a').turns.map((one) =>
+        one.kind === 'said' ? one.text : one.kind,
+      ),
+    ).toEqual(['make the hero tighter']);
+    // The chat in front was never asked anything and keeps its own turn.
+    expect(
+      conversationIn(after.byPath[PROJECT]!, 'chat-b').turns.map((one) =>
+        one.kind === 'said' ? one.text : one.kind,
+      ),
+    ).toEqual(['the pricing page']);
+  });
+
+  it('goes into the box of the chat that asked, behind what is already there', () => {
+    const after = tookBackTheLine(queued(), A, [QUEUED]);
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').draft).toBe(
+      'about the header\n\nand the footer',
+    );
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').draft).toBe('');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('a card written on the strength of a notice', () => {
+  /** Chat B in front, and a look-around still running in chat A. */
+  function bothOpen(): Desks {
+    let desks = openDesk(noDesks, { path: PROJECT, name: 'atlas' });
+    desks = showThread(desks, PROJECT, 'chat-a', { turns: [] });
+    return showThread(desks, PROJECT, 'chat-b', { turns: [] });
+  }
+
+  /* Research runs while somebody may be reading another chat, so the card goes
+     where the notice's words went. */
+  it('is filed in the conversation the notice came from', () => {
+    const desks = bothOpen();
+    const owner = spokenIn(desks, { project: PROJECT, conversation: 'chat-a' });
+    expect(owner).toEqual({ project: PROJECT, address: 'chat-a' });
+
+    const after = changeThread(desks, owner!, (one) => ({
+      ...one,
+      turns: [{ kind: 'plan' as const, id: 'research-1', text: '', steps: ['one'], caveats: [], questions: [], answered: null }],
+    }));
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-a').turns).toHaveLength(1);
+    expect(conversationIn(after.byPath[PROJECT]!, 'chat-b').turns).toEqual([]);
+  });
+
+  it('falls back to the chat in front only when the notice names none', () => {
+    const desks = bothOpen();
+    expect(spokenIn(desks, { project: PROJECT, conversation: null })).toEqual({
+      project: PROJECT,
+      address: 'chat-b',
+    });
+    expect(spokenIn(desks, { project: PROJECT })).toEqual({ project: PROJECT, address: 'chat-b' });
+    // A notice about no folder at all belongs to nobody.
+    expect(spokenIn(desks, { project: null, conversation: 'chat-a' })).toBeNull();
   });
 });
 
@@ -217,5 +430,45 @@ describe('T53: usage from two runs in one conversation', () => {
     // was not handed another chat's words.
     expect(desk?.turns).toEqual([]);
     expect(desk?.parked['chat-a']?.turns).toHaveLength(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+/** The window's own wiring, read off it: every decision above is made here and
+ *  called there, and a call swapped back to the chat in front is invisible to
+ *  types. */
+describe('the window answers to it', () => {
+  const app = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+
+  it('takes a line back through the conversation the press was made in', () => {
+    expect(app).toContain('tookBackTheLine(current, mine, words)');
+    expect(app).not.toContain('withoutTakenBack');
+  });
+
+  it('files a card through the conversation the notice names', () => {
+    const at = app.indexOf('const owner = spokenIn(current, notice);');
+    expect(at).toBeGreaterThan(-1);
+    // Addressed by that owner, not written into whatever desk is in front.
+    expect(app.slice(at, at + 300)).toContain('changeThread(current, owner');
+  });
+
+  it('lets a reference go nowhere but the chat it was brought into', () => {
+    expect(app).not.toContain('moveScope');
+  });
+
+  /* The first screen draws the composer with no folder open, so its mode chips
+     have to land on the window's own state: read there, and written there. */
+  it('gives the mode chips a home before any conversation exists', () => {
+    expect(app).toContain('const plans = desk?.plans ?? loosePlans;');
+    expect(app).toContain('setLoosePlans(');
+  });
+
+  /* The gate is the conversation's, so opening a folder turns none off. The
+     release that used to be here carried the chat now in front's address with
+     the folder being left, which the shell reads as no conversation named — the
+     project default a new chat starts from. */
+  it('turns no gate off for the folder it has just left', () => {
+    expect(app).not.toContain('holdWrites(false, was)');
   });
 });

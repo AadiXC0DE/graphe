@@ -151,7 +151,6 @@ import {
   advisorScopeWords,
   advisorSettings,
   advisorToolNames,
-  extensionToolNames,
   holdScope,
   letGoScope,
   noScope,
@@ -163,6 +162,7 @@ import {
   type LoadedExtension,
 } from '../advisor';
 import { SUBAGENT_SETTINGS_FILE, artifactsBesideSessions, subagentsLoaded } from './subagents';
+import { GRAPHE_ONLY, apartTools, saysToolConflict } from './tool-conflicts';
 import { idFor } from '../../projects/carried';
 import type { ModelChoice, ThinkingLevel } from '../../lib/ipc';
 
@@ -904,6 +904,13 @@ export type GrapheSession = {
    *  handler that overran may still be running: `stopped` says whether it is
    *  known to have finished. */
   readonly hookOverruns: readonly Overrun[];
+  /** The words a package change under this conversation left behind, or null
+   *  when the add-ons this session holds are the ones that are installed. */
+  readonly activationPending: string | null;
+  /** A package changed while this conversation was open. The words are the ones
+   *  the person is shown; nothing here pretends the change has reached a
+   *  session that was built before it. */
+  markActivationPending(says: string): void;
   /**
    * The notes this conversation would find most relevant, for the standing
    * block the system prompt carries.
@@ -1166,6 +1173,69 @@ async function lookAgainFor(runtime: PiRuntime): Promise<void> {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* A model that answers from a script                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Read by nothing but the real-window suite, which sets it to the address of a
+ *  local server that answers in Pi's own message protocol. Named as a seam, and
+ *  honoured as one: see `registerScriptedModel`. */
+const SCRIPTED_MODEL_ENV = 'GRAPHE_TEST_MODEL';
+
+const SCRIPTED_PROVIDER = 'graphe-scripted';
+const SCRIPTED_MODEL_ID = 'scripted';
+
+/** Whether this copy is a shipping build. Only Electron can say, so the shell
+ *  says it on the way up, and the answer here until it does is yes: a caller
+ *  that never speaks leaves the scripted model off rather than on. */
+let shipped = true;
+
+/** Said once by the shell, at whatever it knows `app.isPackaged` to be. */
+export function notePackagedApp(packaged: boolean): void {
+  shipped = packaged;
+}
+
+/**
+ * The scripted model, when the suite asked for one and this is not a shipped
+ * app.
+ *
+ * It is an ordinary custom provider registered the way Pi's own extension API
+ * registers one, pointed at a server the test wrote and holding a credential
+ * that never leaves this process — so a turn runs the whole real path, session
+ * and Guard and tools and event translation, with only the model replaced. The
+ * variable is the only way in and a packaged app is refused however it is set.
+ */
+async function registerScriptedModel(runtime: PiRuntime): Promise<void> {
+  if (shipped) return;
+  const baseUrl = process.env[SCRIPTED_MODEL_ENV];
+  if (baseUrl === undefined || baseUrl === '') return;
+  runtime.registerProvider(SCRIPTED_PROVIDER, {
+    name: 'Scripted test model',
+    baseUrl,
+    api: 'pi-messages',
+    // Enough auth to compose a provider the window will offer; the credential
+    // below is what makes it read as connected rather than merely present.
+    apiKey: 'scripted',
+    models: [
+      {
+        id: SCRIPTED_MODEL_ID,
+        name: 'Scripted replies',
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200_000,
+        maxTokens: 8_192,
+      },
+    ],
+  });
+  try {
+    await runtime.setRuntimeApiKey(SCRIPTED_PROVIDER, 'scripted');
+  } catch {
+    // Registered and offered, if not marked connected. A suite that gets this
+    // far reads the failure in the assertion that follows, not here.
+  }
+}
+
 /**
  * Where provider credentials are read from.
  *
@@ -1177,17 +1247,22 @@ async function lookAgainFor(runtime: PiRuntime): Promise<void> {
 function runtimeFor(agentDir: string, authPath?: string): Promise<PiRuntime> {
   const already = runtimes.get(agentDir);
   if (already !== undefined) return already;
-  const pending = loadPi().then((pi) =>
-    pi.ModelRuntime.create({
-      authPath: authPath ?? join(agentDir, 'auth.json'),
-      modelsPath: join(agentDir, 'models.json'),
-      // False on purpose, and it is not what "look again" depends on: the
-      // refresh below passes `allowNetwork` itself, which wins over this. So
-      // starting the app can never reach for the catalogue, and only a press
-      // can.
-      allowModelNetwork: false,
-    }),
-  );
+  const pending = loadPi()
+    .then((pi) =>
+      pi.ModelRuntime.create({
+        authPath: authPath ?? join(agentDir, 'auth.json'),
+        modelsPath: join(agentDir, 'models.json'),
+        // False on purpose, and it is not what "look again" depends on: the
+        // refresh below passes `allowNetwork` itself, which wins over this. So
+        // starting the app can never reach for the catalogue, and only a press
+        // can.
+        allowModelNetwork: false,
+      }),
+    )
+    .then(async (runtime) => {
+      await registerScriptedModel(runtime);
+      return runtime;
+    });
   runtimes.set(agentDir, pending);
   // A failure here is a failure of the whole folder's worth of connections;
   // forget it so the next ask tries again rather than inheriting the error.
@@ -1568,8 +1643,46 @@ export async function packageHost(agentDir: string, projectRoot: string) {
     async add(id: string): Promise<void> {
       await manager.installAndPersist(`npm:${id}`);
     },
+    async update(id: string): Promise<void> {
+      await manager.update(`npm:${id}`);
+    },
     async remove(id: string): Promise<void> {
       await manager.removeAndPersist(`npm:${id}`);
+    },
+    /**
+     * Which version is on disk now, out of the package's own manifest.
+     *
+     * Pi's package manager keeps the installed path to itself, and its version
+     * helpers are private, so this reads the manifest of the folder it names.
+     * A version nobody can read is `null` rather than a guess: "installed,
+     * version unknown" is a different sentence from "installed 1.2.3", and the
+     * second one is the one somebody comparing versions needs to be true.
+     */
+    async installed(id: string): Promise<{ version: string | null }> {
+      for (const scope of ['user', 'project'] as const) {
+        const at = manager.getInstalledPath(`npm:${id}`, scope);
+        if (at === undefined) continue;
+        const raw = await readFile(join(at, 'package.json'), 'utf8').catch(() => null);
+        if (raw === null) return { version: null };
+        try {
+          const held = JSON.parse(raw) as { version?: unknown };
+          return { version: typeof held.version === 'string' ? held.version : null };
+        } catch {
+          return { version: null };
+        }
+      }
+      return { version: null };
+    },
+    /** Pi's own progress, put through to the shelf as it happens. */
+    watching(handler: (says: string) => void): void {
+      try {
+        manager.setProgressCallback((event) => {
+          if (typeof event.message !== 'string' || event.message.trim() === '') return;
+          handler(event.message.trim());
+        });
+      } catch {
+        // An installer that cannot report still installs.
+      }
     },
   };
 }
@@ -1782,8 +1895,11 @@ function isAlreadyProcessing(cause: unknown): boolean {
  * never handed to the model — which left the agent spelling its searches as
  * shell commands for the Guard to parse, instead of making the reads they are.
  * Naming the set here also means a Pi upgrade cannot quietly change it.
+ *
+ * It is the same set `tool-conflicts.ts` protects and is imported from there, so
+ * what Graphe registers itself and what an add-on may not take cannot drift.
  */
-const WORKING_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const;
+export const WORKING_TOOLS: readonly string[] = GRAPHE_ONLY;
 
 /**
  * Pi's own system prompt, out of the event that carries it.
@@ -1918,6 +2034,10 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   let unwatched = false;
   /** Whether this sitting did anything worth having notes about. */
   let didSomething = false;
+  /** The words a package change under this conversation left behind, if one
+   *  did. A session holds the add-ons it was built with; only building it again
+   *  changes that, so this is what the reload is for. */
+  let activationPending: string | null = null;
   /** Once a sitting, at most. */
   let settledUp = false;
   /** Whether this sitting has had its first question yet — the moment the most
@@ -2555,7 +2675,27 @@ const MOST_AFTER_SAYINGS = 3;
     for (const event of LIFECYCLE_HOOKS) handlers.delete(event);
     leftOut.push({ where, policy: 'tools-only', card });
   }
-  const extensionTools = extensionToolNames(loadedExtensions);
+  /** Every tool name an add-on wants, and the add-on that wants it. Read off
+   *  the registries the loader has just filled, so no rule here is written
+   *  against a package name. */
+  const wantedBy: { name: string; where: string; of: Map<string, unknown> }[] = [];
+  for (const one of loadedExtensions) {
+    // Pi's `LoadedExtension` does not publish its registry, so the shape this
+    // file reads is narrowed once here rather than cast at every use.
+    const held = one as unknown as {
+      resolvedPath?: string;
+      path?: string;
+      tools?: Map<string, unknown>;
+    };
+    const where = held.resolvedPath ?? held.path ?? '';
+    const tools = held.tools;
+    if (!(tools instanceof Map)) continue;
+    const card = cards.get(where) ?? null;
+    const who = card === null || card.id === '' ? nameFromPath(where) : card.id;
+    for (const name of tools.keys()) {
+      if (typeof name === 'string' && name !== '') wantedBy.push({ name, where: who, of: tools });
+    }
+  }
   /** The advisor's own tools, kept apart because a chip turns them on and off
    *  without rebuilding the conversation. */
   const advisorTools = advisorToolNames(loadedExtensions);
@@ -2900,6 +3040,26 @@ const MOST_AFTER_SAYINGS = 3;
 
   // inUse already defined above (keeps chosen even if stale for helpers)
 
+  /* Two providers can want the same tool name — Graphe's own tools, an add-on
+     somebody installed, a bridge an add-on carries. Pi keeps one definition per
+     name without saying anything, so which one loses used to depend on the
+     order things loaded in. Decided here, before the session is built and while
+     both lists are still in our hands; `tool-conflicts.ts` holds the rule. */
+  const apart = apartTools(
+    [...WORKING_TOOLS, ...customTools.map((tool) => tool.name), boundShell.name],
+    wantedBy,
+  );
+  for (const one of apart.conflicts) {
+    options.onEvent({ type: 'notice', what: saysToolConflict(one) });
+  }
+  // The name comes off the registry of the add-on that actually lost it — its
+  // claim's position, because two add-ons can read the same on screen. Getting
+  // this wrong hands the model the tool of the add-on that gave way: for `bash`,
+  // somebody else's definition under the name the Guard is attached to.
+  for (const one of apart.took) wantedBy[one.at]?.of.delete(one.name);
+  const nameKept = new Set(apart.mine);
+  const ourTools = customTools.filter((tool) => nameKept.has(tool.name));
+
   // The manager stays in our hands after the session is built, because the read
   // side of a resumed conversation needs the same manager that will keep
   // writing to it. `continueRecent` resumes the newest session for this folder,
@@ -2933,11 +3093,13 @@ const MOST_AFTER_SAYINGS = 3;
         resourceLoader: loader,
         // Naming `tools` at all switches Pi from "the four defaults plus every
         // custom tool" to "exactly this list", so ours have to be in it or they
-        // vanish. Taken off the tools themselves rather than written twice.
-        tools: [...WORKING_TOOLS, ...customTools.map((tool) => tool.name), ...extensionTools],
+        // vanish. Taken off the tools themselves rather than written twice, and
+        // only the ones that kept their name: a name two providers wanted is
+        // registered once, and the loser is not in the list at all.
+        tools: [...WORKING_TOOLS, ...ourTools.map((tool) => tool.name), ...apart.theirs],
         // Cast because Pi's own bash definition is narrower in its schema than
         // the list it goes into; Pi assigns it the same way internally.
-        customTools: [...customTools, boundShell as (typeof customTools)[number]],
+        customTools: [...ourTools, boundShell as (typeof customTools)[number]],
         modelRuntime: runtime,
         model,
         ...(options.thinking === undefined ? {} : { thinkingLevel: options.thinking }),
@@ -3643,6 +3805,19 @@ const MOST_AFTER_SAYINGS = 3;
 
     get hookOverruns(): readonly Overrun[] {
       return recentOverruns();
+    },
+
+    /** What a package change under this conversation said, or null. Read by the
+     *  shell to tell an installed add-on from an active one. */
+    get activationPending(): string | null {
+      return activationPending;
+    },
+
+    /** A package changed while this conversation was open. The words are the
+     *  ones the person is shown; nothing here pretends the change has already
+     *  reached a session that was built before it. */
+    markActivationPending(says: string): void {
+      activationPending = says;
     },
 
     async recall(about: string, most: number): Promise<readonly { content: string }[]> {

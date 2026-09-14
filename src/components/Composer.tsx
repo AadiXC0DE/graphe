@@ -86,6 +86,15 @@ type Props = {
    * have.
    */
   draft?: string;
+  /**
+   * The box's own words on their way back to the conversation they belong to.
+   *
+   * Called when the box moves to another conversation, with what was in it,
+   * and when a send takes the sentence out. The caller binds the conversation
+   * at render, so a write that lands after a switch still goes to the chat the
+   * sentence was written in rather than to whichever one is on screen.
+   */
+  onDraftChange?: (text: string) => void;
   /** The project this box belongs to. A half-written message is kept against
    *  it, so a reload, a crash or a switch to another conversation and back
    *  leaves the sentence where it was. Absent in the gallery, and then nothing
@@ -241,6 +250,7 @@ export default function Composer({
   attachments = [],
   onAttachmentsChange,
   draft,
+  onDraftChange,
   project,
   conversation,
   connection,
@@ -404,26 +414,47 @@ export default function Composer({
   valueNow.current = value;
 
   /* Put back what was being written here, and hand it on when the box moves to
-     another conversation or the window goes away. */
+     another conversation or the window goes away. The caller's `onDraftChange`
+     is the one bound to this conversation, so a write that lands after a
+     switch still goes to the chat the sentence was written in. */
   useEffect(() => {
     if (keptAt === null) return;
     const kept = keptDraft(keptAt);
     setValue(kept ?? '');
     requestAnimationFrame(() => resize(areaRef.current));
-    return () => keepDraft(keptAt, valueNow.current);
+    return () => {
+      keepDraft(keptAt, valueNow.current);
+      onDraftChange?.(valueNow.current);
+    };
+    // The callback is the one bound when the box arrived here, which is the
+    // conversation being left. Depending on it would re-seed the box on every
+    // render the window makes, and take the cursor with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptAt]);
 
-  /* Written down once the typing pauses rather than on every keystroke. */
+  /* Written down once the typing pauses rather than on every keystroke, and
+     reported to the conversation at the same moment: a send that comes back
+     refused is put back into the box the conversation holds, and the words
+     typed while the send was in flight have to be there for it to put back
+     behind them. The callback is the one bound to this conversation, so the
+     report goes to the chat the sentence was written in. */
   useEffect(() => {
     if (keptAt === null) return;
-    const timer = setTimeout(() => keepDraft(keptAt, value), KEEP_AFTER);
+    const timer = setTimeout(() => {
+      keepDraft(keptAt, value);
+      onDraftChange?.(value);
+    }, KEEP_AFTER);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptAt, value]);
 
   /* Seeded from outside, with the cursor left at the end of it so the next
-     keystroke continues the sentence rather than landing in the middle of it. */
+     keystroke continues the sentence rather than landing in the middle of it.
+     Nothing to do when the sentence handed in is the one already in the box:
+     that is the conversation reporting back what was just typed, and seeding it
+     would move the cursor out from under somebody writing. */
   useEffect(() => {
-    if (draft === undefined || draft === '') return;
+    if (draft === undefined || draft === '' || draft === valueNow.current) return;
     setValue(draft);
     const field = areaRef.current;
     if (field === null) return;
@@ -514,6 +545,9 @@ export default function Composer({
     }
     setDrawn(null);
     setValue('');
+    // The conversation's own copy goes the same way, so a switch back does not
+    // find the sentence it has just sent waiting in the box.
+    onDraftChange?.('');
     setRefused(null);
     if (areaRef.current) areaRef.current.style.height = 'auto';
   };

@@ -37,3 +37,6 @@ site/assets/shots/*
 # Subagent scratch: what a helper was asked, what it said, its transcript.
 # Runtime state, not project config — .pi/hooks.json and .pi/mcp.json stay.
 .pi/subagents/
+
+# Local architecture audit and implementation plan.
+/docs/graphe-stabilization-plan-2026-09-13.md

@@ -107,6 +107,7 @@ import {
   type WorkspaceFacts,
   type ReviewOpened,
   type ReviewVerdict,
+  type PreviewFrame,
 } from '../src/lib/ipc';
 
 /** Refused before it reaches the wire. The shape matches everything else the
@@ -430,8 +431,8 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.watchBrowser, on, named(where)) as Promise<Result<boolean>>;
   },
 
-  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void {
-    const hear = (_event: unknown, frame: { project: string; bytes: string }): void => listener(frame);
+  onBrowserFrame(listener: (frame: PreviewFrame) => void): () => void {
+    const hear = (_event: unknown, frame: PreviewFrame): void => listener(frame);
     ipcRenderer.on(CHANNEL.browserFrame, hear);
     return () => ipcRenderer.removeListener(CHANNEL.browserFrame, hear);
   },
@@ -1116,7 +1117,8 @@ const api: GrapheApi = {
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
-    again?: boolean,
+    again: boolean,
+    where: Where,
   ): Promise<Result<null>> {
     const fine =
       bounds === null ||
@@ -1127,23 +1129,29 @@ const api: GrapheApi = {
     if ((address !== null && typeof address !== 'string') || !fine) {
       return Promise.resolve(refuse<null>('I could not tell where to put the page.'));
     }
-    return ipcRenderer.invoke(CHANNEL.pageAt, address, bounds, again === true) as Promise<Result<null>>;
+    return ipcRenderer.invoke(
+      CHANNEL.pageAt,
+      address,
+      bounds,
+      again === true,
+      named(where),
+    ) as Promise<Result<null>>;
   },
 
-  pageHidden(hidden: boolean): Promise<Result<null>> {
+  pageHidden(hidden: boolean, where: Where): Promise<Result<null>> {
     if (typeof hidden !== 'boolean') {
       return Promise.resolve(refuse<null>('I could not tell whether that was on or off.'));
     }
-    return ipcRenderer.invoke(CHANNEL.pageHidden, hidden) as Promise<Result<null>>;
+    return ipcRenderer.invoke(CHANNEL.pageHidden, hidden, named(where)) as Promise<Result<null>>;
   },
 
-  watchStart(says?: string): Promise<Result<null>> {
+  watchStart(says: string | undefined, where: Where): Promise<Result<null>> {
     const words = typeof says === 'string' ? says : undefined;
-    return ipcRenderer.invoke(CHANNEL.watchStart, words) as Promise<Result<null>>;
+    return ipcRenderer.invoke(CHANNEL.watchStart, words, named(where)) as Promise<Result<null>>;
   },
 
-  watchStop(): Promise<Result<Recording | null>> {
-    return ipcRenderer.invoke(CHANNEL.watchStop) as Promise<Result<Recording | null>>;
+  watchStop(where: Where): Promise<Result<Recording | null>> {
+    return ipcRenderer.invoke(CHANNEL.watchStop, named(where)) as Promise<Result<Recording | null>>;
   },
 
   spendLimit(): Promise<Result<SpendLimit | null>> {

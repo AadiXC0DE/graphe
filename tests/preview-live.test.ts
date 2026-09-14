@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { liveFrames, type Frame } from '../src/preview/live';
+import { liveFrames, type Frame, type LiveFrames } from '../src/preview/live';
 
 /** Every ask the shell would have heard, in order. */
 function asking(): { asked: [string, boolean][]; watch: (project: string, on: boolean) => void } {
@@ -19,7 +19,15 @@ function asking(): { asked: [string, boolean][]; watch: (project: string, on: bo
   return { asked, watch: (project, on) => asked.push([project, on]) };
 }
 
-const picture = (project: string): Frame => ({ project, bytes: 'bytes' });
+/** A picture of a preview, in the shape the shell sends: it says which preview
+ *  it is of, and the epoch it was taken in. */
+const picture = (project: string, over: Partial<Frame> = {}): Frame => ({
+  preview: `preview-${project}`,
+  project,
+  epoch: 1,
+  bytes: 'bytes',
+  ...over,
+});
 
 describe('looking at a browser', () => {
   it('asks the shell once, however many things are looking', () => {
@@ -90,6 +98,71 @@ describe('looking at a browser', () => {
       ['/projects/one', true],
       ['/projects/one', false],
     ]);
+  });
+});
+
+describe('a picture of something the window is not showing', () => {
+  /** The pane is open, and the shell's first picture has said what is being
+   *  looked at. */
+  function watching(): { live: LiveFrames; seen: Frame[] } {
+    const shell = asking();
+    const live = liveFrames({ watch: shell.watch });
+    const seen: Frame[] = [];
+    live.subscribe('/projects/one', (frame) => seen.push(frame));
+    live.deliver(picture('/projects/one'));
+    expect(seen.map((one) => one.bytes)).toEqual(['bytes']);
+    return { live, seen };
+  }
+
+  it('is dropped rather than drawn as the one now', () => {
+    const { live, seen } = watching();
+    // Another preview, arriving after the window moved on. It is for the
+    // project the pane still has open, so nothing else would stop it.
+    live.deliver(picture('/projects/one', { preview: 'somebody-else', bytes: 'late' }));
+    expect(seen.map((one) => one.bytes)).toEqual(['bytes']);
+  });
+
+  it('is dropped when it is from an earlier epoch of the same preview', () => {
+    const { live, seen } = watching();
+    // A reload: the same preview, the next epoch. That one is the window's.
+    live.deliver(picture('/projects/one', { epoch: 2, bytes: 'now' }));
+    expect(seen.map((one) => one.bytes)).toEqual(['bytes', 'now']);
+    // And the picture taken before it, arriving after: a view of the page as it
+    // was, which is not what the pane is showing.
+    live.deliver(picture('/projects/one', { epoch: 1, bytes: 'before' }));
+    expect(seen.map((one) => one.bytes)).toEqual(['bytes', 'now']);
+  });
+
+  it('cannot be drawn at all when it does not say what it is of', () => {
+    const shell = asking();
+    const live = liveFrames({ watch: shell.watch });
+    const seen: Frame[] = [];
+    live.subscribe('/projects/one', (frame) => seen.push(frame));
+    // A picture with no preview or no epoch is one nothing can be matched
+    // against, and guessing is how the wrong folder gets drawn.
+    live.deliver(picture('/projects/one', { preview: '' }));
+    live.deliver(picture('/projects/one', { epoch: 1.5 }));
+    expect(seen).toHaveLength(0);
+    // Nothing was adopted either, so the first real one is still the first.
+    live.deliver(picture('/projects/one', { preview: 'real' }));
+    expect(seen).toHaveLength(1);
+  });
+
+  it('is adopted again when the pane is opened again', () => {
+    const shell = asking();
+    const live = liveFrames({ watch: shell.watch });
+    const first: Frame[] = [];
+    const stop = live.subscribe('/projects/one', (frame) => first.push(frame));
+    live.deliver(picture('/projects/one', { preview: 'before' }));
+    stop();
+
+    // Somebody closed the pane and opened it again, and by then the shell is
+    // showing a different preview — started over, or a different browse. What
+    // the last pane was showing is not held against this one.
+    const second: Frame[] = [];
+    live.subscribe('/projects/one', (frame) => second.push(frame));
+    live.deliver(picture('/projects/one', { preview: 'after', epoch: 7 }));
+    expect(second).toHaveLength(1);
   });
 });
 

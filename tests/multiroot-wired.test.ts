@@ -82,7 +82,12 @@ describe('what reads and what refuses', () => {
     // Matched against what was found on disk. A name off the wire can only ever
     // be one of the projects already there.
     expect(block).toContain('childNamed(open.held.childRepos, where.repo)');
-    expect(block).toContain('checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path');
+    // In the order a call means them, and the folder in front only when it named
+    // nothing that has a folder of its own.
+    expect(block).toContain('checkoutEntryFor(open, where)?.folder ??');
+    expect(block).toContain('childRepoFor(open, where)?.path ??');
+    expect(block).toContain('recordedFolderNow(open, where) ??');
+    expect(block).toContain('open.path');
   });
 
   it('keeps each project’s saved work its own, opened once and remembered', () => {

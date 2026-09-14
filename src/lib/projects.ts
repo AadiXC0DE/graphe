@@ -27,6 +27,7 @@
  */
 
 import type { Attachment } from '../components/Attachments';
+import type { Plans } from '../components/HowToWork';
 import type { Recording } from '../diff/flow';
 import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
@@ -90,10 +91,17 @@ export type Desk = {
   /** What this sitting has cost. Null until there is a first number — the meter
    *  appears when it has something to say and then stays. */
   spent: SpendView | null;
-  /** What has been brought in and not yet said. */
+  /** What this conversation has brought in and not yet said. Belongs to it:
+   *  a fresh chat opens with an empty box, whatever the one before it held. */
   attachments: readonly Attachment[];
-  /** What has been brought in *and said* — the story of the work. */
+  /** What this conversation brought in *and said* — the story of its work. */
   references: readonly Reference[];
+  /** The sentence half-written here. Parked and restored with the rest, so
+   *  coming back to a chat finds it as it was left. */
+  draft: string;
+  /** How this conversation's next message goes out. A chat left in research
+   *  or plan does not set the mode for its neighbours. */
+  plans: Plans;
   /** The git state of the project, as the shell last reported it. Null until
    *  the overview has been asked for. */
   overview: Overview | null;
@@ -170,8 +178,8 @@ export type Desk = {
 /** A conversation this project has open but is not showing.
  *
  * Only what belongs to a conversation rather than to the project: what was said
- * in it. The versions, the spend and the pictures are the project's, and are
- * shared.
+ * in it, what it brought in, the sentence being written and the mode it is
+ * working in. The versions and the spend are the project's.
  */
 export type Parked = {
   turns: readonly Turn[];
@@ -180,7 +188,162 @@ export type Parked = {
   counted?: number;
   /** Whether a turn is in flight here. Same reason as `Desk.busy`. */
   busy?: boolean;
+  /** The box: what this conversation brought in and has not sent. */
+  attachments?: readonly Attachment[];
+  /** What it brought in and said. */
+  references?: readonly Reference[];
+  /** The sentence half-written in it. */
+  draft?: string;
+  /** How its next message goes out. */
+  plans?: Plans;
 };
+
+/** Which conversation a write belongs to. Every one of them is addressed this
+ *  way, so a change that lands after somebody moved on still goes where it was
+ *  meant to. */
+export type Owned = { project: string; address: string | null };
+
+/** Nothing parked here, in the shape the rest of the file reads. */
+const NOTHING_YET: Parked = {
+  turns: [],
+  doing: null,
+  counted: 0,
+  busy: false,
+  attachments: [],
+  references: [],
+  draft: '',
+  plans: 'auto',
+};
+
+/**
+ * One conversation as this project holds it: the one in front, one parked, or
+ * an empty one this project has not had.
+ *
+ * The front conversation's state is not stored twice. It is the desk's own
+ * fields, read as a conversation, so there is no second copy to fall out of
+ * step with what is on screen.
+ */
+export function conversationIn(desk: Desk, address: string | null): Parked {
+  if (address !== null && address === desk.address) return frontOf(desk);
+  if (address !== null) return desk.parked[address] ?? NOTHING_YET;
+  // No address at all is the conversation nobody has named yet, which is the
+  // one on screen before its session exists.
+  return desk.address === null ? frontOf(desk) : NOTHING_YET;
+}
+
+function frontOf(desk: Desk): Parked {
+  return {
+    turns: desk.turns,
+    doing: desk.doing,
+    counted: desk.counted,
+    busy: desk.busy,
+    attachments: desk.attachments,
+    references: desk.references,
+    draft: desk.draft,
+    plans: desk.plans,
+  };
+}
+
+/**
+ * Change the conversation named, wherever it is in the row.
+ *
+ * The front one is the desk's own fields; any other is written back into
+ * `parked`. A conversation this project does not have changes nothing — an
+ * answer arriving for a chat that has been closed is not a reason to open it
+ * again.
+ */
+export function changeThread(desks: Desks, owner: Owned, change: (one: Parked) => Parked): Desks {
+  return changeDesk(desks, owner.project, (desk) => {
+    const address = owner.address;
+    const here = address === null ? desk.address === null : address === desk.address;
+    if (here) {
+      const was = frontOf(desk);
+      const next = change(was);
+      if (next === was) return desk;
+      return { ...desk, ...asHeld(next) };
+    }
+    // An unnamed conversation that is not the one in front is one this project
+    // has not started yet, and a write for it has nowhere to go.
+    if (address === null) return desk;
+    const was = desk.parked[address];
+    if (was === undefined) return desk;
+    const next = change(was);
+    if (next === was) return desk;
+    return { ...desk, parked: { ...desk.parked, [address]: next } };
+  });
+}
+
+/**
+ * Which conversation a notice was spoken in: the one it names, or — when it
+ * names none — the conversation in front of the project it is about, which is
+ * where `receive` puts that notice's words. Null for a notice with no project
+ * at all, which belongs to nobody.
+ *
+ * A run carries on in the background while somebody reads another chat, so a
+ * card written on the strength of a notice goes where the notice's words went,
+ * never into whatever happens to be in front.
+ */
+export function spokenIn(
+  desks: Desks,
+  notice: { project: string | null; conversation?: string | null },
+): Owned | null {
+  if (notice.project === null) return null;
+  return {
+    project: notice.project,
+    address: notice.conversation ?? desks.byPath[notice.project]?.address ?? null,
+  };
+}
+
+/** A conversation's own fields in the shape the desk keeps them, so one place
+ *  decides what "the conversation in front" means. */
+function asHeld(one: Parked): Pick<
+  Desk,
+  'turns' | 'doing' | 'counted' | 'busy' | 'attachments' | 'references' | 'draft' | 'plans'
+> {
+  return {
+    turns: one.turns,
+    doing: one.doing ?? null,
+    counted: one.counted ?? 0,
+    busy: one.busy ?? false,
+    attachments: one.attachments ?? [],
+    references: one.references ?? [],
+    draft: one.draft ?? '',
+    plans: one.plans ?? 'auto',
+  };
+}
+
+/**
+ * Take out of the box what has just been sent, and nothing else.
+ *
+ * `accepted` is what was in the box when the send started, taken by identity:
+ * the same picture attached again is a new revision and is not this send's to
+ * take. Anything added while the send was in flight stays, and so does
+ * everything in another conversation's box — a late upload for one chat cannot
+ * empty the box of the chat somebody has since switched to.
+ */
+export function tookTheBox(desks: Desks, owner: Owned, accepted: readonly Attachment[]): Desks {
+  if (accepted.length === 0) return desks;
+  return changeThread(desks, owner, (one) => {
+    const staged = one.attachments ?? [];
+    const left = staged.filter((each) => !accepted.includes(each));
+    return left.length === staged.length ? one : { ...one, attachments: left };
+  });
+}
+
+/**
+ * The sentence of a send that did not go, back in the box it came from.
+ *
+ * Whatever is in the box now stays, and stays first: somebody may have started
+ * the next message while the upload was still going, and that text is not this
+ * failure's to throw away. Another conversation's box is not touched at all.
+ */
+export function putBackTheBox(desks: Desks, owner: Owned, said: string): Desks {
+  if (said.trim() === '') return desks;
+  return changeThread(desks, owner, (one) => {
+    const was = one.draft ?? '';
+    return { ...one, draft: was.trim() === '' ? said : intoTheBox(was, [said]) };
+  });
+}
 
 /** A run of states somebody recorded on the page, and the project it was
  *  recorded in. */
@@ -255,6 +418,25 @@ export function intoTheBox(draft: string, words: readonly string[]): string {
   return draft.trim() === '' ? back : `${draft}\n\n${back}`;
 }
 
+/**
+ * What came back out of the line, out of the conversation that asked for it and
+ * into its box.
+ *
+ * Addressed at the press. Taking a line back is a round trip through the shell,
+ * and by the time it answers somebody may be reading another chat: the words
+ * come off the thread they were shown on, and go into the box they came from,
+ * in one write, wherever that conversation now is in the row.
+ */
+export function tookBackTheLine(desks: Desks, owner: Owned, words: readonly string[]): Desks {
+  const back = words.filter((one) => one.trim() !== '');
+  if (back.length === 0) return desks;
+  return changeThread(desks, owner, (one) => ({
+    ...one,
+    turns: withoutTakenBack(one.turns, back),
+    draft: intoTheBox(one.draft ?? '', back),
+  }));
+}
+
 /** Every desk, and which one is in front. */
 export type Desks = {
   readonly current: string | null;
@@ -271,6 +453,8 @@ function blankDesk(path: string, name: string): Desk {
     spent: null,
     attachments: [],
     references: [],
+    draft: '',
+    plans: 'auto',
     overview: null,
     versions: [],
     repoVersions: {},
@@ -325,22 +509,18 @@ export function showThread(
         : Object.fromEntries(Object.entries(desk.parked).filter(([one]) => one !== address));
     return {
       ...desk,
-      turns: arriving?.turns ?? wanted?.turns ?? [],
-      doing: wanted?.doing ?? null,
-      counted: wanted?.counted ?? 0,
-      busy: wanted?.busy ?? false,
+      // The conversation coming forward arrives whole: what was said in it, what
+      // it brought in, the sentence being written and the mode it works in. A
+      // fresh chat has none of these, which is the whole point of them being
+      // here rather than on the project.
+      ...asHeld({ ...(wanted ?? NOTHING_YET), turns: arriving?.turns ?? wanted?.turns ?? [] }),
       address,
       parked:
         desk.address === null || desk.address === address
           ? rest
           : {
               ...rest,
-              [desk.address]: {
-                turns: desk.turns,
-                doing: desk.doing,
-                counted: desk.counted,
-                busy: desk.busy,
-              },
+              [desk.address]: frontOf(desk),
             },
       // A conversation nobody has opened here goes on the end of the row rather
       // than being left out of it. A tab missing is worse than one out of place.

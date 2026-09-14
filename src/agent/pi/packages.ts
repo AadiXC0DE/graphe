@@ -9,7 +9,16 @@
  * spawn a process by accident.
  */
 
+import { oneAtATime, type PackageChange, type PackageProgress } from './package-lifecycle';
 import { REACHABLE, type Reach } from './reach';
+
+export {
+  RELOAD_TO_ACTIVATE,
+  RELOAD_TO_LET_GO,
+  reloadWords,
+  type PackageChange,
+  type PackageProgress,
+} from './package-lifecycle';
 
 export {
   REACHABLE,
@@ -286,19 +295,35 @@ export function everything(
  * `id` is the catalogue's own name and nothing else — no prefix, no version.
  * Whoever implements this owns the spelling the package manager wants, so the
  * vocabulary of one particular installer never reaches the rest of the app.
+ *
+ * The three below are what a change needs to be reported rather than merely
+ * made. A host that cannot say what version is on disk still installs: the
+ * record then says the change happened without naming a version, which is the
+ * honest thing to write down.
  */
 export type PackageHost = {
   search(term: string): Promise<unknown>;
   list(): Promise<unknown>;
   add(id: string): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Install the newest of one that is already here. */
+  update?(id: string): Promise<void>;
+  /** What is on disk for this id now, and which version. */
+  installed?(id: string): Promise<{ version: string | null }>;
+  /** The installer's own progress, on its way past, as one line at a time. */
+  watching?(handler: (says: string) => void): void;
 };
 
 export type Shelf = {
   browse(term: string): Promise<readonly Pack[]>;
   mine(): Promise<readonly Pack[]>;
-  add(id: string): Promise<{ ok: true } | { ok: false; why: string }>;
-  remove(id: string): Promise<void>;
+  /** A change is reported with what it replaced, because "installed" without a
+   *  version is not enough to tell an update from a first install. */
+  add(id: string): Promise<{ ok: true; change: PackageChange } | { ok: false; why: string }>;
+  update(id: string): Promise<{ ok: true; change: PackageChange } | { ok: false; why: string }>;
+  remove(id: string): Promise<PackageChange>;
+  /** Follow what is happening, in sentences. Returns the way to stop. */
+  watching(handler: (progress: PackageProgress) => void): () => void;
 };
 
 /** npm's own rule for a name, which is what the catalogue holds. */
@@ -347,6 +372,44 @@ const COULD_NOT = {
  *  `host`. Every failure leaves as a sentence somebody can act on. */
 export function packageShelf(host: PackageHost): Shelf {
   const alreadyHere = async (): Promise<ReadonlySet<string>> => new Set(installed(await host.list()));
+  /** One change at a time, however many presses arrive at once. */
+  const inTurn = oneAtATime();
+  const watchers = new Set<(progress: PackageProgress) => void>();
+  const say = (progress: PackageProgress): void => {
+    for (const watch of watchers) watch(progress);
+  };
+  // The installer's own progress, in the same channel as ours, so the screen
+  // has one thing to follow rather than two.
+  host.watching?.((says) => say({ says, id: '', doing: 'install', done: false }));
+
+  /** What is installed for this id, as far as anybody can say. */
+  async function versionOf(id: string): Promise<{ version: string | null } | null> {
+    if (host.installed === undefined) return null;
+    try {
+      return await host.installed(id);
+    } catch {
+      // A version nobody can read is not a reason to refuse the change.
+      return null;
+    }
+  }
+
+  /**
+   * One change, with the version that was there before it and the one that is
+   * there after, and a line said at each end. Serialized even when two people
+   * press at the same moment: two installs into one folder at once is how a
+   * half-populated `node_modules` gets written down as a card.
+   */
+  async function change(id: string, doing: PackageChange['doing'], work: () => Promise<void>): Promise<PackageChange> {
+    return inTurn(async () => {
+      const before = await versionOf(id);
+      say({ says: saysDoing(doing, id), id, doing, done: false });
+      await work();
+      const after = doing === 'remove' ? null : await versionOf(id);
+      const change: PackageChange = { id, doing, before, after };
+      say({ says: saysChanged(change), id, doing, done: true });
+      return change;
+    });
+  }
 
   return {
     async browse(term: string): Promise<readonly Pack[]> {
@@ -396,26 +459,75 @@ export function packageShelf(host: PackageHost): Shelf {
         .sort(byWorth);
     },
 
-    async add(id: string): Promise<{ ok: true } | { ok: false; why: string }> {
-      const wanted = id.trim();
-      if (wanted === '' || wanted.length > 214 || !PLAUSIBLE_ID.test(wanted)) {
-        return { ok: false, why: 'That is not something I know how to add.' };
-      }
+    async add(id: string): Promise<{ ok: true; change: PackageChange } | { ok: false; why: string }> {
+      const wanted = plausible(id);
+      if (wanted === null) return { ok: false, why: 'That is not something I know how to add.' };
       try {
-        await host.add(wanted);
-        return { ok: true };
+        return { ok: true, change: await change(wanted, 'install', () => host.add(wanted)) };
       } catch (cause) {
         return { ok: false, why: whyItFailed(cause, COULD_NOT.add) };
       }
     },
 
-    async remove(id: string): Promise<void> {
+    async update(id: string): Promise<{ ok: true; change: PackageChange } | { ok: false; why: string }> {
+      const wanted = plausible(id);
+      if (wanted === null) return { ok: false, why: 'That is not something I know how to add.' };
+      if (host.update === undefined) {
+        return { ok: false, why: 'This copy of the app cannot install a newer one of these.' };
+      }
       try {
-        await host.remove(id.trim());
+        return { ok: true, change: await change(wanted, 'update', () => host.update!(wanted)) };
+      } catch (cause) {
+        return { ok: false, why: whyItFailed(cause, COULD_NOT.add) };
+      }
+    },
+
+    async remove(id: string): Promise<PackageChange> {
+      const wanted = id.trim();
+      try {
+        return await change(wanted, 'remove', () => host.remove(wanted));
       } catch {
         // Nothing useful to say: the shelf is read again straight after, and
         // one that is still listed is its own report.
+        return { id: wanted, doing: 'remove', before: null, after: null };
       }
     },
+
+    watching(handler: (progress: PackageProgress) => void): () => void {
+      watchers.add(handler);
+      return () => {
+        watchers.delete(handler);
+      };
+    },
   };
+}
+
+/** A catalogue id, or nothing. npm's own rule, which is what the catalogue
+ *  holds; anything else is not something to hand an installer. */
+function plausible(id: string): string | null {
+  const wanted = id.trim();
+  if (wanted === '' || wanted.length > 214 || !PLAUSIBLE_ID.test(wanted)) return null;
+  return wanted;
+}
+
+/** What is happening, in one line. Never a spinner without a sentence. */
+function saysDoing(doing: PackageChange['doing'], id: string): string {
+  if (doing === 'install') return `Adding ${nameOf(id)}…`;
+  if (doing === 'update') return `Updating ${nameOf(id)}…`;
+  return `Removing ${nameOf(id)}…`;
+}
+
+/** What happened, with the version where one is known: "added" on its own
+ *  cannot tell an update from a first install, and that is the question
+ *  somebody asking about a version is asking. */
+function saysChanged(change: PackageChange): string {
+  const name = nameOf(change.id);
+  const was = change.before?.version ?? null;
+  const now = change.after?.version ?? null;
+  if (change.doing === 'remove') return was === null ? `Removed ${name}.` : `Removed ${name} ${was}.`;
+  if (change.doing === 'update') {
+    if (was === null) return now === null ? `Updated ${name}.` : `Updated ${name} to ${now}.`;
+    return now === null ? `Updated ${name}.` : `Updated ${name} from ${was} to ${now}.`;
+  }
+  return now === null ? `Added ${name}.` : `Added ${name} ${now}.`;
 }

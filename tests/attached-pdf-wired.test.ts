@@ -40,7 +40,9 @@ describe('a PDF the person attached', () => {
      is only held back for the picture that is actually being refused. */
   it('is not held back by a model that cannot read pictures', () => {
     expect(APP).toContain('const held = blind && inTheBox.some((one) => one.kind === "image")');
-    expect(APP).toContain('if (inTheBox.length > 0 && !held) emptyTheBox()');
+    // Taken once the shell has the message, and only from the conversation that
+    // sent it: a send that comes back refused leaves the box as it was.
+    expect(APP).toContain('if (!held) emptyTheBox(mine, inTheBox);');
   });
 
   it('survives the wire, which used to keep pictures and nothing else', () => {

@@ -16,6 +16,7 @@ import {
   installed,
   packageShelf,
   readCatalog,
+  reloadWords,
   type PackageHost,
 } from '../src/agent/pi/packages';
 import { cardFrom } from '../src/agent/pi/extension-probe';
@@ -520,13 +521,14 @@ describe('packageShelf.mine', () => {
 describe('packageShelf.add', () => {
   it('installs it and says so', async () => {
     const host = fakeHost();
-    expect(await packageShelf(host).add('pi-lens')).toEqual({ ok: true });
+    const answer = await packageShelf(host).add('pi-lens');
+    expect(answer.ok).toBe(true);
     expect(host.add).toHaveBeenCalledWith('pi-lens');
   });
 
   it('accepts a scoped name, and trims what was typed', async () => {
     const host = fakeHost();
-    expect(await packageShelf(host).add('  @studio/pi-copy-review  ')).toEqual({ ok: true });
+    expect((await packageShelf(host).add('  @studio/pi-copy-review  ')).ok).toBe(true);
     expect(host.add).toHaveBeenCalledWith('@studio/pi-copy-review');
   });
 
@@ -600,6 +602,176 @@ describe('packageShelf.remove', () => {
         },
       }),
     );
-    await expect(shelf.remove('pi-lens')).resolves.toBeUndefined();
+    await expect(shelf.remove('pi-lens')).resolves.toEqual({
+      id: 'pi-lens',
+      doing: 'remove',
+      before: null,
+      after: null,
+    });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* A change, recorded                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Let every promise that can settle, settle. Nothing here is on a clock: the
+ *  question is the order work happens in, not how long it takes. */
+async function flush(): Promise<void> {
+  for (let at = 0; at < 8; at += 1) await Promise.resolve();
+}
+
+/** A host that knows what version is on disk, and lets each step be watched. */
+function versionedHost(versions: Record<string, string>, overrides: Partial<PackageHost> = {}): PackageHost {
+  return fakeHost({
+    add: vi.fn(async (id: string) => {
+      versions[id] = '2.0.0';
+    }),
+    update: vi.fn(async (id: string) => {
+      versions[id] = '3.0.0';
+    }),
+    remove: vi.fn(async (id: string) => {
+      delete versions[id];
+    }),
+    installed: vi.fn(async (id: string) =>
+      versions[id] === undefined ? { version: null } : { version: versions[id]! },
+    ),
+    ...overrides,
+  });
+}
+
+describe('a change to what is installed', () => {
+  it('records what was there before it and what is there after', async () => {
+    const host = versionedHost({ 'pi-lens': '1.4.2' });
+    const answer = await packageShelf(host).add('pi-lens');
+
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.change).toEqual({
+      id: 'pi-lens',
+      doing: 'install',
+      before: { version: '1.4.2' },
+      after: { version: '2.0.0' },
+    });
+  });
+
+  it('says the version, because added on its own cannot tell an update from a first install', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({}));
+    shelf.watching((progress) => said.push(progress.says));
+
+    await shelf.add('pi-lens');
+    expect(said).toEqual(['Adding Lens…', 'Added Lens 2.0.0.']);
+  });
+
+  it('says what an update moved from and to', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({ 'pi-lens': '1.4.2' }));
+    shelf.watching((progress) => said.push(progress.says));
+
+    const answer = await shelf.update('pi-lens');
+    expect(answer.ok).toBe(true);
+    expect(said).toEqual(['Updating Lens…', 'Updated Lens from 1.4.2 to 3.0.0.']);
+  });
+
+  it('runs one at a time, in the order they were asked for', async () => {
+    const running: string[] = [];
+    const open: (() => void)[] = [];
+    const host = versionedHost({}, {
+      add: vi.fn(async (id: string) => {
+        running.push(`start ${id}`);
+        const { promise, resolve } = Promise.withResolvers<void>();
+        open.push(() => {
+          running.push(`end ${id}`);
+          resolve();
+        });
+        return promise;
+      }),
+      installed: vi.fn(async () => ({ version: null })),
+    });
+    const shelf = packageShelf(host);
+
+    const first = shelf.add('pi-one');
+    const second = shelf.add('pi-two');
+    // Nothing of the second one starts while the first is still going: two
+    // installs into one folder at once is a half-populated node_modules.
+    await flush();
+    expect(running).toEqual(['start pi-one']);
+    expect(open).toHaveLength(1);
+
+    open[0]?.();
+    await first;
+    await flush();
+    expect(running).toEqual(['start pi-one', 'end pi-one', 'start pi-two']);
+    open[1]?.();
+    await second;
+    expect(running).toEqual(['start pi-one', 'end pi-one', 'start pi-two', 'end pi-two']);
+  });
+
+  it('does not let a failed one stop the next', async () => {
+    const host = versionedHost({}, {
+      add: vi.fn(async (id: string) => {
+        if (id === 'pi-broken') throw new Error('npm error code E404');
+        return undefined;
+      }),
+    });
+    const shelf = packageShelf(host);
+
+    const broken = await shelf.add('pi-broken');
+    expect(broken).toEqual({ ok: false, why: 'There is nothing by that name to add.' });
+    expect((await shelf.add('pi-fine')).ok).toBe(true);
+  });
+
+  it('says the change happened even when nobody can name the version', async () => {
+    const said: string[] = [];
+    // A host from before this file knew about versions: it installs and cannot
+    // say what landed.
+    const shelf = packageShelf(fakeHost());
+    shelf.watching((progress) => said.push(progress.says));
+
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.change).toEqual({ id: 'pi-lens', doing: 'install', before: null, after: null });
+    expect(said).toEqual(['Adding Lens…', 'Added Lens.']);
+  });
+
+  it('stops saying anything once the watcher is taken off', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({}));
+    const stop = shelf.watching((progress) => said.push(progress.says));
+    stop();
+
+    await shelf.add('pi-lens');
+    expect(said).toEqual([]);
+  });
+
+  it('passes the installer’s own progress through in the same channel', async () => {
+    const said: string[] = [];
+    /** The installer's progress callback, as the host would hold it. */
+    let fromInstaller: ((says: string) => void) | undefined;
+    const shelf = packageShelf(
+      versionedHost({}, {
+        watching: (handler) => {
+          fromInstaller = handler;
+        },
+      }),
+    );
+    shelf.watching((progress) => said.push(progress.says));
+    // While an install is happening, in the words the installer uses.
+    fromInstaller?.('added 3 packages in 2s');
+
+    expect(said).toEqual(['added 3 packages in 2s']);
+  });
+
+  it('is reported to a conversation in the words that say what to do about it', async () => {
+    const shelf = packageShelf(versionedHost({}));
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(reloadWords(answer.change)).toBe('Installed; reload this chat to activate');
+
+    const off = await packageShelf(versionedHost({ 'pi-lens': '1.4.2' })).remove('pi-lens');
+    expect(reloadWords(off)).toBe('Removed; reload this chat to let it go');
   });
 });

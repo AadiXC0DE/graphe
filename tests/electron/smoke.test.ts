@@ -7,11 +7,13 @@
  * run was told to keep its files in is the folder the shell actually wrote to,
  * and two conversations live side by side in one project.
  *
- * What it does not prove: no model answers here. A fresh profile has no
- * credential in it, so a turn stops at "no account has been connected" and the
- * transcript stays in memory. Phase 1.1's deterministic model transport is what
- * turns the rest of the plan's Electron claims — a turn in flight, a question
- * waited on, a result arriving after the window moved on — into assertions.
+ * What it does not prove: everything that needs a model this repo does not
+ * have. A launch is given one only when it asks, by way of `GRAPHE_TEST_MODEL`
+ * and the scripted server in `./scripted-model`, and that one answers from a
+ * written script — it cannot be wrong, cannot need a second opinion and cannot
+ * touch the network. So a turn can now be made to happen here: a tool call, a
+ * file written, a reply arriving in pieces. What is still out of reach at this
+ * layer is listed at the bottom of the file rather than implied by silence.
  *
  * Not part of `npm test`: it needs a built renderer and a built shell, so it
  * runs under `scripts/run-electron-smoke.mjs` (`npm run test:electron`), which
@@ -39,6 +41,7 @@ import { _electron as electron, type ElectronApplication, type Page } from 'play
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { PROFILE_ENV, PROFILE_SWITCH, resolveProfile } from '../../electron/profile';
+import { scriptedModel } from './scripted-model';
 
 vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
@@ -117,10 +120,17 @@ async function readWhenWritten(file: string, within = 30_000): Promise<string> {
  *  Electron's `--user-data-dir` goes along too — Chromium's own switch for the
  *  same folder — so the run is disposable whether or not the shell has been
  *  wired to `electron/profile.ts` yet. Both name one place, and everything
- *  asserted below is about the profile this resolved. */
+ *  asserted below is about the profile this resolved.
+ *
+ *  `scripted` points the app at a model that answers from a script, and only a
+ *  launch that names one gets it: a run with no account still has to stop at
+ *  "Connect a model", which is a scenario of its own. The seam is refused in a
+ *  shipped app, so a launch that asks for it is asserted to be an unpackaged
+ *  one rather than assumed to be. */
 async function launchApp(
   profile: string,
   url: string,
+  scripted?: string,
 ): Promise<{ app: ElectronApplication; window: Page }> {
   const argv = ['.', `${PROFILE_SWITCH}=${profile}`];
   // Playwright hands this straight to the child process, so an inherited
@@ -131,6 +141,7 @@ async function launchApp(
   }
   env[PROFILE_ENV] = profile;
   env['GRAPHE_DEV_SERVER_URL'] = url;
+  if (scripted !== undefined) env['GRAPHE_TEST_MODEL'] = scripted;
   const resolved = resolveProfile(argv, env, profile);
   // Pi keeps credentials and its model list outside the app's profile unless it
   // is told otherwise, so this is what stops a run from reading — or writing —
@@ -142,6 +153,9 @@ async function launchApp(
     cwd: here,
     env,
   });
+  if (scripted !== undefined) {
+    expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(false);
+  }
   const window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
   return { app, window };
@@ -174,6 +188,17 @@ function fixtureProject(profile: string): string {
     })}\n`,
   );
   return project;
+}
+
+/** The project file panel, turned on the way somebody turns it on: in the file
+ *  the shell reads at first paint. Written before the launch rather than
+ *  pressed afterwards, because what is under test is the file a turn wrote,
+ *  not the switch that shows the panel. */
+function showTheProjectFiles(profile: string): void {
+  writeFileSync(
+    join(profile, 'preferences.json'),
+    `${JSON.stringify({ version: 1, preferences: { showFiles: true } })}\n`,
+  );
 }
 
 /** Every error-level line in the profile's log. An uncaught exception, an
@@ -324,4 +349,155 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await stop();
     }
   });
+
+  it('writes a file through a tool call, and the conversation beside it sees the same file', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    showTheProjectFiles(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // Two turns: one that reaches for a tool, and one that says what it did.
+    model.replies([
+      {
+        calls: {
+          name: 'write',
+          arguments: { path: 'a note.md', content: 'written by the scripted model\n' },
+        },
+      },
+      { says: ['Wrote ', 'a note.md.'] },
+    ]);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await window.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+      await window.locator('.pickerrow__open').first().click();
+      await window.locator('.welcome__title').first().waitFor({ timeout: 60_000 });
+      // The scripted model is the one answering, which is the seam having been
+      // taken rather than the app having found an account on this machine.
+      expect(await window.locator('.thinking__label').innerText()).toBe('Scripted replies');
+
+      await window.locator('.composer__input').fill('write a note file');
+      await window.locator('.composer__send').first().click();
+
+      // A turn ran: the tool was called and the file is on disk, in the folder
+      // the window is working in.
+      await vi.waitFor(() => expect(existsSync(join(project, 'a note.md'))).toBe(true), {
+        timeout: 90_000,
+      });
+      expect(readFileSync(join(project, 'a note.md'), 'utf8')).toBe('written by the scripted model\n');
+
+      // And the person sees it: the rule says it happened, and the project's
+      // own file list has the file in it without a relaunch.
+      await vi.waitFor(
+        async () => {
+          expect(await window.locator('.message--graphe .message__body').last().innerText()).toContain(
+            'Wrote a note.md.',
+          );
+        },
+        { timeout: 60_000 },
+      );
+      expect(await window.locator('.thread__row').count()).toBeGreaterThanOrEqual(3);
+      await vi.waitFor(
+        async () => {
+          expect(await window.locator('.files__row', { hasText: 'a note.md' }).count()).toBe(1);
+        },
+        { timeout: 60_000 },
+      );
+
+      // A second conversation in the same project, which is where T01 says the
+      // file has to be visible: the same workspace, an empty transcript.
+      await window.locator('.shelf__new').first().click();
+      await vi.waitFor(
+        async () => {
+          expect(await window.locator('.tabs__title').allTextContents()).toEqual([
+            'write a note file',
+            'New conversation',
+          ]);
+        },
+        { timeout: 60_000 },
+      );
+      expect(await window.locator('.welcome__title').innerText()).toContain('a folder to work in');
+      expect(await window.locator('.thread__row').count()).toBe(0);
+      await vi.waitFor(
+        async () => {
+          expect(await window.locator('.files__row', { hasText: 'a note.md' }).count()).toBe(1);
+        },
+        { timeout: 60_000 },
+      );
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
+
+  it('shows a reply arriving in pieces, in the order they were sent', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    model.replies([{ says: ['one ', 'two ', 'three'] }]);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await window.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+      await window.locator('.pickerrow__open').first().click();
+      await window.locator('.welcome__title').first().waitFor({ timeout: 60_000 });
+
+      await window.locator('.composer__input').fill('say three words');
+      await window.locator('.composer__send').first().click();
+
+      /* Caught mid-arrival. The first piece is on screen on its own while the
+         reply is still being written, and the caret that marks a growing reply
+         is there with it: a reply that appeared whole would never be seen like
+         this, and the assertion after it is what "in order" means. */
+      const arriving = window.locator('.message--graphe .message__body').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).not.toBe(''), {
+        timeout: 60_000,
+        interval: 25,
+      });
+      expect((await arriving.innerText()).trim()).toBe('one');
+      expect(await window.locator('.message__caret').count()).toBe(1);
+
+      // And it finishes as the pieces, in the order they were sent, with the
+      // caret that marks a growing reply gone once the reply has stopped
+      // growing. The last piece and the end of the turn are two arrivals, so
+      // the caret going is waited for rather than sampled.
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).toBe('one two three'), {
+        timeout: 60_000,
+      });
+      await vi.waitFor(async () => expect(await window.locator('.message__caret').count()).toBe(0), {
+        timeout: 30_000,
+      });
+      expect(await window.locator('.tabs__title').allTextContents()).toEqual(['say three words']);
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
 });
+
+/* What this layer does not reach, said here rather than left to silence:
+ *   - a real provider: sign-in, a network call and a model's own judgement.
+ *     The scripted server answers from a written script.
+ *   - the packaged app: this runs the built output unpackaged, so signing,
+ *     asar rules and a minimal PATH belong to the packaged smoke.
+ *   - the native preview page and a live page load; the window is what is
+ *     driven here.
+ *   - layout, focus and zoom at the minimum window size: somebody at a screen.
+ *   - a second project, a worktree and a resumed transcript; one project with
+ *     two conversations is what this sets up.
+ */

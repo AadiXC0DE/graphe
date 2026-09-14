@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
@@ -170,7 +170,9 @@ import { ownCopyWhere } from "./lib/owncopy";
 import {
   changeCurrent,
   changeDesk,
+  changeThread,
   closeDesk,
+  conversationIn,
   parkThread,
   threadsIn,
   currentDesk,
@@ -180,13 +182,17 @@ import {
   noDesks,
   nowDoing,
   openDesk,
+  putBackTheBox,
   receive,
   researchLog,
   showThread,
+  spokenIn,
   tookBack,
-  withoutTakenBack,
+  tookBackTheLine,
+  tookTheBox,
   type Desk,
   type Desks,
+  type Owned,
   type Reference,
   folderCalled,
 } from "./lib/projects";
@@ -574,11 +580,33 @@ function Conversation() {
   const [packBusy, setPackBusy] = useState<string | null>(null);
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
-   *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<Plans>('auto');
+   *  the other two are for somebody who has an opinion about this one.
+   *
+   * Kept per conversation, like everything else about one: a chat left in
+   * research or plan does not set the mode for the tab beside it. Before there
+   * is a conversation to keep it in — the first screen's composer is drawn with
+   * no folder open — it is the window's own, so its chips are not dead. */
+  const [loosePlans, setLoosePlans] = useState<Plans>('auto');
+  const plans = desk?.plans ?? loosePlans;
   /* Read inside callbacks that were built before the last change to it. */
   const plansNow = useRef(plans);
   plansNow.current = plans;
+  /** Write it where it belongs, whichever conversation is in front when a
+   *  delayed answer lands — or to the window itself, before there is one. */
+  const setPlans = useCallback((next: SetStateAction<Plans>) => {
+    const here = currentDesk(desksNow.current);
+    if (here === null) {
+      setLoosePlans((was) => (typeof next === "function" ? next(was) : next));
+      return;
+    }
+    const owner: Owned = { project: here.path, address: here.address };
+    setDesks((current) =>
+      changeThread(current, owner, (one) => ({
+        ...one,
+        plans: typeof next === "function" ? next(one.plans ?? "auto") : next,
+      })),
+    );
+  }, []);
   /** Research is a one-message choice, and only that one reply is read for the
    *  plan it may end with. See src/hooks/useResearch.ts. */
   const researchRuns = useResearch();
@@ -795,7 +823,12 @@ function Conversation() {
      depth must not claim the chosen model's did. */
   const setBlockThinking = useCallback(
     (choice: ModelChoice, level: ThinkingLevel) => {
-      void bridge.setThinking(choice, level).then((answer) => {
+      const desk = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      };
+      void bridge.setThinking(choice, level, where).then((answer) => {
         if (answer.ok) setPreferences(answer.value);
       });
     },
@@ -804,7 +837,12 @@ function Conversation() {
 
   const changeThinking = useCallback(
     (choice: ModelChoice, level: ThinkingLevel) => {
-      void bridge.setThinking(choice, level).then((answer) => {
+      const desk = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      };
+      void bridge.setThinking(choice, level, where).then((answer) => {
         if (!answer.ok) return;
         setPreferences(answer.value);
         setConnection((current) =>
@@ -1122,7 +1160,8 @@ function Conversation() {
   const [progress, setProgress] = useState<ShowProgress | null>(null);
 
   /** Attachments before there is a project to attach them to. Once a folder is
-   *  open they live on its desk, like everything else. */
+   *  open they live on the conversation that holds them, like everything else
+   *  about it. */
   const [loose, setLoose] = useState<readonly Attachment[]>([]);
   const attachments = desk?.attachments ?? loose;
 
@@ -1132,6 +1171,14 @@ function Conversation() {
    *  moment it runs. */
   const attachmentsNow = useRef(attachments);
   attachmentsNow.current = attachments;
+
+  /** Whose box the window is looking at, worked out at the moment of asking
+   *  rather than at the moment of rendering. A write that lands after somebody
+   *  switched tabs still names the conversation it was meant for. */
+  const ownerNow = useCallback((): Owned | null => {
+    const here = currentDesk(desksNow.current);
+    return here === null ? null : { project: here.path, address: here.address };
+  }, []);
 
   /** The pictures in the box, for the message about to carry them. Object URLs
    *  rather than bytes: the File already holds those, so a conversation full of
@@ -1146,20 +1193,68 @@ function Conversation() {
     [],
   );
 
-  /** Take everything out of the box. Called the moment its contents have been
-   *  sent, wherever they were sent from. */
-  const emptyTheBox = useCallback(() => {
-    setLoose([]);
+  /**
+   * Take out of the box what has just been sent, and only that.
+   *
+   * The owner is the conversation the send started in, not whichever one is on
+   * screen when the shell answers, and `accepted` is what was in the box when
+   * it started: anything put in since belongs to somebody's next thought.
+   */
+  const emptyTheBox = useCallback((owner: Owned | null, accepted: readonly Attachment[]) => {
+    if (owner === null) {
+      setLoose([]);
+      return;
+    }
+    setDesks((current) => tookTheBox(current, owner, accepted));
+  }, []);
+
+  /** A sentence in the box before there is a project to write it in. Once a
+   *  folder is open the sentence is the conversation's. */
+  const [looseDraft, setLooseDraft] = useState("");
+  const draft = desk?.draft ?? looseDraft;
+
+  /** The conversation the box on screen belongs to, bound at this render rather
+   *  than resolved when a write lands: a keystroke or a file that arrives after
+   *  somebody switched tabs belongs to the chat it was made in. */
+  const boxOwner: Owned | null =
+    desk === null ? null : { project: desk.path, address: desk.address };
+
+  /**
+   * Put a sentence in the box of the conversation named, composed with whatever
+   * is already there.
+   *
+   * An example, a handoff note, a line taken back out of the queue and a send
+   * that came back refused all come through here. The conversation is named
+   * rather than assumed, so a write that lands after somebody moved on still
+   * goes where it was meant to.
+   */
+  const writeDraft = useCallback((owner: Owned | null, change: (was: string) => string) => {
+    if (owner === null) {
+      setLooseDraft((was) => change(was));
+      return;
+    }
     setDesks((current) =>
-      current.current === null ? current : changeCurrent(current, (one) => ({ ...one, attachments: [] })),
+      changeThread(current, owner, (one) => {
+        const was = one.draft ?? "";
+        const next = change(was);
+        return next === was ? one : { ...one, draft: next };
+      }),
     );
   }, []);
 
-  /** An example from the welcome screen, put in the box ready to be edited.
-   *  Never sent on anybody's behalf — a click that spends money on a sentence
-   *  the user did not write is exactly the surprise this product exists to
-   *  avoid. */
-  const [draft, setDraft] = useState("");
+  /** The same, for the conversation on screen. */
+  const handIn = useCallback(
+    (change: (was: string) => string) => writeDraft(ownerNow(), change),
+    [ownerNow, writeDraft],
+  );
+
+  /** The box's own words on their way back to the conversation they belong to.
+   *  The conversation is bound at the render the box was drawn for, so the
+   *  report a switch produces goes to the chat being left. */
+  const keepDraftAt = useCallback(
+    (owner: Owned | null) => (text: string) => writeDraft(owner, () => text),
+    [writeDraft],
+  );
 
   /** A native page must yield to renderer popovers; it cannot be stacked under
      them with CSS alone. */
@@ -1306,18 +1401,13 @@ function Conversation() {
     });
   }, []);
 
-  /* The chip belongs to the window and the gate belongs to a conversation, so
-     switching conversations would otherwise leave the chip saying Plan over a
-     chat that was never told, and the chat behind holding writes back with
-     nothing on screen to say so. The gate follows the chip to wherever you
-     are. */
-  const heldProject = useRef<string | null>(null);
+  /* The gate is the shell's, and it belongs to a conversation — the same one the
+     chip beside it belongs to. The shell knows nothing about a chat until it is
+     told, so a folder opening is where a chat that was closed and comes back
+     saying Plan says so again. Nothing is said for the folder being left: its
+     chats keep the gate they were given, and the chip follows each of them. */
   useEffect(() => {
     const path = openProject;
-    const was = heldProject.current;
-    if (was === path) return;
-    if (was !== null) holdWrites(false, was);
-    heldProject.current = path;
     if (path !== null && plansNow.current === 'plan') holdWrites(true, path);
   }, [openProject, holdWrites]);
 
@@ -1328,7 +1418,7 @@ function Conversation() {
     }
     if ((next === 'plan') !== (plans === 'plan')) holdWrites(next === 'plan');
     setPlans(next);
-  }, [plans, say, holdWrites]);
+  }, [plans, say, holdWrites, setPlans]);
 
   /** Which project a review call is about. The panel's own child, when the
    *  folder holds several, so a review lands in the project it came out of. */
@@ -1410,7 +1500,9 @@ function Conversation() {
 
   const selectModel = useCallback(
     (choice: ModelChoice) => {
-      void bridge.selectModel(choice).then((answer) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = here === null ? {} : { project: here.path };
+      void bridge.selectModel(choice, where).then((answer) => {
         // Said, not swallowed: a chip naming one model while the conversation
         // answers as another is the thing this reports.
         if (!answer.ok) {
@@ -1449,13 +1541,17 @@ function Conversation() {
      depth: the same model can be doing the work in one place and advising in
      another, and those are different answers. */
   const setAdvisorThinking = useCallback((_choice: ModelChoice, level: ThinkingLevel) => {
-    void bridge.setAdvisorThinking(level).then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.setAdvisorThinking(level, where).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
 
   const setAdvisorGate = useCallback((which: 'completionGate' | 'loopGate', on: boolean) => {
-    void bridge.setAdvisorGate(which, on).then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.setAdvisorGate(which, on, where).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
@@ -1468,6 +1564,8 @@ function Conversation() {
 
   const selectAdvisor = useCallback(
     (choice: ModelChoice | null) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = here === null ? {} : { project: here.path };
       void (async () => {
         if (choice !== null && !packsNow.current.some((one) => one.id === ADVISOR_PACKAGE)) {
           const added = await bridge.addPackage(ADVISOR_PACKAGE);
@@ -1477,7 +1575,7 @@ function Conversation() {
           }
           setPacks(added.value);
         }
-        const answer = await bridge.selectAdvisor(choice);
+        const answer = await bridge.selectAdvisor(choice, where);
         if (answer.ok) setPreferences(answer.value);
         else troubleHere(answer.trouble);
       })();
@@ -1490,7 +1588,12 @@ function Conversation() {
    *  list as it stands afterwards. */
   const trustCarried = useCallback(
     (id: string, trust: boolean) => {
-      void bridge.trustCarried(id, trust).then((answer) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(here === null ? {} : { project: here.path }),
+        ...(here?.address == null ? {} : { conversation: here.address }),
+      };
+      void bridge.trustCarried(id, trust, where).then((answer) => {
         if (answer.ok) setCarried(answer.value);
         else troubleHere(answer.trouble);
       });
@@ -2041,10 +2144,13 @@ function Conversation() {
       // the box for the person to cut down or throw away. Editing it and
       // pressing send is their press, so nothing is sent from here.
       if (how === "continue" && answer.value.handoff !== undefined) {
-        setDraft(answer.value.handoff);
+        writeDraft(
+          { project: answer.value.path, address: answer.value.address ?? null },
+          () => answer.value.handoff ?? "",
+        );
       }
     },
-    [showOpened, troubleAt, goToScreen],
+    [showOpened, troubleAt, goToScreen, writeDraft],
   );
 
   /**
@@ -2115,7 +2221,12 @@ function Conversation() {
     if (!already) {
       const figma = REACHABLE.find((one) => one.id === 'figma');
       if (figma !== undefined) {
-        const saved = await bridge.connectedSave([...(connected?.tools ?? []), asServer(figma)]);
+        const here = currentDesk(desksNow.current);
+        const where: Where = here === null ? {} : { project: here.path };
+        const saved = await bridge.connectedSave(
+          [...(connected?.tools ?? []), asServer(figma)],
+          where,
+        );
         if (saved.ok) setConnected(saved.value);
         else troubleHere(saved.trouble);
       }
@@ -2473,9 +2584,16 @@ function Conversation() {
              it — so the app began executing a plan nobody had said yes to. */
           const found = stepsFromReport(report);
           const project = notice.project;
-          if (project !== null && found.steps.length > 0) {
-            setDesks((current) =>
-              changeDesk(current, project, (one) => ({
+          if (found.steps.length > 0) {
+            /* The card belongs to the conversation whose report produced it, not
+               to whatever is in front: a look-around runs while somebody may be
+               reading another chat, and a checklist that appears under the wrong
+               one is a list they never asked for. */
+            setDesks((current) => {
+              const owner = spokenIn(current, notice);
+              // A notice about no folder at all has nowhere to file it.
+              if (owner === null) return current;
+              return changeThread(current, owner, (one) => ({
                 ...one,
                 turns: [
                   ...one.turns,
@@ -2489,8 +2607,8 @@ function Conversation() {
                     answered: null,
                   },
                 ],
-              })),
-            );
+              }));
+            });
           }
           // Whether "now build it" gets a checklist depends on what came back.
           // Research that laid out steps leaves a card to say yes to. Research
@@ -3032,14 +3150,18 @@ function Conversation() {
    *  behind it is litter. */
   const openInEditor = useCallback(() => {
     setSwitching(false);
-    void bridge.openInEditor().then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.openInEditor(undefined, where).then((answer) => {
       if (!answer.ok) troubleHere(answer.trouble);
     });
   }, [troubleHere]);
 
   const revealFolder = useCallback(() => {
     setSwitching(false);
-    void bridge.revealFolder().then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.revealFolder(where).then((answer) => {
       if (!answer.ok) troubleHere(answer.trouble);
     });
   }, [troubleHere]);
@@ -3255,13 +3377,17 @@ function Conversation() {
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       };
       const owner = desk === null ? null : keyOf(desk.path, desk.address ?? '');
-      /* Somebody has said something, so the run that was working a list down
-         starts its rounds again from zero, and whatever they stopped is behind
-         them. The shell holds both — it is what sends the rounds. */
-      void owner;
-      // What is in the box at the moment of sending — never a snapshot from
-      // whenever this callback was last rebuilt (see `attachmentsNow`).
-      const inTheBox = attachmentsNow.current;
+      /* The conversation this message belongs to, as an address rather than a
+         key. What was said in it, what it brought in and the mode it is working
+         in all go there, whether or not it is still the one on screen. */
+      const mine: Owned | null =
+        desk === null ? null : { project: desk.path, address: desk.address };
+      // What is in the box at the moment of sending: the box of the
+      // conversation in front now — the one this message belongs to — read off
+      // the desk here rather than from whenever this callback was last rebuilt
+      // (see `attachmentsNow`).
+      const inTheBox =
+        desk === null ? attachmentsNow.current : conversationIn(desk, desk.address).attachments ?? [];
       // A model that cannot read pictures never gets sent one, whichever door
       // the message came through. The composer stops this at the box; a note
       // drawn on the page goes straight to here, and used to carry the picture
@@ -3269,12 +3395,7 @@ function Conversation() {
       // pre-empt. The pictures stay put, so the line explaining why is still
       // on screen beside them.
       const blind = readsPictures(connection) === false;
-      // And the box is empty afterwards. It used to keep them: a picture
-      // attached once went out again with every message after it, so a model
-      // that could not read pictures failed on the next message too, and the
-      // one after that, and nothing on screen said why.
       const held = blind && inTheBox.some((one) => one.kind === "image");
-      if (inTheBox.length > 0 && !held) emptyTheBox();
 
       // The pictures go along for the ride: read into the base64 the shell
       // expects, and — the same moment — recorded in the overview as the
@@ -3283,6 +3404,8 @@ function Conversation() {
       // the agent is still a reference somebody meant it to have.
       const reference: Reference[] = [];
       const pictures: PromptAttachment[] = [];
+      // The ones the window itself could not read, named if the send fails.
+      const unread: string[] = [];
       // Pasting a Figma address turns it into a chip and takes it out of the
       // box, so unless it is put back here the agent never hears the link at
       // all — it sees a message about a design it was never given.
@@ -3305,7 +3428,8 @@ function Conversation() {
         const travels = attached.kind === "document" || (attached.kind === "image" && !blind);
         if (travels && attached.file !== undefined) {
           const bytes = await pictureBytes(attached.file);
-          if (bytes !== null) {
+          if (bytes === null) unread.push(attached.name);
+          else
             pictures.push({
               kind: attached.kind === "document" ? "document" : "image",
               name: attached.name,
@@ -3315,48 +3439,58 @@ function Conversation() {
               mimeType: pictureType(attached.name, attached.file.type),
               bytes,
             });
-          }
         }
       }
 
       setDesks((current) => {
-        const update = (one: Desk): Desk => {
-          const started = { task, startedAt: Date.now() };
-          const conversation = target.conversation;
-          if (conversation !== undefined && conversation !== one.address) {
-            const parked = one.parked[conversation];
-            if (parked === undefined) return one;
-            return {
+        const started = { task, startedAt: Date.now() };
+        return mine === null
+          ? changeCurrent(current, (one) => ({
               ...one,
+              // Never over the top of a job already in flight. Queueing a second
+              // message used to replace the running one's task and start time.
+              doing: one.doing ?? started,
               references: [...one.references, ...reference],
-              parked: {
-                ...one.parked,
-                [conversation]: { ...parked, doing: parked.doing ?? started },
-              },
-            };
-          }
-          return {
-            ...one,
-            // Never over the top of a job already in flight. Queueing a second
-            // message used to replace the running one's task and start time.
-            doing: one.doing ?? started,
-            references: [...one.references, ...reference],
-          };
-        };
-        return target.project === undefined
-          ? changeCurrent(current, update)
-          : changeDesk(current, target.project, update);
+            }))
+          : changeThread(current, mine, (one) => ({
+              ...one,
+              doing: one.doing ?? started,
+              references: [...(one.references ?? []), ...reference],
+            }));
       });
+      /* The sentence and its pictures come back to the box only when the shell
+         has refused the message, so it is put back below rather than here. */
+      const putBack = (): void => {
+        if (mine === null) writeDraft(null, () => text);
+        else setDesks((current) => putBackTheBox(current, mine, text));
+      };
       goBusy();
       if (owner !== null) holdSend(owner);
       try {
         const said =
           links.length === 0 ? text : `${text}\n\n${ATTACH_WORDS.alsoLook(links)}`;
         const reply = await bridge.prompt(said, pictures, ways, target);
-        if (!reply.ok) troubleAt(target, reply.trouble);
+        if (!reply.ok) {
+          // Kept, not thrown away: what somebody wrote is theirs, and asking
+          // them to write it again because the provider was busy is the app
+          // arguing with them. The pictures were never taken, so they are still
+          // in the box beside it.
+          putBack();
+          troubleAt(
+            target,
+            unread.length === 0
+              ? reply.trouble
+              : { ...reply.trouble, because: `${reply.trouble.because} ${ATTACH_WORDS.notRead(unread)}` },
+          );
+          return;
+        }
+        // Taken now, and only from the conversation that sent: a box somebody
+        // has added to since had a second thought in it, and that stays.
+        if (!held) emptyTheBox(mine, inTheBox);
       } catch (cause) {
         // The bridge is not supposed to throw. If it ever does, the window says
         // something calm rather than turning white.
+        putBack();
         troubleAt(target, {
           what: STOPPED_PART_WAY,
           because: "Something went wrong on my side. Nothing has been changed.",
@@ -3369,7 +3503,7 @@ function Conversation() {
         if (owner !== null) letSendGo(owner);
       }
     },
-    [troubleAt, emptyTheBox, holdSend, letSendGo, connection, setRecorded],
+    [troubleAt, emptyTheBox, holdSend, letSendGo, connection, setRecorded, writeDraft],
   );
 
   /**
@@ -3528,7 +3662,7 @@ function Conversation() {
       }
       await deliver(text, priced.task, { lookFirst });
     },
-    [deliver, desks, openProject, howFar, open, plans, say, goalChip, lookAround, picturesInTheBox, researchRuns],
+    [deliver, desks, openProject, howFar, open, plans, say, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans],
   );
 
   /* ------------------------------------------------------------ in line */
@@ -3580,7 +3714,10 @@ function Conversation() {
         // picture. So the box is emptied here too: left full, whatever was in it
         // went out with the *next* ordinary message instead, which is the
         // re-sending this was supposed to have ended.
-        if (attachmentsNow.current.length > 0) emptyTheBox();
+        const staged = conversationIn(desk, desk.address).attachments ?? [];
+        if (staged.length > 0) {
+          emptyTheBox({ project: desk.path, address: desk.address }, staged);
+        }
         void bridge.steer(text, {
           project: desk.path,
           conversation: desk.address ?? undefined,
@@ -3640,7 +3777,7 @@ function Conversation() {
       // once is the point, not a turn that waits for the other's to finish.
       void send(text);
     },
-    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns],
+    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans],
   );
 
   /* A note written on the page joins the line when a turn of mine is going, and
@@ -4093,6 +4230,12 @@ function Conversation() {
       ...(desk === null ? {} : { project: desk.path }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
     };
+    /* The chat the press was made in, taken now rather than read when the shell
+       answers: taking a line back is a round trip, and somebody can switch
+       while it is going. The words belong to the conversation that queued them,
+       not to whichever one is in front by the time they come back. */
+    const mine: Owned | null =
+      desk === null ? null : { project: desk.path, address: desk.address };
     const owner = desk === null ? null : keyOf(desk.path, desk.address ?? '');
     void bridge.takeBackQueue(target).then((answer) => {
       // The line did not come back, so it is still waiting behind the run. The
@@ -4106,15 +4249,14 @@ function Conversation() {
       // Nothing was queued: nothing to put in the box, and nothing on screen to
       // clear.
       if (words.length === 0) return;
-      setDraft((was) => intoTheBox(was, words));
-      // And out of the conversation, or the same sentence is on screen twice:
-      // once as though it had been said, once in the box waiting to be.
-      setDesks((current) =>
-        changeCurrent(current, (one) => ({ ...one, turns: withoutTakenBack(one.turns, words) })),
-      );
+      // Into the box and out of the thread in one write, so the same sentence
+      // is never on screen twice — once as though it had been said, once in the
+      // box waiting to be. With no folder open there is no thread to clear.
+      if (mine === null) writeDraft(null, (was) => intoTheBox(was, words));
+      else setDesks((current) => tookBackTheLine(current, mine, words));
       if (owner !== null) setQueued((was) => ({ ...was, [owner]: [] }));
     });
-  }, [troubleAt]);
+  }, [troubleAt, writeDraft]);
 
   /**
    * The answer to "this is a bigger job".
@@ -4238,14 +4380,14 @@ function Conversation() {
            plan to read rather than work already started. */
         const again = chosen?.decision === undefined ? null : decidedMessage(chosen.decision);
         if (again === null) {
-          setDraft(text);
+          writeDraft(desk === null ? null : { project: desk.path, address: desk.address }, () => text);
           return;
         }
         const revise = `${text}\n\n${again}\n\n${PLAN_WORDS.planAgain}`;
         void deliver(revise, sizeUp(revise), { lookFirst: true });
       }
     },
-    [deliver, desk, openProject, holdWrites, lookAround, refreshBuildPlan],
+    [deliver, desk, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
   );
 
   /**
@@ -4446,7 +4588,7 @@ function Conversation() {
     const path = openProject;
     if (path === null) return;
     setPreferences((was) => ({ ...was, kept: keeping(was.kept, path, versionId, keep) }));
-    void bridge.keepVersion(versionId, keep).then((answer) => {
+    void bridge.keepVersion(versionId, keep, { project: path }).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, [openProject]);
@@ -4953,8 +5095,8 @@ function Conversation() {
     composerPopoverOpen;
   useEffect(() => {
     if (pane === 'off') return;
-    void bridge.pageHidden(covered);
-  }, [covered, pane]);
+    preview.hidePage(covered);
+  }, [covered, pane, preview.hidePage]);
 
   /* ------------------------------------------------------------------ money */
 
@@ -5021,7 +5163,10 @@ function Conversation() {
         case 'always': {
           // The file is the whole feature, so this opens the file.
           const file = alwaysNow?.file ?? '';
-          if (file !== '') void bridge.openInEditor(file);
+          const here = currentDesk(desksNow.current);
+          if (file !== '') {
+            void bridge.openInEditor(file, here === null ? {} : { project: here.path });
+          }
           return;
         }
         case 'connected':
@@ -5184,10 +5329,10 @@ function Conversation() {
           void putBack(found.version.id, fromRepo.current[found.version.id]);
           return;
         case "say":
-          setDraft(found.say);
+          handIn(() => found.say);
       }
     },
-    [open, panelRepoNow, swapConversation, seeIt, putBack],
+    [open, panelRepoNow, swapConversation, seeIt, putBack, handIn],
   );
 
   /* ------------------------------------------------------------------- draw */
@@ -5621,10 +5766,18 @@ function Conversation() {
             const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
             setChangesOpen(false);
             if (dropping.trim() === '') return;
-            void bridge.changesDrop(dropping).then((answer) => {
-              if (!answer.ok) troubleHere(answer.trouble);
-              else if (openProject !== null) void refreshOverview(openProject);
-            });
+            // The folder the change was read out of, so undoing part of it
+            // cannot land in whichever project happens to be in front.
+            const repo = actingRepoNow.current;
+            void bridge
+              .changesDrop(dropping, {
+                ...(openProject === null ? {} : { project: openProject }),
+                ...(repo === null ? {} : { repo }),
+              })
+              .then((answer) => {
+                if (!answer.ok) troubleHere(answer.trouble);
+                else if (openProject !== null) void refreshOverview(openProject);
+              });
           }}
         />
       </Suspense>
@@ -5647,7 +5800,10 @@ function Conversation() {
             return answer.ok ? answer.value : { state: 'would-not-start', because: answer.trouble.because };
           }}
           onSave={async (tools) => {
-            const answer = await bridge.connectedSave(tools);
+            const answer = await bridge.connectedSave(
+              tools,
+              openProject === null ? {} : { project: openProject },
+            );
             if (answer.ok) setConnected(answer.value);
             else troubleHere(answer.trouble);
           }}
@@ -5671,8 +5827,11 @@ function Conversation() {
             const answer = await bridge.skillText(skill.id);
             return answer.ok ? answer.value : null;
           }}
-          onUse={(insert) => setDraft((was) => draftWith(was, insert))}
-          onOpenFile={(skill) => void bridge.openSkillFile(skill.id)}
+          onUse={(insert) => handIn((was) => draftWith(was, insert))}
+          onOpenFile={(skill) => {
+            const where: Where = openProject === null ? {} : { project: openProject };
+            void bridge.openSkillFile(skill.id, where);
+          }}
           onAddMore={openAddMore}
         />
       </Suspense>
@@ -5893,7 +6052,7 @@ function Conversation() {
           />
         ) : undecided ? null : desk === null || desk.turns.length === 0 ? (
           <Welcome
-            onUse={setDraft}
+            onUse={(said) => handIn(() => said)}
             project={desk?.name ?? null}
             onPickDocument={async () => {
               const answer = await bridge.chooseDocument(desk === null ? undefined : { project: desk.path });
@@ -6174,6 +6333,7 @@ function Conversation() {
               waiting={desk !== null && holding[keyOf(desk.path, desk.address ?? '')] === true}
               onWait={waitForMe}
               draft={draft}
+              onDraftChange={keepDraftAt(boxOwner)}
               attachments={attachments}
               connection={connection}
               room={room}
@@ -6202,13 +6362,10 @@ function Conversation() {
               tree={desk === null ? [] : (files[desk.path] ?? []).map((one) => ({ path: one.path, folder: false }))}
               workflows={workflows}
               onAttachmentsChange={(next) => {
-                if (openProject === null) setLoose(next);
+                if (boxOwner === null) setLoose(next);
                 else {
                   setDesks((current) =>
-                    changeCurrent(current, (one) => ({
-                      ...one,
-                      attachments: next,
-                    })),
+                    changeThread(current, boxOwner, (one) => ({ ...one, attachments: next })),
                   );
                 }
               }}
@@ -6284,7 +6441,15 @@ function Conversation() {
           onCreateBranch={createBranch}
           onFetch={(repo) => fromOrigin((where) => bridge.fetchOrigin(where), repo)}
           onFastForward={(repo) => fromOrigin((where) => bridge.fastForward(where), repo)}
-          onShare={(repo) => void bridge.shareReview(repo === undefined ? undefined : { repo })}
+          onShare={(repo) => {
+            // A child repo alone would still leave the review to be made for
+            // whichever project is in front.
+            const where: Where = {
+              ...(openProject === null ? {} : { project: openProject }),
+              ...(repo === undefined ? {} : { repo }),
+            };
+            void bridge.shareReview(where);
+          }}
           onDecide={decideOnWork}
           onHowMuch={changeHowMuch}
           onHandOver={handToDeveloper}
@@ -6313,7 +6478,10 @@ function Conversation() {
             setPanelRepo((was) => (was === name ? was : name));
             refreshLanding(openProject);
           }}
-          onOpenFile={(file) => void bridge.openInEditor(file)}
+          onOpenFile={(file) => {
+            const where: Where = openProject === null ? {} : { project: openProject };
+            void bridge.openInEditor(file, where);
+          }}
           onKeepGoing={keepGoing}
           onStartAfter={startAfter}
           onKeepAway={keepAway}
@@ -6363,7 +6531,10 @@ function Conversation() {
             busy={busy}
             onClose={() => setGraphOpen(false)}
             onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
-            onOpenFile={(file) => void bridge.openInEditor(file)}
+            onOpenFile={(file) => {
+              const where: Where = openProject === null ? {} : { project: openProject };
+              void bridge.openInEditor(file, where);
+            }}
             repos={desk.overview?.repos ?? []}
             repo={historyRepo}
             onRepo={(name) => setGraphRepo(name)}
@@ -6482,7 +6653,7 @@ function Conversation() {
           address={pageAt ?? previewUrl}
           onAddress={(address) => {
             setPageAt(address);
-            void bridge.pageAt(address, null, true);
+            preview.pointAt(address);
           }}
           onElsewhere={(address) => void bridge.openLink(address)}
           onRoom={movePane}
@@ -6586,7 +6757,10 @@ function Conversation() {
             setPackBusy(id);
             const now = connected?.tools ?? [];
             void bridge
-              .connectedSave([...now.filter((one) => one.name !== id), asServer(wanted)])
+              .connectedSave(
+                [...now.filter((one) => one.name !== id), asServer(wanted)],
+                openProject === null ? {} : { project: openProject },
+              )
               .then((answer) => {
                 if (answer.ok) setConnected(answer.value);
                 else troubleHere(answer.trouble);
@@ -6597,7 +6771,10 @@ function Conversation() {
             setPackBusy(id);
             const now = connected?.tools ?? [];
             void bridge
-              .connectedSave(now.filter((one) => one.name !== id))
+              .connectedSave(
+                now.filter((one) => one.name !== id),
+                openProject === null ? {} : { project: openProject },
+              )
               .then((answer) => {
                 if (answer.ok) setConnected(answer.value);
                 else troubleHere(answer.trouble);

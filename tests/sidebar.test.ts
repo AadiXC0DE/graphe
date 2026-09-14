@@ -10,7 +10,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import Sidebar from '../src/components/Sidebar';
+import Sidebar, { CONTEXT_WORDS } from '../src/components/Sidebar';
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -133,5 +133,30 @@ describe('the one control that folds it', () => {
     expect(draw({ open: false }).querySelector('.shelf__mark')?.getAttribute('data-tip')).toBe(
       'Show sidebar ⌘B',
     );
+  });
+});
+
+describe('whose context each thing is', () => {
+  const MINE = [{ id: 'r1', kind: 'image' as const, name: 'the mock.png', note: 'PNG' }];
+
+  it('draws what this chat was given to work from', () => {
+    const where = draw({ pinned: MINE });
+    const band = where.querySelector('.shelf__band:not(.shelf__band--scroll)');
+    expect(band?.querySelector('.shelf__caption')?.textContent).toBe(CONTEXT_WORDS.title);
+    expect([...band!.querySelectorAll('.shelf__pin .shelf__rowname')].map((one) => one.textContent)).toEqual([
+      'the mock.png',
+    ]);
+  });
+
+  it('draws no band at all when this chat was given nothing', () => {
+    expect(draw({ pinned: [] }).querySelector('.shelf__band:not(.shelf__band--scroll)')).toBeNull();
+  });
+
+  /* A reference is the conversation's, and there is nowhere else for one to go.
+     Nothing in the band offers to hand it to every other chat in the project,
+     or says that it has been: the band is a list, not a control. */
+  it('offers no way to take one out of the chat that was given it', () => {
+    const band = draw({ pinned: MINE }).querySelector('.shelf__band:not(.shelf__band--scroll)');
+    expect(band?.querySelector('button')).toBeNull();
   });
 });

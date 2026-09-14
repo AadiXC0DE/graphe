@@ -42,7 +42,7 @@ type Props = {
   openPath: string | null;
   onOpen: (project: RecentProject) => void;
   onBrowse: () => void;
-  /** What the agent has been given to work from, this sitting. */
+  /** What the agent has been given to work from, this sitting, in this chat. */
   pinned: readonly Reference[];
   /** The conversations this project has had, newest first. */
   conversations: readonly ShelfConversation[];
@@ -112,6 +112,27 @@ type Place = {
   icon: React.ReactNode;
   count?: number;
 };
+
+/** What the band above the conversations is called. */
+export const CONTEXT_WORDS = {
+  title: 'Context',
+} as const;
+
+/** One thing in the Context band: something this chat was sent or worked
+ *  from. A reference belongs to the conversation it was brought into, so the
+ *  band has one list and nothing to mark. */
+function Pin({ one }: { one: Reference }) {
+  return (
+    <li className="shelf__pin">
+      {one.kind === 'image' && one.preview !== undefined ? (
+        <img className="shelf__thumb" src={one.preview} alt="" />
+      ) : (
+        <span className="shelf__thumb shelf__thumb--none" aria-hidden="true" />
+      )}
+      <span className="shelf__rowname">{one.name}</span>
+    </li>
+  );
+}
 
 /** The places the shelf can go, in the one order both states draw. Two
  *  hand-written lists had drifted into two orders, and the strip had no way to
@@ -535,17 +556,10 @@ export default function Sidebar(props: Props) {
 
           {pinned.length === 0 ? null : (
             <section className="shelf__band">
-              <h2 className="shelf__caption">Working from</h2>
+              <h2 className="shelf__caption">{CONTEXT_WORDS.title}</h2>
               <ul className="shelf__list">
                 {pinned.map((one) => (
-                  <li key={one.id} className="shelf__pin">
-                    {one.kind === 'image' && one.preview !== undefined ? (
-                      <img className="shelf__thumb" src={one.preview} alt="" />
-                    ) : (
-                      <span className="shelf__thumb shelf__thumb--none" aria-hidden="true" />
-                    )}
-                    <span className="shelf__rowname">{one.name}</span>
-                  </li>
+                  <Pin key={one.id} one={one} />
                 ))}
               </ul>
             </section>

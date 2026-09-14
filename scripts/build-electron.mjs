@@ -105,6 +105,18 @@ const builds = [
       ].join('\n'),
     },
   },
+  {
+    ...shared,
+    entryPoints: [`${root}src/agent/pi/probe-runner.ts`],
+    outfile: `${root}dist-electron/probe-runner.mjs`,
+    format: 'esm',
+    banner: {
+      js: [
+        "import { createRequire as __createRequire } from 'node:module';",
+        'const require = __createRequire(import.meta.url);',
+      ].join('\n'),
+    },
+  },
 ];
 
 await rm(`${root}dist-electron`, { recursive: true, force: true });
@@ -116,6 +128,6 @@ if (watch) {
 } else {
   await Promise.all(builds.map((options) => build(options)));
   console.log(
-    'built dist-electron/boot.mjs, dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs and dist-electron/subagent-runner.mjs',
+    'built dist-electron/boot.mjs, dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs, dist-electron/subagent-runner.mjs and dist-electron/probe-runner.mjs',
   );
 }

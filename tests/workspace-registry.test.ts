@@ -411,9 +411,21 @@ describe('a stored index', () => {
     expect(workspaceById(read.index, 'w1')?.state).toBe('recovery-required');
   });
 
-  it('refuses a version it does not know', () => {
-    const read = parseIndex(JSON.stringify({ version: 99, projects: {}, byRoot: {}, workspaces: {}, conversations: {} }));
+  it('refuses a version it does not know, and says the profile is newer', () => {
+    const read = parseIndex(
+      JSON.stringify({ version: 99, projects: {}, byRoot: {}, workspaces: {}, conversations: {} }),
+    );
     expect(read.problem).not.toBeNull();
+    // The difference matters: a file from a newer app is not corruption, and
+    // an older build has to leave it alone rather than move it aside.
+    expect(read.future).toBe(true);
+  });
+
+  it('does not call a damaged file a newer one', () => {
+    expect(parseIndex('{ half a').future).toBe(false);
+    expect(
+      parseIndex(JSON.stringify({ version: 'one', projects: {} })).future,
+    ).toBe(false);
   });
 });
 

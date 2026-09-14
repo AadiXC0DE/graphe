@@ -11,6 +11,7 @@
  * today.
  */
 
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
@@ -18,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { writeAtomically } from '../../lib/atomic';
+import { RUN_AS_NODE } from './childenv';
 import { EXTENSION_BUDGET } from './standing';
 
 /** The runtime a card was read under. A card read by one version is not
@@ -29,6 +31,20 @@ export type RuntimeTag = string;
 
 /** A factory that never answers is a factory we stop waiting for. */
 const PROBE_MS = 5000;
+
+/** What the child writes its answer on, so a factory that prints something of
+ *  its own does not read back as a card. */
+export const PROBE_MARKER = 'graphe-probe ';
+
+/** How much of a child's output is kept, counted back from the end. A factory
+ *  may log as much as it likes before the answer, and none of that is
+ *  evidence — so the answer, which is written last, is what has to survive. */
+const PROBE_OUTPUT_MOST = 1 << 20;
+
+/** How long a child gets to be gone after the signal, before the caller is
+ *  told anyway. A process that has been killed is reaped in milliseconds; this
+ *  is here so a kill that never lands cannot hold up discovery. */
+const KILL_GRACE_MS = 2000;
 
 /** What a tool description has to mention before it counts as work that
  *  outlives the call that started it. */
@@ -243,10 +259,15 @@ function idFor(path: string): string {
  * Run the factory once and write down what it asked for.
  *
  * Everything it can reach is the stub, so there is nothing here for it to start
- * or write to; a factory that throws, hangs, or is not a factory at all comes
- * back as `null` rather than as a failure somebody has to handle.
+ * or write to; a factory that throws, or is not a factory at all, comes back as
+ * `null` rather than as a failure somebody has to handle.
+ *
+ * The patience below only covers a factory that returns a promise nobody ever
+ * settles. A factory that spins synchronously cannot be interrupted from here
+ * at all — nothing on this thread runs while it does — which is why the probe
+ * happens in a process of its own wherever one has been built.
  */
-export async function probe(path: string): Promise<CapabilityCard | null> {
+export async function recordEntry(path: string): Promise<Recorded | null> {
   const source = await readFile(path, 'utf8').catch(() => '');
   if (source === '') return null;
 
@@ -268,7 +289,127 @@ export async function probe(path: string): Promise<CapabilityCard | null> {
     // An extension we cannot read is one we will not vouch for either way.
     return null;
   }
-  return cardFrom(taken());
+  return taken();
+}
+
+/* -------------------------------------------------------------------------- */
+/* The disposable process                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** The program that records a card in a process of its own, if this copy has
+ *  one. Built beside the shell like the helper, so packaged and unpackaged
+ *  builds resolve it the same way; `GRAPHE_PROBE_PROGRAM` names another, which
+ *  is how a test drives this path without a built app. */
+export function probeProgram(): string | null {
+  const named = (process.env['GRAPHE_PROBE_PROGRAM'] ?? '').trim();
+  if (named !== '') return existsSync(named) ? named : null;
+  const built = fileURLToPath(new URL('./probe-runner.mjs', import.meta.url));
+  return existsSync(built) ? built : null;
+}
+
+/** What a child said, if it said anything this understands. Anything else —
+ *  a factory's own logging, half a line, a card from another version — is
+ *  nothing, which is what an add-on we could not read gets.
+ *
+ *  The last line that parses wins, not the first: the child writes its answer
+ *  after the factory has run, so a marker-shaped line the factory printed
+ *  itself is earlier than the answer and does not stand for it. */
+function recordedFrom(output: string): Recorded | null {
+  let said: Recorded | null = null;
+  for (const line of output.split('\n')) {
+    if (!line.startsWith(PROBE_MARKER)) continue;
+    try {
+      const held = JSON.parse(line.slice(PROBE_MARKER.length)) as { recorded?: unknown };
+      said = (held.recorded ?? null) as Recorded | null;
+    } catch {
+      // Not the shape a marker carries, so nothing is known from this line:
+      // whatever an earlier one said still stands.
+    }
+  }
+  return said;
+}
+
+/**
+ * Read one card in a process that can be ended.
+ *
+ * A trusted factory may loop for ever without ever yielding, and a promise race
+ * cannot touch that: the thread it would run on is the one that is busy. So the
+ * factory runs in a child, and the deadline is kept here, where it can always
+ * be kept — the child is killed, and the card is nothing.
+ */
+export async function probeInChild(
+  program: string,
+  path: string,
+  deadlineMs = PROBE_MS,
+): Promise<CapabilityCard | null> {
+  const { promise, resolve } = Promise.withResolvers<Recorded | null>();
+  let said = '';
+  /** The deadline passed, so whatever the child eventually says is not an answer. */
+  let late = false;
+  let settled = false;
+  const child = spawn(process.execPath, [program, path], {
+    // Electron's own binary is not Node until it is told to be.
+    env: { ...process.env, [RUN_AS_NODE]: '1' },
+    // The child's error output goes nowhere rather than down a pipe: nothing
+    // reads it, and a pipe nobody drains stops a factory that fills it.
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  });
+  const settle = (answer: Recorded | null): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(bell);
+    clearTimeout(grace);
+    // A child nobody is waiting for must not hold this process open.
+    child.unref();
+    child.stdout?.removeAllListeners();
+    resolve(answer);
+  };
+  const bell = setTimeout(() => {
+    late = true;
+    child.kill('SIGKILL');
+    // The caller is told once the process is gone rather than the moment the
+    // signal is sent, so nothing is left being killed behind an answer. A kill
+    // that somehow does not land still resolves, on a grace of its own.
+    grace = setTimeout(() => settle(null), KILL_GRACE_MS);
+  }, deadlineMs);
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  child.stdout?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    // Drop from the front, not the back: the answer is the last thing written,
+    // so a factory that logs past the cap scrolls itself out, not the answer.
+    said = (said + chunk).slice(-PROBE_OUTPUT_MOST);
+  });
+  child.on('error', () => {
+    late = true;
+    settle(null);
+  });
+  child.on('close', () => settle(late ? null : recordedFrom(said)));
+
+  const recorded = await promise;
+  if (recorded === null) return null;
+  try {
+    return cardFrom(recorded);
+  } catch {
+    // Whatever arrived is not the shape of a recording.
+    return null;
+  }
+}
+
+/**
+ * What this extension will do.
+ *
+ * In a process of its own whenever one is available, so a factory that never
+ * yields costs a card and a killed child rather than the whole app. Without a
+ * program to run — a copy of the app that has not been built, a test that has
+ * not asked for one — the factory runs here, where the deadline above cannot
+ * reach it, and that limit is stated rather than hidden.
+ */
+export async function probe(path: string): Promise<CapabilityCard | null> {
+  const program = probeProgram();
+  if (program !== null) return probeInChild(program, path);
+  const recorded = await recordEntry(path);
+  return recorded === null ? null : cardFrom(recorded);
 }
 
 /** How many add-ons are read at once.

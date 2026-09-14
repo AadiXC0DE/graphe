@@ -134,37 +134,67 @@ export function canonical(path: string): string {
  *
  * Anything unreadable comes back as an empty index with the reason attached
  * rather than as a throw: losing the registry is bad, and refusing to start is
- * worse. The caller is expected to quarantine the file it could not read.
+ * worse. `verdictOn` says what the caller does with that: a damaged file is
+ * kept aside, a file from a newer app is left alone.
  */
-export function parseIndex(text: string): { index: WorkspaceIndex; problem: string | null } {
+export type IndexReading = {
+  index: WorkspaceIndex;
+  /** Why it could not be read, when it could not. */
+  problem: string | null;
+  /**
+   * True when the file is a profile written by a *newer* version of this app.
+   *
+   * That is not corruption and must not be treated as it: an older build that
+   * meets a newer index has to refuse to write rather than move somebody's
+   * record of where their work was out of the way and start empty. The caller
+   * decides what to do, and the only safe answer is to leave the file alone.
+   */
+  future: boolean;
+};
+
+export function parseIndex(text: string): IndexReading {
   let held: unknown;
   try {
     held = JSON.parse(text);
   } catch (cause) {
-    return { index: emptyIndex(), problem: `not JSON: ${String(cause)}` };
+    return { index: emptyIndex(), problem: `not JSON: ${String(cause)}`, future: false };
   }
-  const one = held as Partial<WorkspaceIndex> | null;
+  const one = held as { version?: unknown } | null;
+  if (
+    typeof one === 'object' &&
+    one !== null &&
+    typeof one.version === 'number' &&
+    Number.isFinite(one.version) &&
+    one.version > INDEX_VERSION
+  ) {
+    return {
+      index: emptyIndex(),
+      problem: `written by a newer version (index ${String(one.version)})`,
+      future: true,
+    };
+  }
   if (one === null || typeof one !== 'object' || one.version !== INDEX_VERSION) {
-    return { index: emptyIndex(), problem: `not a version ${String(INDEX_VERSION)} index` };
+    return { index: emptyIndex(), problem: `not a version ${String(INDEX_VERSION)} index`, future: false };
   }
+  const asIndex = one as Partial<WorkspaceIndex>;
   // Field by field: a half-written index costs the rows it lost, not the ones
   // it kept. A record without an id or a folder is not a workspace.
   const workspaces: Record<string, WorkspaceRecord> = {};
-  for (const [id, value] of Object.entries(asRecord(one.workspaces))) {
+  for (const [id, value] of Object.entries(asRecord(asIndex.workspaces))) {
     const record = readWorkspace(value);
     if (record !== null) workspaces[id] = record;
   }
   const projects: Record<string, ProjectRecord> = {};
-  for (const [id, value] of Object.entries(asRecord(one.projects))) {
+  for (const [id, value] of Object.entries(asRecord(asIndex.projects))) {
     const record = readProject(value);
     if (record !== null) projects[id] = record;
   }
   const byRoot: Record<string, string> = {};
-  for (const [root, id] of Object.entries(asRecord(one.byRoot))) {
+  for (const [root, id] of Object.entries(asRecord(asIndex.byRoot))) {
     if (typeof id === 'string' && projects[id] !== undefined) byRoot[root] = id;
   }
   const conversations: Record<string, ConversationRecord> = {};
-  for (const [conversation, held] of Object.entries(asRecord(one.conversations))) {
+  for (const [conversation, held] of Object.entries(asRecord(asIndex.conversations))) {
     // The first version of this index stored the workspace id alone. A profile
     // written by it opens with the same link and nothing else known.
     if (typeof held === 'string') {
@@ -190,7 +220,20 @@ export function parseIndex(text: string): { index: WorkspaceIndex; problem: stri
     const record = readConversation(conversation, held, workspaces);
     if (record !== null) conversations[conversation] = record;
   }
-  return { index: { version: INDEX_VERSION, projects, byRoot, workspaces, conversations }, problem: null };
+  return {
+    index: { version: INDEX_VERSION, projects, byRoot, workspaces, conversations },
+    problem: null,
+    future: false,
+  };
+}
+
+/** What a reader should do with what it found: use it, keep it out of the way,
+ *  or leave it exactly where it is because an older app cannot judge it. */
+export type IndexVerdict = 'use' | 'quarantine' | 'leave-alone';
+
+export function verdictOn(read: IndexReading): IndexVerdict {
+  if (read.problem === null) return 'use';
+  return read.future ? 'leave-alone' : 'quarantine';
 }
 
 export function serializeIndex(index: WorkspaceIndex): string {

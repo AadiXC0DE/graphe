@@ -1106,9 +1106,10 @@ export type Overview = {
   repos?: readonly RepoOverview[];
   /**
    * The address of the live preview being served for this folder, or null when
-   * nothing is being served. The window shows its preview button only while
-   * this is set — a preview that exists gets a button; one that does not gets
-   * nothing.
+   * nothing is being served there. The window shows its preview button only
+   * while this is set — a preview that exists gets a button; one that does not
+   * gets nothing. A preview of somewhere else is not this folder's, and is
+   * reported as nothing.
    */
   preview: string | null;
   /** Things the last turn made that are worth looking at rather than reading. */
@@ -1658,6 +1659,29 @@ export const CHANNEL = {
 } as const;
 
 /**
+ * One picture of a preview, and which preview it is a picture of.
+ *
+ * The shell takes a picture of the agent's browser every second or so and sends
+ * it to the window, which draws whatever arrives. What arrives can be of
+ * something the window is not showing any more — another workspace's browser, or
+ * this one before a reload — so every picture says what it is of. The window
+ * draws the ones that match what it is showing and drops the rest, rather than
+ * putting a view of somewhere else on screen as though it were current.
+ */
+export type PreviewFrame = {
+  /** The preview's own id. The same for as long as this browser is the one
+   *  being shown; a different one is a different preview. */
+  preview: string;
+  /** The project whose browser it is, which is what the window asked about. */
+  project: string;
+  /** One more each time the window starts looking again, so a picture taken
+   *  before a reload cannot be mistaken for the one now. */
+  epoch: number;
+  /** The picture itself, base64, as the shell encoded it. */
+  bytes: string;
+};
+
+/**
  * Everything the window may ask the shell to do. All of it.
  *
  * There is no `invoke(channel, ...args)` here on purpose. A generic escape hatch
@@ -1800,8 +1824,9 @@ export type GrapheApi = {
   /** Watch what the browser is doing, a picture at a time, or stop. The
    *  pictures arrive on `onBrowserFrame`. */
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
-  /** Each picture of the browser, while somebody is watching one. */
-  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void;
+  /** Each picture of the browser, while somebody is watching one. Each one says
+   *  which preview it is of; the window draws the ones matching what it shows. */
+  onBrowserFrame(listener: (frame: PreviewFrame) => void): () => void;
   /** Start a document-to-build: name a document and an optional instruction,
    *  and the shell turns it into a plan. */
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
@@ -2001,19 +2026,28 @@ export type GrapheApi = {
    *  A null rectangle closes it. */
   /** Where the page is drawn, and what it shows. Moving it never reloads it:
    *  the box is reported whenever the window changes shape, and a turn full of
-   *  tool calls changes it many times. `again` is the reload press. */
+   *  tool calls changes it many times. `again` is the reload press.
+   *
+   *  The page is one native view for the whole window, so `where` is not
+   *  optional here: it names the project whose page this is, and a call that
+   *  names another project, or none, is refused rather than pointed at
+   *  whichever page happens to be up. */
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
-    again?: boolean,
+    again: boolean,
+    where: Where,
   ): Promise<Result<null>>;
-  /** Take the page out of the way while something is drawn over it. */
-  pageHidden(hidden: boolean): Promise<Result<null>>;
+  /** Take the page out of the way while something is drawn over it. `where`
+   *  names the project whose page it is, as `pageAt` does. */
+  pageHidden(hidden: boolean, where: Where): Promise<Result<null>>;
   /** Watch how somebody uses the page, capturing every state with the thing
-   *  that produced it. `says` is what they are trying, in their own words. */
-  watchStart(says?: string): Promise<Result<null>>;
-  /** Stop watching and keep what was seen. Null when nothing was. */
-  watchStop(): Promise<Result<Recording | null>>;
+   *  that produced it. `says` is what they are trying, in their own words.
+   *  `where` names the project whose page it is, as `pageAt` does. */
+  watchStart(says: string | undefined, where: Where): Promise<Result<null>>;
+  /** Stop watching and keep what was seen. Null when nothing was. `where`
+   *  names the project whose page it is, as `pageAt` does. */
+  watchStop(where: Where): Promise<Result<Recording | null>>;
 
   /** What can be added to Graphe. A search term looks past the ones we ship. */
   packages(term?: string): Promise<Result<readonly Pack[]>>;

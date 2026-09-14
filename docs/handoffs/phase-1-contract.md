@@ -66,5 +66,9 @@ wired into the shell. The remaining consumers are listed in the phase 5 handoff.
 | The nine phase 1.2 regressions | Partly. Covered by new tests: untrusted extension discovery (marker), extension asks (host + card), waiting panel ownership, listing honesty, workspace identity. Not covered by an automated test: "New B sees A's uncommitted edit", "selecting B changes nothing of A's", "A's image does not appear in B", "delayed A results after B selection", "restart resumes an isolated conversation's cwd". Each needs a real Electron run | phase 10 |
 | Legacy unqualified-call counter | Not done | phase 5 |
 
-Exit criteria: not met as written (the Electron-level evidence is missing). The
-three containment changes are in, tested, and green.
+Exit criteria: the three containment changes are in, tested and green, and the
+real-window layer now exists and runs in CI (`Electron smoke`), where it boots
+the shipped app on a disposable profile, opens a project by pressing its row and
+holds two conversations apart. What is still missing is the rest of the 1.2 list
+at that layer: a scripted provider in the Electron suite is what T01, T21, T25,
+T44 and T47 in the phase 10 catalogue are waiting on.

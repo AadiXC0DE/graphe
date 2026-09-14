@@ -32,8 +32,9 @@ window test for those today would be a test of a modal, not of the scenario.
 | --- | --- |
 | `npx vitest run tests/scenarios` | 11 files, **96 tests passed**, no skips, no failures (54 s wall on this machine) |
 | `npx tsc --noEmit -p <config narrowed to tests/scenarios + tests/helpers>` | clean, 46 s |
-| `npx tsc --noEmit` (whole tree) | not clean, and **no error is in a file this task touched**. Every error is in a `src/**` file another workstream is editing on this branch: `src/App.tsx` (unused `Look`, `Move`, `panelRepo`, `inStep`, `lookingAtFigma`, `askFigma`), `src/components/Overview.tsx` (unused `useMemo`), `src/gallery/Gallery.tsx` (`styles` not on `OverviewView`, missing `onOpenDesign`), and at the time of writing `src/design/moved.ts` importing a `./drift` module that is not on disk and `src/lib/projects.ts` reading `Overview.styles` while that field is being moved. The narrowed run above reports only those two, and nothing under `tests/scenarios/` in either run |
-| `npm run test:electron` | not run: it builds and launches a real Electron window, and no test added here needs it |
+| `npx tsc --noEmit` (whole tree) | clean at hand-off time. While this task ran it was red with other workstreams' in-flight edits; those are all landed and the tree compiles |
+| `npm run test:electron` | **run and green**: 2 tests, a real window on a disposable profile. It does not cover this catalogue's turn-dependent cases (see above) but it caught the switch-back defect recorded below |
+| `npx vitest run` (whole suite) | 330 files passed, 1 skipped, **6739 tests passed**, 2 skipped, including all 96 here |
 
 Three of the tests are `it.fails(...)`: vitest counts them as passing when they
 fail, which is what they are for. Each names its finding in the comment above it.

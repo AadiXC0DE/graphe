@@ -27,7 +27,7 @@ every key in it yours to change.
 
 <br>
 
-<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is running in the background, what is on a schedule, and what the sitting has cost.">
+<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is running in the background and what the sitting has cost.">
 
 </div>
 

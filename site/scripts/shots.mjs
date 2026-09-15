@@ -61,17 +61,13 @@ async function ensureServer() {
 /** The pieces of the interface the page shows, by the heading they sit under in
  *  the gallery. Each becomes one picture per theme. */
 const PIECES = [
-  ['see-it-before-you-say-yes', 'See it before you say yes'],
-  ['evidence', 'Evidence, not a diff'],
   ['versions', 'Version timeline'],
   ['background-work', 'Background work'],
   ['design', 'Design'],
-  ['ready-to-ship', 'Ready to ship'],
   ['cost', 'Cost'],
   ['helpers', 'Who else is working'],
   ['show-me', 'Show me'],
   ['history-lines', 'History, as lines'],
-  ['in-step-with-figma', 'In step with Figma'],
   ['doing', 'What it is doing, while it does it'],
 ];
 

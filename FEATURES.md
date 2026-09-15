@@ -84,7 +84,7 @@ Any address, not just your own site: open it, read it, press things, type into t
 For the tools that aren't websites. A picture of the screen, then press, type, drag and scroll on it, the same moves you would make. The two permissions are the ones every other agent asks for, and until they are given it says so and opens the right setting rather than failing quietly.
 
 **26 · A folder that holds several projects**
-Open a working directory with `backend/` and `frontend/` beside each other and both are simply there: each with its own line of work to move between, its own versions to save and go back to, its own press to see it running or hand it on. The folder itself is left a plain folder, nothing is created in it to make it look like one project.
+Open a working directory with `backend/` and `frontend/` beside each other and both are simply there: each with its own line of work to move between, its own versions to save and go back to, its own press to see it running. The folder itself is left a plain folder, nothing is created in it to make it look like one project.
 
 **27 · The browser stays signed in, when you say so**
 One switch per project. On, the browser keeps what it is signed in to between sittings, so a staging site or a dashboard is signed into once rather than every run. Off, where it starts, every page opens in a browser that has never been anywhere, and turning it off again forgets what was kept.

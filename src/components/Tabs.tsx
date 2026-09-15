@@ -37,11 +37,18 @@ type Props = {
   /** Put a tab somewhere else in the row. Left out where the row cannot be
    *  rearranged, and then nothing in it is draggable. */
   onReorder?: (id: string, to: number) => void;
+  /** Show the conversation in a second pane. Left out where the window cannot
+   *  hold one, and then the press is not offered. */
+  onSplit?: () => void;
 };
 
 export const SAYS = {
   label: 'What you have open',
   add: 'New conversation',
+  /** Beside the press that starts a conversation, because that is where
+   *  somebody choosing one is already looking. The operation, not a sentence
+   *  about it. */
+  split: 'Split',
   close: (title: string) => `Close ${title}`,
   more: 'Everything open',
   states: {
@@ -62,7 +69,7 @@ export const SAYS = {
  * working and having the tab tell you when it needs you is the whole reason
  * tabs exist here, and it is what a side panel of background agents gets wrong.
  */
-export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Props) {
+export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder, onSplit }: Props) {
   const [listing, setListing] = useState(false);
   /** The tab under the hand, and where it would land. Held here rather than on
    *  the event, because a drop needs both and only one of them is in it. */
@@ -339,6 +346,16 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
           <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
         </svg>
       </button>
+
+      {/* Beside it, because this is where somebody choosing a conversation is
+          already looking: the second pane shows this same chat beside itself.
+          Drawn only where the window can hold one, so the press is never a
+          control that reaches nothing. */}
+      {onSplit === undefined ? null : (
+        <button type="button" className="tabs__split" onClick={onSplit} title={SAYS.split}>
+          {SAYS.split}
+        </button>
+      )}
 
       {/* The strip scrolls; this lists everything, marks and all, for the ones
           that have scrolled out of sight. */}

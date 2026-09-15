@@ -47,7 +47,6 @@ function draw(over: Record<string, unknown> = {}): HTMLDivElement {
         open: true,
         onToggle: NOTHING,
         onAsk: NOTHING,
-        onCanvas: NOTHING,
         onHistory: NOTHING,
         onReviews: NOTHING,
         onReviewQueue: NOTHING,
@@ -96,11 +95,20 @@ describe('the places the shelf can go', () => {
     expect(placesIn(draw({ open: false }), '.shelf__act', 'tip').at(-1)).toBe('Settings');
   });
 
+  /* A place is drawn only where it has somewhere to go, and the retired
+     designer screens have nowhere at all — so their names must not be in the
+     list at any width. */
   it('leaves out a place with nowhere to go, in both', () => {
-    expect(placesIn(draw({ open: true, onCanvas: undefined }), '.shelf__more', 'tip')).not.toContain('Canvas');
+    expect(placesIn(draw({ open: true, onHistory: undefined }), '.shelf__more', 'tip')).not.toContain('History');
     act(() => root?.unmount());
     host?.remove();
-    expect(placesIn(draw({ open: false, onCanvas: undefined }), '.shelf__act', 'tip')).not.toContain('Canvas');
+    expect(placesIn(draw({ open: false, onHistory: undefined }), '.shelf__act', 'tip')).not.toContain('History');
+  });
+
+  it('offers no name for a screen that was retired', () => {
+    const tips = [...placesIn(draw({ open: true }), '.shelf__more', 'tip')];
+    expect(tips).not.toContain('Canvas');
+    expect(tips).not.toContain('Design');
   });
 });
 

@@ -148,6 +148,9 @@ describe('a plan with nothing in it', () => {
  *  the same way the stale-folder rule is: on the source. */
 describe('the window actually sends what was decided', () => {
   const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  /** One row of the conversation, drawn. The card that shows a plan's questions
+   *  lives here now, because the window draws two transcripts. */
+  const ROW = readFileSync(new URL('../src/components/Turnstile.tsx', import.meta.url), 'utf8');
 
   it('hands the decision to the message rather than dropping it', () => {
     expect(APP).toMatch(/decidedMessage\(chosen\.decision\)/);
@@ -164,7 +167,7 @@ describe('the window actually sends what was decided', () => {
   });
 
   it('still passes the questions to the card that draws them', () => {
-    expect(APP).toMatch(/questions=\{turn\.questions\}/);
+    expect(ROW).toMatch(/questions=\{turn\.questions\}/);
   });
 });
 

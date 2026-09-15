@@ -4,9 +4,12 @@
  * index and whatever the renderer has selected: identity is generated here and
  * never inferred from any of them. The brand is what makes that checkable, by
  * keeping a raw string from standing in for an id by accident.
+ *
+ * `globalThis.crypto` rather than `node:crypto`: this module is imported by the
+ * window as well as by the shell — a native page's id is minted where the page
+ * is drawn — and a `node:` import cannot be bundled for a renderer. Node 22 and
+ * Chromium both have it, and both draw from the same source of randomness.
  */
-
-import { randomUUID } from 'node:crypto';
 
 declare const idBrand: unique symbol;
 
@@ -51,7 +54,7 @@ export type Sequence = number & { readonly [idBrand]: 'Sequence' };
 
 /** A fresh id. Generated, never derived from a path, a name or a selection. */
 export function newId<B extends string>(): Id<B> {
-  const raw: string = randomUUID();
+  const raw: string = globalThis.crypto.randomUUID();
   return raw as Id<B>;
 }
 

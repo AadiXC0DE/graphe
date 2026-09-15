@@ -452,7 +452,10 @@ describe('the window answers to it', () => {
      coordinate the window and the record can both arrive at. */
   it('sends where a message stands with a fork of it', () => {
     expect(app).toContain('bridge.forkConversation(path, said ?? null, where)');
-    expect(app).toContain('onForkHere(saidBy)');
+    // The press is drawn by the row's own module, which the window reaches by
+    // a dynamic import: one row of a conversation, in either transcript.
+    const row = readFileSync(new URL('../../src/components/Turnstile.tsx', import.meta.url), 'utf8');
+    expect(row).toContain('onForkHere(saidBy)');
     expect(main).toContain('from.held.forkAfter(boundary)');
   });
 

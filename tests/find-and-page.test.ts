@@ -86,7 +86,10 @@ describe('drawing the tail of a long conversation', () => {
   });
 
   it('is drawn by the thread, and asking for more asks for a page at a time', () => {
-    expect(app).toContain('const paged = lastTurns(chat.turns, drawing);');
+    // The tail arithmetic is one piece of arithmetic for both transcripts the
+    // window can draw, so it lives in the module they share.
+    expect(source('src/lib/threadview.ts')).toContain('lastTurns(turns, drawing)');
+    expect(app).toContain('drawnFrom(chat.turns, drawing, apart)');
     expect(app).toContain('setDrawing((was) => was + AT_FIRST)');
   });
 

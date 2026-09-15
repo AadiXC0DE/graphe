@@ -248,11 +248,38 @@ export type WorktreePlan = {
   setup: SetupHere;
 };
 
+/**
+ * A conversation whose recorded folder is not usable any more.
+ *
+ * The registry and the migration both write this down, and until the window is
+ * told about it a chat whose folder was deleted is indistinguishable from one
+ * whose folder is there. It is carried rather than inferred: only the shell can
+ * see the folder, and a window that guessed would either hide a real problem or
+ * invent one.
+ */
+export type WorkspaceTrouble = {
+  /** The folder it was recorded in, as it was written down. What somebody
+   *  needs in order to recognise where the work used to be. */
+  folder: string;
+  /** Gone, or there and something else. Two different problems, and both mean
+   *  this conversation cannot be opened where it says it works. */
+  state: 'missing' | 'recovery-required';
+  /** One sentence about it, built by src/work/recovery.ts so the window and
+   *  the shell cannot say different things. */
+  because: string;
+};
+
 export type OpenedProject = {
   /** Absolute path. Shown only if the user asks for it. */
   path: string;
   /** The folder's own name, which is what people call their project. */
   name: string;
+  /** True when this conversation is on screen read-only because the folder it
+   *  works in is gone. Nothing may be sent from it: the box is refused and
+   *  `unavailable` says why. */
+  readOnly?: boolean;
+  /** Why, when it is. Absent on every ordinary open. */
+  unavailable?: WorkspaceTrouble;
   /** What a continued conversation opens with, as a draft: written from the
    *  conversation it came from, and editable before it is sent. Absent unless
    *  this conversation was started by continuing another. */
@@ -391,6 +418,11 @@ export type Conversation = {
    *  is the only side that knows: a conversation with a turn in flight says so
    *  even after its tab has been closed. */
   state?: SessionState;
+  /** Set when the folder this conversation works in is gone, or is no longer a
+   *  checkout of this project. The row can then say so before somebody opens
+   *  it and finds out. Absent when there is nothing to say, which is every
+   *  conversation whose folder is where it was left. */
+  workspace?: WorkspaceTrouble;
 };
 
 /**
@@ -1582,6 +1614,9 @@ export const CHANNEL = {
   conversationContinue: 'graphe:conversation-continue',
   conversationFork: 'graphe:conversation-fork',
   conversationArchive: 'graphe:conversation-archive',
+  /** Point a conversation at the folder its work is in now, when the one it
+   *  recorded is gone. */
+  conversationRelink: 'graphe:conversation-relink',
   extensionAsk: 'graphe:extension-ask',
   extensionAnswer: 'graphe:extension-answer',
   worktreeNew: 'graphe:worktree-new',
@@ -2056,6 +2091,16 @@ export type GrapheApi = {
     on: boolean,
     where?: Where,
   ): Promise<Result<readonly Conversation[]>>;
+  /**
+   * Point this conversation at the folder its work is in now.
+   *
+   * The one repair for a conversation whose recorded folder is gone, and
+   * deliberately the only one: the record is moved onto the folder chosen, so
+   * the same conversation carries on in the same transcript and the runtime it
+   * holds. A folder that is not there, or is not a checkout of this project,
+   * is refused with a sentence and nothing is changed.
+   */
+  relinkConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>>;
   /** Start a shell in the workspace this call names. There is no command
    *  argument on purpose: a terminal is keystrokes, not an execution door. */
   terminalOpen(

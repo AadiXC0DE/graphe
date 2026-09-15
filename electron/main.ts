@@ -68,6 +68,7 @@ import {
   listAllConversations,
   notePackagedApp,
   packageHost,
+  readTranscript,
   type Conversation,
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
@@ -122,6 +123,7 @@ import {
   type Hatches,
   type ModelChoice,
   type OpenedProject,
+  type WorkspaceTrouble,
   type SetupHere,
   type SetupState,
   type WorktreePlan,
@@ -289,6 +291,13 @@ import { inFlight, movedByWork, reportedState, Sessions, type WorkEvent } from '
 import { asConversationId, newConversationId, type ConversationId } from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
 import { handoffMessage } from '../src/work/continuing';
+import {
+  isUnusable,
+  usableWhereRecorded,
+  unavailableFor,
+  whyNotRelink,
+  type FolderFacts,
+} from '../src/work/recovery';
 import {
   MARKER_FILE,
   LOCK_FILE,
@@ -3473,10 +3482,18 @@ async function conversationsInProject(
       const putAway =
         conversationById(index, one.path)?.archived === true ||
         conversationById(index, one.id)?.archived === true;
+      // The folder this conversation works in, when the shell can tell which
+      // one that is. A row can then say the folder is gone before somebody
+      // opens it and finds out, which is what the registry was written for and
+      // none of what it was reaching.
+      const workspace =
+        workspaceForConversation(index, one.path) ?? workspaceForConversation(index, one.id);
+      const trouble = workspaceTrouble(workspace);
       return {
         ...one,
         archived: putAway,
         state: reportedState(states.stateOf(named(one.path)), putAway),
+        ...(trouble === null ? {} : { workspace: trouble }),
       };
     }),
   };
@@ -4795,6 +4812,71 @@ async function startConversation(
 
 /** A conversation now live, and anything the window should say over it once. */
 type Started = { session: GrapheSession; address: string; note?: string };
+
+/** A saved conversation read off disk with no session behind it.
+ *
+ * This is what "open read-only" is: the words are there and nothing can be
+ * asked of them. There is no working directory to run in, so no runtime is
+ * built, nothing is resumed and no file is touched — which is the honest answer
+ * for a conversation whose folder is gone. */
+type ReadOnly = { address: string; conversation: string | null; history: readonly AgentEvent[] };
+
+/** Whether a recorded folder is really this conversation's workspace now.
+ *
+ * Read rather than assumed, and only when there is a key to compare: a folder
+ * holding a different repository at the path this conversation recorded is not
+ * where its work is, and handing it over would edit somebody else's project. A
+ * record with no key has nothing to compare against, which is not a mismatch. */
+async function folderFacts(record: WorkspaceRecord): Promise<FolderFacts> {
+  if (!existsSync(record.cwd)) return { present: false, sameRepository: false };
+  if (record.repoKey === null) return { present: true, sameRepository: true };
+  const here = await repoKeyOf(gitRunHereFor(), record.cwd).catch(() => null);
+  return { present: true, sameRepository: here === null || here === record.repoKey };
+}
+
+/** What the window is told about a workspace it cannot use, or null when there
+ *  is nothing to say. `displayPath` is what the record was written with, which
+ *  is what somebody recognises. */
+function workspaceTrouble(record: WorkspaceRecord | null): WorkspaceTrouble | null {
+  if (record === null) return null;
+  const said = unavailableFor({ state: record.state, folder: record.displayPath });
+  if (said === null) return null;
+  return {
+    folder: said.folder,
+    state: record.state === 'recovery-required' ? 'recovery-required' : 'missing',
+    because: said.because,
+  };
+}
+
+/**
+ * A conversation whose recorded workspace cannot be used, opened read-only.
+ *
+ * The plan's rule for this state: where the folder and its branch are both gone
+ * there is nothing to reconstruct, so the transcript is read and shown and the
+ * window is told why. Deliberately not an error card, and deliberately not a
+ * silent fallback into the project folder — either would leave somebody
+ * believing they were editing their own copy.
+ *
+ * Null when there is no record, or the record is usable: both are ordinary
+ * opens and go on to build a session.
+ */
+async function readOnlyOpening(
+  asked: string,
+  record: WorkspaceRecord | null,
+): Promise<ReadOnly | null> {
+  if (record === null || !isUnusable(record.state)) return null;
+  if (usableWhereRecorded(record.state, await folderFacts(record))) return null;
+  const conversation = conversationById(await loadWorkspaceIndex(), asked);
+  const file = conversation?.sessionFile ?? null;
+  // The words are the whole of it. A transcript that will not read is still not
+  // an error to shout about: there is nothing to show, and the band above says
+  // the thing worth acting on, which is where the folder went.
+  const history =
+    file === null
+      ? []
+      : await readTranscript(file).then((read) => (read.ok ? read.value : []));
+  return { address: conversation?.conversationId ?? asked, conversation: file, history };
+}
 
 /**
  * Start a conversation in a project, and put it in front of the others.
@@ -8670,6 +8752,26 @@ function register(): void {
     const [path, , pressed] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
+    // A conversation whose recorded folder is gone opens read-only rather than
+    // being quietly opened somewhere else. Checked before anything is built,
+    // because the whole of it is that no session is made: there is no working
+    // directory to run one in.
+    if (typeof path === 'string' && path !== '') {
+      const record = await recordedWorkspace(path);
+      const read = await readOnlyOpening(path, record);
+      if (read !== null) {
+        const said = workspaceTrouble(record);
+        return done({
+          path: open.path,
+          name: open.name,
+          history: read.history,
+          conversation: read.conversation,
+          address: read.address,
+          readOnly: true,
+          ...(said === null ? {} : { unavailable: said }),
+        });
+      }
+    }
     // The one already open stays open. Moving between conversations is moving
     // between things that are both still going on, and the ledger belongs to the
     // sitting rather than to either of them, so it stays too.
@@ -8874,6 +8976,76 @@ function register(): void {
     const listed = await conversationsInProject(open.path);
     if (!listed.ok) return fail(NOTHING_OPEN);
     return done(listed.value);
+  });
+
+  /**
+   * Point a conversation at the folder its work is in now.
+   *
+   * The one thing that repairs a conversation whose recorded folder is gone,
+   * and deliberately the only thing: the record is moved onto the folder
+   * somebody chose, so the same conversation carries on in the same transcript
+   * with the same runtime, and nothing is copied. A folder that is not there, or
+   * that holds a different repository, is refused with a sentence and nothing is
+   * changed — the alternative is an agent editing somebody else's files while
+   * the window says it is working on this one.
+   */
+  handle<OpenedProject>(CHANNEL.conversationRelink, async (_event, args) => {
+    const [folder] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const asked = where.conversation;
+    if (typeof asked !== 'string' || asked === '') return fail(NO_SUCH_ENTRY);
+    const record = await recordedWorkspace(asked);
+    if (record === null) return fail(NO_SUCH_ENTRY);
+    if (typeof folder !== 'string' || folder === '') {
+      return fail({
+        what: 'No folder was chosen.',
+        because: 'Choose the folder this conversation should work in, and press again.',
+        actionLabel: 'Got it',
+      });
+    }
+    const chosen = canonical(folder);
+    const found = await stat(chosen).catch(() => null);
+    const facts: FolderFacts =
+      found === null || !found.isDirectory()
+        ? { present: false, sameRepository: false }
+        : {
+            present: true,
+            sameRepository:
+              record.repoKey === null ||
+              (await repoKeyOf(gitRunHereFor(), chosen).catch(() => null)) === record.repoKey,
+          };
+    const refused = whyNotRelink(facts);
+    if (refused !== null) {
+      return fail({ what: 'That folder cannot be used.', because: refused, actionLabel: 'Got it' });
+    }
+    await loadWorkspaceIndex();
+    // The workspace the conversation now works in: the folder somebody chose,
+    // written down as a workspace of this project. `addWorkspace` hands back the
+    // record already there when this folder is one, so pointing twice is one.
+    const ensured = ensureProject(workspaceIndex, open.path);
+    const added = addWorkspace(ensured.index, {
+      projectId: ensured.project.projectId,
+      path: chosen,
+      kind: 'worktree',
+      managed: false,
+      createdBy: 'relink',
+      now: Date.now(),
+    });
+    workspaceIndex = added.index;
+    const verified = await rememberRepo(added.workspace);
+    workspaceIndex = attachConversation(workspaceIndex, asked, verified.workspaceId);
+    await saveWorkspaceIndex();
+    // A checkout row still filed under the old folder would spread the
+    // conversation out somewhere else again, so it goes: the folder just chosen
+    // is where its work is, and that is what the record now says.
+    if (open.held.checkouts.delete(asked)) {
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    }
+    const started = await startConversation(open, openingFor(asked, false));
+    if (!started.ok) return started;
+    return done(openedFrom(open, started.value));
   });
 
   /**

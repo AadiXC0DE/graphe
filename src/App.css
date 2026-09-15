@@ -1091,3 +1091,45 @@ p {
   right: var(--browser-take);
 }
 
+
+/* The second pane: another conversation of the same project, read beside the
+   one being worked on.
+
+   It is a real second view rather than a second window — the same desk holds
+   both conversations whole, so nothing is fetched and no second session is
+   built. It takes no typing: the hand is in the focused pane, and this one is
+   for reading what is happening next to what you are working on.
+
+   Laid out beneath the column rather than beside it, because the window's
+   scroller is the page itself (use-stick-to-bottom watches `.app`) and a
+   side-by-side split would put a second scroller inside a scroller. The
+   conversation being typed into stays the one that owns the page's scroll
+   position, which is what keeps "jump to latest" honest. */
+.beside {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-width: var(--thread-width);
+  margin: var(--space-5) auto var(--space-6);
+  padding: 0 var(--column-pad);
+  border-top: 1px solid var(--border);
+}
+
+.beside__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-2);
+}
+
+.beside__name {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.beside__scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}

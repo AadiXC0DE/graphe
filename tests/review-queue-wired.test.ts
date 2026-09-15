@@ -260,7 +260,9 @@ describe('the bridge is whole', () => {
   });
 
   it('opens the screen from the palette and from above the composer', () => {
-    expect(APP).toContain("id: 'review-queue', name: 'Review finished work'");
+    // One name for one thing: Review is reviewing a finished change, and the
+    // shelf, the palette and the screen all say it.
+    expect(APP).toContain("id: 'review-queue', name: 'Review'");
     expect(APP).toContain('className="reviewband"');
     expect(APP).toContain('waitingToReview(reviewQ)');
   });

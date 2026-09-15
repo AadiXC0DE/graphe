@@ -839,6 +839,13 @@ const api: GrapheApi = {
     >;
   },
 
+  relinkConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>> {
+    const folder = typeof path === 'string' && path.trim() !== '' ? path : null;
+    return ipcRenderer.invoke(CHANNEL.conversationRelink, folder, named(where)) as Promise<
+      Result<OpenedProject>
+    >;
+  },
+
   onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void {
     const forward = (_event: IpcRendererEvent, ask: ExtensionRequest): void => {
       listener(ask);

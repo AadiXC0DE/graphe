@@ -132,6 +132,21 @@ export function inFlight(state: SessionState): boolean {
 }
 
 /**
+ * What a conversation's runtime shows on a row: a run going, a run that was cut
+ * off, or nothing worth a mark.
+ *
+ * `interrupted` is not `inFlight` — nothing is running — and it is not idle
+ * either: something was asked for and did not finish, which is the one thing a
+ * row must not present as a chat sitting still. That is the whole reason this
+ * is a predicate of its own rather than an `inFlight` test at the call site,
+ * which is what left a killed run reading as a timestamp.
+ */
+export function runMark(state: SessionState): 'working' | 'interrupted' | null {
+  if (inFlight(state)) return 'working';
+  return state === 'interrupted' ? 'interrupted' : null;
+}
+
+/**
  * The things a run does that stop it being `running` without ending it.
  *
  * Both are the run's own to say and neither is visible from the shell

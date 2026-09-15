@@ -152,6 +152,15 @@ type Props = {
   /** The project's files, so `@` can name one. Empty is fine — the list then
    *  offers skills alone, exactly as it did before. */
   tree?: readonly { path: string; folder: boolean }[];
+  /**
+   * Why nothing may be sent from this box, or absent when something can.
+   *
+   * Set for a conversation whose folder is gone: the transcript above is
+   * readable, and there is no working directory for a sentence to be carried
+   * out in. The box says so rather than accepting a message that could only
+   * come back as a failure.
+   */
+  readOnly?: string;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -289,6 +298,7 @@ export default function Composer({
   tree = [],
   workflows,
   waiting,
+  readOnly,
   onWait,
 }: Props) {
   const [value, setValue] = useState('');
@@ -560,6 +570,13 @@ export default function Composer({
   const submit = (mode?: 'steer' | 'followUp') => {
     const text = value.trim();
     if (!text) return;
+    // A conversation whose folder is gone is open to be read, not written to.
+    // Said rather than sent, and the words stay in the box so pointing the chat
+    // at a folder and pressing again is the whole of the fix.
+    if (readOnly !== undefined) {
+      setRefused(readOnly);
+      return;
+    }
     // Said rather than sent. The picture stays in the box, so switching model
     // and pressing again is the whole of the fix.
     if (blindToPictures) {
@@ -1120,7 +1137,7 @@ export default function Composer({
           <button
             className="composer__send"
             onClick={stopping ? onStop : () => submit()}
-            disabled={stopping ? false : !value.trim()}
+            disabled={stopping ? false : readOnly !== undefined ? true : !value.trim()}
             aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
           >
             {stopping ? (
@@ -1163,9 +1180,12 @@ export default function Composer({
 
       {/* Always in the document, empty most of the time. A live region that is
           added at the same moment as its first sentence is a live region a
-          screen reader has no reason to be listening to yet. */}
+          screen reader has no reason to be listening to yet. The read-only
+          sentence is here rather than only after a press: the send button is
+          disabled, and a disabled control with no visible reason beside it is
+          indistinguishable from a broken one. */}
       <p className="composer__refused" role="status">
-        {refused ?? cannotRead}
+        {refused ?? readOnly ?? cannotRead}
       </p>
 
       <input

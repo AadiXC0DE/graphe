@@ -1,7 +1,7 @@
 import { cloneElement, Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { bridge } from '../lib/bridge';
 import type { Conversation, NewerVersion, ProjectItem, RecentProject } from '../lib/ipc';
-import { inFlight } from '../domain/conversations';
+import { runMark } from '../domain/conversations';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { continuationWords } from '../work/continuing';
@@ -33,6 +33,11 @@ export const ACTS_WORDS = {
   stop: 'Stop',
   stopHint: 'End the turn this conversation is in the middle of',
   working: 'Still working',
+  /** Said under a row whose run was cut off by the app stopping. Not the same
+   *  as working and not the same as quiet: something was asked for and did not
+   *  finish, and a row that showed a bare timestamp for it read as a chat
+   *  sitting still. */
+  interrupted: 'Interrupted',
   /** The other way to start a second line of work from this row: in a copy of
    *  the project, on a branch of its own, rather than in the same files. The
    *  card behind it is the one that already exists. */
@@ -116,8 +121,6 @@ type Props = {
   /** The three things the strip can still reach when it is folded. Each one is
    *  left out of the strip when it has nowhere to go. */
   onAsk?: () => void;
-  /** Work in flight, as the graph it already is. */
-  onCanvas?: () => void;
   onHistory?: () => void;
   /** The github pull requests and issues of the project in front. */
   onReviews?: () => void;
@@ -204,12 +207,11 @@ function Pin({
 function placesOf(p: Props): readonly Place[] {
   return [
     { id: 'ask', name: 'Find anything', tip: 'Find anything (⌘K)', on: p.onAsk, icon: <FindIcon /> },
-    { id: 'canvas', name: 'Canvas', tip: 'Canvas', on: p.onCanvas, icon: <CanvasIcon /> },
-    { id: 'history', name: 'History', tip: 'History', on: p.onHistory, icon: <HistoryIcon /> },
+    { id: 'history', name: 'History', tip: 'Commits, branch by branch', on: p.onHistory, icon: <HistoryIcon /> },
     {
       id: 'review',
       name: 'Review',
-      tip: 'Finished work waiting for review',
+      tip: 'Finished work waiting for you',
       on: p.onReviewQueue,
       icon: <ReviewIcon />,
       count: p.reviewsWaiting,
@@ -455,11 +457,17 @@ export default function Sidebar(props: Props) {
                             {/* A turn in flight is the shell's fact, not the
                                 window's: a conversation whose tab was closed is
                                 still working, and a row that stopped saying so
-                                made it look like a chat sitting still. */}
+                                made it look like a chat sitting still. A run
+                                the app was killed in the middle of is the other
+                                half: it is not working any more and it did not
+                                finish, so it is marked rather than dated. */}
                             <span className="shelf__rowsub">
-                              {workingHere.has(one.path) || inFlight(one.state ?? 'unloaded')
+                              {workingHere.has(one.path) ||
+                              runMark(one.state ?? 'unloaded') === 'working'
                                 ? ACTS_WORDS.working
-                                : ago(one.at)}
+                                : runMark(one.state ?? 'unloaded') === 'interrupted'
+                                  ? ACTS_WORDS.interrupted
+                                  : ago(one.at)}
                             </span>
                           </button>
                           {acts === null ? null : (
@@ -507,7 +515,7 @@ export default function Sidebar(props: Props) {
                         {acts === null || menuAt !== one.path ? null : (
                           <Acts
                             title={one.title}
-                            working={workingHere.has(one.path) || inFlight(one.state ?? 'unloaded')}
+                            working={workingHere.has(one.path) || runMark(one.state ?? 'unloaded') === 'working'}
                             onContinue={() => {
                               setMenuAt(null);
                               acts.onContinueConversation(one.path);
@@ -939,21 +947,6 @@ function FindIcon({ size = 14 }: IconProps) {
   );
 }
 
-function CanvasIcon({ size = 14 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1.5" y="5.5" width="4.5" height="5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="10" y="1.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <rect x="10" y="9.75" width="4.5" height="4.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-      <path
-        d="M6 8h2a1.5 1.5 0 0 0 1.5-1.5V6.25M6 8h2a1.5 1.5 0 0 1 1.5 1.5v0.25"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
 
 function HistoryIcon({ size = 14 }: IconProps) {
   return (

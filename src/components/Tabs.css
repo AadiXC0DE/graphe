@@ -297,3 +297,29 @@
 .tabs__tab--landing {
   box-shadow: inset 2px 0 0 var(--accent);
 }
+
+/* The second pane, offered beside the press that starts a conversation: both
+   are about what is open, and a control nobody can see is a feature nobody
+   has. A word rather than an icon, because "split" is the operation and an
+   icon for it is a guess. */
+.tabs__split {
+  flex: none;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-hover),
+    border-color var(--dur-micro) var(--ease-hover);
+}
+
+.tabs__split:hover,
+.tabs__split:focus-visible {
+  border-color: var(--border);
+  color: var(--text);
+}

@@ -1,13 +1,10 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
-import ActivityLine from "./components/ActivityLine";
-import { Shown } from "./components/Shown";
 import type { Attachment } from "./components/Attachments";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Composer from "./components/Composer";
 import CostMeter from "./components/CostMeter";
 import ErrorCard from "./components/ErrorCard";
-import Message from "./components/Message";
 import Overview from "./components/Overview";
 import WorkingMark from "./components/WorkingMark";
 import ProjectPicker from "./components/ProjectPicker";
@@ -27,8 +24,8 @@ import { cssFor, defaultAppearance, type Appearance } from "./design/appearance"
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { drainStarted } from "./lib/queue";
-import { AT_FIRST, foldEvents, lastTurns } from "./lib/hydrate";
-import { threadWords } from "./lib/threadview";
+import { AT_FIRST, foldEvents } from "./lib/hydrate";
+import { drawnFrom, threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece, WaitingSend } from "./agent/types";
 import type {
@@ -59,8 +56,6 @@ import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
-  busyService,
-  longConversation,
   meter,
   nothingSpentYet,
   retryHonesty,
@@ -77,7 +72,6 @@ import {
 } from "./agent/research";
 import { goalElapsed, withElapsed } from "./work/goal";
 import { keyOf, ownerOf } from "./work/owner";
-import { continuationWords } from "./work/continuing";
 import { trashActions } from "./work/trash";
 import { migrationActions } from "./work/migration";
 import { useResearch } from "./hooks/useResearch";
@@ -94,9 +88,8 @@ import { useWhichProject } from "./hooks/useWhichProject";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
 import type { Plans } from "./components/HowToWork";
 import { bridge } from "./lib/bridge";
-import { isAdvisor, lastSaid, opening } from "./lib/describe";
+import { isAdvisor } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
-import { rows } from "./lib/steps";
 import { durationInWords } from "./lib/when";
 import {
   showWords,
@@ -121,6 +114,7 @@ import {
   type HowFar,
   type Money,
   type OpenedProject,
+  type WorkspaceTrouble,
   type AlwaysDoes,
   type AlwaysRow,
   type SavedVersion,
@@ -144,7 +138,6 @@ import { modelKey } from "./lib/ipc";
 import { reviewWords, waiting as waitingToReview, type FileVerdict, type Verdict as QueueVerdict } from "./work/reviewqueue";
 import { usePrefersReducedMotion } from "./lib/motion";
 import { keeping } from "./projects/kept";
-import { behind } from "./lib/showme";
 import {
   changeDesk,
   changeTheFront,
@@ -182,7 +175,23 @@ import {
   type Turn,
 } from "./lib/thread";
 import { NOTHING_SAID } from "./state/conversations";
-import { asMarkdown, wordsOf, COPY_WORDS } from "./lib/transcript";
+import {
+  addPane,
+  closePane,
+  focusPane,
+  focusedConversation,
+  focusedPane,
+  inspectorPane,
+  isPinned,
+  onePane,
+  paneAt,
+  pin,
+  pinnedWords,
+  showIn,
+  type Panes,
+  type ViewId,
+} from "./domain/views";
+import { asMarkdown, COPY_WORDS } from "./lib/transcript";
 import { copyText } from "./lib/copying";
 import { markFor, showing, themeFrom, type Theme } from "./lib/theme";
 import { gitIsMissing, keptAppWide, stillShowing } from "./lib/app-wide";
@@ -194,6 +203,12 @@ import "./App.css";
    opens — so none of them belongs in the bundle somebody waits for. */
 /* Reached by a press and none of them on screen at launch, so none of them
    is in the bundle anybody waits for. */
+/* The band that says where the hand is, and the band that says a folder is
+   gone. Both are reached by a press or by a state nothing is in on a fresh
+   launch, so neither is in the bundle anybody waits for. */
+const Turnstile = lazy(() => import("./components/Turnstile"));
+const PaneBand = lazy(() => import("./components/Panes"));
+const Recovery = lazy(() => import("./components/Recovery"));
 const ReviewQueue = lazy(() => import("./components/ReviewQueue"));
 const Conflict = lazy(() => import("./components/Conflict"));
 const Changes = lazy(() => import("./components/Changes"));
@@ -222,13 +237,9 @@ const FindInThread = lazy(() => import("./components/FindInThread"));
 /* The three cards a conversation only sometimes carries — a question before any
    file is touched, a plan to agree to, a review to answer. Each is fetched the
    first time a turn of that kind is actually drawn. */
-const AskFirst = lazy(() => import("./components/AskFirst"));
-const PlanCard = lazy(() => import("./components/PlanCard"));
-const ReviewCard = lazy(() => import("./components/ReviewCard"));
 /* Bands and cards that exist only once there is something to say: a question
    waiting on an answer, a run in flight, helpers at work. Nothing draws until
    one of them does. */
-const ConfirmChange = lazy(() => import("./components/ConfirmChange"));
 const HelperRail = lazy(() => import("./components/HelperRail"));
 const InLine = lazy(() => import("./components/InLine"));
 const Running = lazy(() => import("./components/Running"));
@@ -496,6 +507,21 @@ function Conversation() {
      how a chat used to lose its draft or its mode on the way to the front.
      See src/lib/projects.ts and src/state/conversations.ts. */
   const chat = inFront(desk);
+  /**
+   * The panes this window is showing, and which one the hand is in.
+   *
+   * One pane is the ordinary window and two is the most that fits a transcript
+   * worth reading. A pane carries a view id of its own and the conversation it
+   * shows; the focused pane is the one the composer, the keyboard and the
+   * inspector address. Two panes showing one chat are two views of one
+   * conversation, and the shell keeps one runtime because both ask for it by
+   * the same address — which is what the plan means by "opening the same chat in
+   * another pane does not create a session".
+   */
+  const [panes, setPanes] = useState<Panes>(() => onePane());
+  /* The conversation this window's controls act on. With one pane it is the
+     desk's, which is why the ordinary case does not change shape at all. */
+  const aimedAt = focusedConversation(panes);
   /* The folder in front, as a plain value. `openProject` is a field on the
      state and not a ref, but a hook list cannot tell those apart by name, so
      every list that wanted it read as a ref nobody should be listing. */
@@ -572,6 +598,18 @@ function Conversation() {
    *  Only the shell knows, and only about the one it just put in front, so this
    *  is replaced on every swap rather than accumulated. */
   const [ownCopyHere, setOwnCopyHere] = useState(false);
+  /**
+   * Why the conversation on screen cannot be written to, or null when it can.
+   *
+   * Set only by the shell, and only for a conversation whose recorded folder is
+   * gone: the transcript is shown and nothing is built behind it, because there
+   * is no working directory for a session to run in. The band above the thread
+   * is what says so, and the box below it is refused — a composer that accepted
+   * a sentence nothing could carry out would be the one dishonest thing here.
+   */
+  const [unavailable, setUnavailable] = useState<WorkspaceTrouble | null>(null);
+  /** True while the folder for a relink is being chosen. */
+  const [relinking, setRelinking] = useState(false);
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
   /** The New worktree card, which is the one deliberate way to make a copy. */
@@ -1752,6 +1790,7 @@ function Conversation() {
       // marked, and pressing the row you are already in looks like a dead button.
       setInConversation(opened.value.conversation);
       setOwnCopyHere(opened.value.ownCopy === true);
+      setUnavailable(opened.value.unavailable ?? null);
       // The shelf and running band are about the project in front. Clear the old
       // project's rows while this project's readings are on their way so they
       // can never briefly appear under the wrong project.
@@ -1862,6 +1901,7 @@ function Conversation() {
       }
       setInConversation(opened.conversation);
       setOwnCopyHere(opened.ownCopy === true);
+      setUnavailable(opened.unavailable ?? null);
       setDesks((current) => showThread(current, opened.path, opened.address ?? null, { turns }));
       refreshRoom({
         project: opened.path,
@@ -2031,6 +2071,56 @@ function Conversation() {
     },
     [showOpened, troubleAt, goToScreen, writeDraft],
   );
+
+  /**
+   * Point this conversation at the folder its work is in now.
+   *
+   * The repair for a conversation whose recorded folder is gone. The folder is
+   * chosen with the same picker everything else uses, and the shell does the
+   * rest: the record moves, the same transcript carries on, and the band above
+   * the thread goes away because there is nothing left to say. A folder that is
+   * not there, or is not a checkout of this project, is refused by the shell and
+   * the reason lands where a failure always does.
+   */
+  const relinkConversation = useCallback(async (): Promise<void> => {
+    const here = currentDesk(desksNow.current);
+    if (here === null || here.address === null) return;
+    const where: Where = { project: here.path, conversation: here.address };
+    const picked = await bridge.chooseFolder();
+    if (!picked.ok) {
+      troubleAt(where, picked.trouble);
+      return;
+    }
+    // Cancelled. Nothing was chosen, so nothing is changed and nothing is said:
+    // a sentence about a press nobody completed is noise.
+    if (picked.value === null) return;
+    setRelinking(true);
+    try {
+      const answer = await bridge.relinkConversation(picked.value, where);
+      if (!answer.ok) {
+        troubleAt(where, answer.trouble);
+        return;
+      }
+      setTidying(false);
+      setRoom(null);
+      showOpened(answer.value);
+    } finally {
+      setRelinking(false);
+    }
+  }, [showOpened, troubleAt]);
+
+  /**
+   * Start somewhere new, carrying a note about what was said here.
+   *
+   * The other half of the plan's offer, and deliberately a new conversation
+   * rather than a repair: nothing is written where the missing folder used to
+   * be, and the note lands in the box for somebody to edit before it is sent.
+   */
+  const continueFromHere = useCallback((): void => {
+    const here = currentDesk(desksNow.current);
+    if (here === null || here.address === null) return;
+    void startFrom(here.address, "continue");
+  }, [startFrom]);
 
   /**
    * Fork the conversation on screen at one of its messages.
@@ -3344,6 +3434,10 @@ function Conversation() {
    */
   const hand = useCallback(
     (text: string, mode?: 'steer' | 'followUp') => {
+      // Read-only is a property of the conversation, not of the box: the
+      // keyboard, the palette and a drafted note all arrive here, so the
+      // refusal belongs here rather than only on the composer's own press.
+      if (unavailable !== null) return;
       if (openProject === null) {
         void send(text);
         return;
@@ -3439,7 +3533,7 @@ function Conversation() {
       // once is the point, not a turn that waits for the other's to finish.
       void send(text);
     },
-    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans],
+    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans, unavailable],
   );
 
   /* A note written on the page joins the line when a turn of mine is going, and
@@ -3727,6 +3821,7 @@ function Conversation() {
         }
         setInConversation(opened.conversation);
         setOwnCopyHere(opened.ownCopy === true);
+        setUnavailable(opened.unavailable ?? null);
         // The one way a conversation comes forward, the same as every other:
         // the record it already had, with the turns the shell read for it. Two
         // hand-written field lists is how a field comes to be dropped by one of
@@ -3883,6 +3978,59 @@ function Conversation() {
 
   tabRow.handles(goToTab, closeTab);
 
+  /* ---------------------------------------------------------------- panes */
+
+  /**
+   * Keep the focused pane pointing at the conversation on screen.
+   *
+   * The desk is what the transcript is drawn from, so a pane and the desk
+   * disagreeing is the bug this prevents: a switch from anywhere — a shelf row,
+   * a tab, the palette, the shell starting a chat — moves the desk, and the
+   * focused pane follows it. The other pane is untouched, which is the whole
+   * point of having two.
+   */
+  useEffect(() => {
+    setPanes((current) => showIn(current, current.focused, desk?.address ?? null));
+  }, [desk?.address]);
+
+  /**
+   * Put the hand in a pane.
+   *
+   * This is the whole of "focusing a pane retargets the composer and the
+   * keyboard": everything that acts on a conversation reads the focused pane's
+   * through the desk, so focusing is not decoration. The desk is moved to the
+   * pane's conversation rather than the other way round, because there is one
+   * transcript and one runtime behind both views.
+   */
+  const focusOn = useCallback(
+    (id: ViewId) => {
+      const wanted = paneAt(panes, id);
+      if (wanted === null || wanted.id === panes.focused) return;
+      setPanes((current) => focusPane(current, id));
+      const desk = currentDesk(desksNow.current);
+      if (desk === null || wanted.conversation === null) return;
+      if (desk.address === wanted.conversation) return;
+      void swapConversation(wanted.conversation);
+    },
+    [panes, swapConversation],
+  );
+
+  /** Open a second pane on the same conversation, and focus it. Nothing is
+   *  asked of the shell: the desk already holds every open conversation whole,
+   *  so two views of one chat cost no second session. */
+  const splitPane = useCallback((): void => {
+    setPanes((current) => addPane(current, aimedAt));
+  }, [aimedAt]);
+
+  const dropPane = useCallback((id: ViewId): void => {
+    setPanes((current) => closePane(current, id));
+  }, []);
+
+  /** Follow the focus, or stay where it was put. */
+  const togglePin = useCallback((): void => {
+    setPanes((current) => pin(current, isPinned(current) ? null : current.focused));
+  }, []);
+
 
 
 
@@ -3938,9 +4086,9 @@ function Conversation() {
    * build, which is the one thing this confirmation exists to avoid.
    */
   const answerEstimate = useCallback(
-    (answered: EstimateTurn, go: boolean) => {
+    (owner: Owned, answered: EstimateTurn, go: boolean) => {
       setDesks((current) =>
-        changeTheFront(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.flatMap((turn): Turn[] => {
             if (turn.kind !== "estimate" || turn.id !== answered.id)
@@ -3973,6 +4121,7 @@ function Conversation() {
    */
   const answerPlan = useCallback(
     (
+      owner: Owned,
       turnId: string,
       go: boolean,
       chosen?: {
@@ -3981,16 +4130,17 @@ function Conversation() {
         decision?: PlanDecision;
       },
     ) => {
-      const text = desk === null ? '' : lookAround.said(desk.path, desk.address);
+      const text = lookAround.said(owner.project, owner.address);
+      const mine = conversationIn(desksNow.current.byPath[owner.project] ?? null, owner.address);
       // The steps the agent proposed for this plan, read before the answer is
       // written — the build-plan store wants the real task list.
-      const planTurn = chat.turns.find(
+      const planTurn = mine.turns.find(
         (turn): turn is Extract<typeof turn, { kind: "plan" }> =>
           turn.kind === "plan" && turn.id === turnId,
       );
       const steps = planTurn === undefined ? [] : planTurn.steps;
       setDesks((current) =>
-        changeTheFront(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "plan" && turn.id === turnId
@@ -4003,13 +4153,13 @@ function Conversation() {
       // The look-around has been answered here. Without this the next thing
       // somebody typed counted as the answer to it and skipped its own list,
       // so every message straight after an accepted plan got none.
-      if (desk !== null) lookAround.answering(desk.path, desk.address);
+      lookAround.answering(owner.project, owner.address);
       if (go) {
         if (plansNow.current === 'plan') {
           holdWrites(false);
           setPlans('auto');
           setDesks((current) =>
-            changeTheFront(current, (one) => ({
+            changeThread(current, owner, (one) => ({
               ...one,
               turns: [...one.turns, said('graphe', 'Out of Plan, going ahead with it.')],
             })),
@@ -4053,14 +4203,14 @@ function Conversation() {
            plan to read rather than work already started. */
         const again = chosen?.decision === undefined ? null : decidedMessage(chosen.decision);
         if (again === null) {
-          writeDraft(desk === null ? null : { project: desk.path, address: desk.address }, () => text);
+          writeDraft(owner, () => text);
           return;
         }
         const revise = `${text}\n\n${again}\n\n${PLAN_WORDS.planAgain}`;
         void deliver(revise, sizeUp(revise), { lookFirst: true });
       }
     },
-    [deliver, desk, chat.turns, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
+    [deliver, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
   );
 
   /**
@@ -4087,9 +4237,9 @@ function Conversation() {
   );
 
   const fixReview = useCallback(
-    (turnId: string) => {
+    (owner: Owned, turnId: string) => {
       setDesks((current) =>
-        changeTheFront(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "review" && turn.id === turnId
@@ -4121,24 +4271,24 @@ function Conversation() {
     // Nothing to get on with. A card with no steps is one asking for a list,
     // not one asking for approval — answering it sends "do these: nothing".
     if (waiting.steps.length === 0) return;
-    answerPlan(waiting.id, true);
+    answerPlan({ project: desk.path, address: desk.address }, waiting.id, true);
   }, [desk, chat.turns, answerPlan, howFar]);
 
   /** The model answered in prose. The card says so; this is the press under it,
    *  which asks again in the same words the look-around uses rather than
    *  leaving somebody to work out how to phrase it. */
   const askForAPlanAgain = useCallback(
-    (turnId: string) => {
-      answerPlan(turnId, false);
+    (owner: Owned, turnId: string) => {
+      answerPlan(owner, turnId, false);
       void deliver(PLAN_WORDS.asked, sizeUp(PLAN_WORDS.asked), { lookFirst: true });
     },
     [answerPlan, deliver],
   );
 
   const respond = useCallback(
-    (turnId: string, callId: string, decision: Decision) => {
+    (owner: Owned, turnId: string, callId: string, decision: Decision) => {
       setDesks((current) =>
-        changeTheFront(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "asked" && turn.id === turnId
@@ -4147,10 +4297,12 @@ function Conversation() {
           ),
         })),
       );
-      const here = currentDesk(desksNow.current);
+      // Answered into the conversation the card belongs to, never into
+      // whichever one is in front: two panes can hold two questions at once,
+      // and a press in one must not answer the other's.
       void bridge.answer(callId, decision, {
-        ...(here === null ? {} : { project: here.path }),
-        ...(here?.address == null ? {} : { conversation: here.address }),
+        project: owner.project,
+        ...(owner.address == null ? {} : { conversation: owner.address }),
       });
     },
     [],
@@ -4164,9 +4316,9 @@ function Conversation() {
    * every ask it answers, and a card still open when that arrives would be
    * marked as never answered at all.
    */
-  const answerAsked = useCallback((turnId: string, answers: Answers | null) => {
+  const answerAsked = useCallback((owner: Owned, turnId: string, answers: Answers | null) => {
     setDesks((current) =>
-      changeTheFront(current, (one) => ({
+      changeThread(current, owner, (one) => ({
         ...one,
         turns: one.turns.map((turn) =>
           turn.kind === "asked-first" && turn.id === turnId
@@ -4182,16 +4334,15 @@ function Conversation() {
         ),
       })),
     );
-    const here = currentDesk(desksNow.current);
     void bridge.answerAsked(turnId, answers, {
-      ...(here === null ? {} : { project: here.path }),
-      ...(here?.address == null ? {} : { conversation: here.address }),
+      project: owner.project,
+      ...(owner.address == null ? {} : { conversation: owner.address }),
     });
   }, []);
 
-  const dismiss = useCallback((turnId: string) => {
+  const dismiss = useCallback((owner: Owned, turnId: string) => {
     setDesks((current) =>
-      changeTheFront(current, (one) => ({
+      changeThread(current, owner, (one) => ({
         ...one,
         turns: one.turns.filter((turn) => turn.id !== turnId),
       })),
@@ -4415,7 +4566,7 @@ function Conversation() {
         run: () => setShelfOpen((was) => !was) },
       { id: 'find', name: 'Find in this conversation', where: 'Conversation', keys: keysFor('find'),
         run: () => setFinding((was) => (was === null ? '' : was)), ready: here, whyNot: needsProject },
-      { id: 'changes', name: 'Review the working diff', where: 'Project',
+      { id: 'changes', name: 'Changes', where: 'Project',
         run: () => {
           setChangeText(null);
           setChangesOpen(true);
@@ -4435,14 +4586,14 @@ function Conversation() {
               setChangeText(answer.value);
             });
         }, ready: here, whyNot: needsProject },
-      { id: 'history', name: 'Look through the history', where: 'Project',
+      { id: 'history', name: 'History', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },
       { id: 'copy', name: COPY_WORDS.whole, where: 'Conversation',
         run: () => { void copyText(asMarkdown(inFront(currentDesk(desksNow.current)).turns)); },
         ready: here, whyNot: needsProject },
-      { id: 'reviews', name: 'Read the pull requests', where: 'Project',
+      { id: 'reviews', name: 'Pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
-      { id: 'review-queue', name: 'Review finished work', where: 'Project',
+      { id: 'review-queue', name: 'Review', where: 'Project',
         run: () => { goToScreen('review'); startScreen(() => setReviewQueueOpen(true)); refreshReviewQueue(); },
         ready: here, whyNot: needsProject },
       { id: 'skills', name: 'Look at the skills', where: 'Graphe',
@@ -4863,6 +5014,55 @@ function Conversation() {
 
   const tabs: readonly Tab[] = threadTabs;
 
+  /* Which conversation the main column is drawing, and whether its own turn is
+     in flight. With one pane this is simply the conversation on screen; with
+     two it is the focused pane's, which is what makes focusing a pane retarget
+     the whole column rather than only the box. */
+  const drawnFor: Owned = { project: openProject ?? '', address: desk?.address ?? null };
+  const herePane = focusedPane(panes);
+  const otherPane = panes.open.find((one) => one.id !== herePane.id) ?? null;
+  /** Whether a named conversation's own turn is running, which is what its rows
+   *  answer to: one pane working must not mark the other's newest message as
+   *  still being written. */
+  const busyIn = (address: string | null): boolean => {
+    if (desk === null) return false;
+    const turns = conversationIn(desk, address).turns;
+    return (
+      turns.some(
+        (turn) =>
+          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+          (turn.kind === 'did' && turn.state === 'running') ||
+          (turn.kind === 'tidying' && turn.state === 'running'),
+      ) ||
+      (sendsInTheAir[keyOf(desk.path, address ?? '')] ?? 0) > 0 ||
+      (address === desk.address && chat.busy)
+    );
+  };
+  const busyThere = busyIn(otherPane?.conversation ?? null);
+  /** Whose cards those are. A press in the pane beside must act on that pane's
+   *  conversation, which is the whole difference between two panes and one
+   *  window drawn twice. */
+  const ownerThere: Owned = { project: openProject ?? '', address: otherPane?.conversation ?? null };
+  const allThere = drawnFrom(
+    conversationIn(desk, otherPane?.conversation ?? null).turns,
+    AT_FIRST,
+  ).rows.length;
+  /* The beside pane scrolls itself: it is a reading pane, so it keeps its own
+     position and needs no stick-to-bottom behaviour. */
+  const besideRef = useRef<HTMLDivElement | null>(null);
+
+  /* One row per pane, named for the chat it holds, and the inspector's own line
+     while it is pinned. Both are read from the desk, because the desk holds
+     every open conversation of this project whole. */
+  const paneRows = panes.open.map((one) => ({
+    id: one.id,
+    title: titleOf(conversationIn(desk, one.conversation).turns),
+    focused: one.id === panes.focused,
+  }));
+  const pinnedTo = isPinned(panes)
+    ? pinnedWords(titleOf(conversationIn(desk, inspectorPane(panes).conversation).turns))
+    : null;
+
 
   /* Where a tab sits is the person's to decide: the row is spatial memory, and
      a row that cannot be arranged is one nobody can learn. Conversations only,
@@ -4953,6 +5153,10 @@ function Conversation() {
                 void swapConversation(null);
               }}
               onReorder={reorderTab}
+              // Beside New, where the hand already is: somebody choosing a
+              // conversation is looking at this row, and the second pane shows
+              // the same chat beside itself.
+              onSplit={splitPane}
             />
           ) : null}
 
@@ -5473,6 +5677,22 @@ function Conversation() {
           onPutAway={(id) => setAppAway((was) => (was.includes(id) ? was : [...was, id]))}
         />
 
+        {/* Which pane the hand is in, once there is more than one. The press
+            that makes a second lives at the end of the tab strip, where the
+            hand already is; what is left here is the row that says where the
+            hand is and the pin that decides which chat the panel reads. */}
+        {desk === null || panes.open.length < 2 || reading !== null ? null : (
+          <Suspense fallback={null}>
+            <PaneBand
+              panes={paneRows}
+              pinned={pinnedTo}
+              onFocus={focusOn}
+              onClose={dropPane}
+              onTogglePin={togglePin}
+            />
+          </Suspense>
+        )}
+
         {/* The file sits where the reading happens rather than squeezed into
             the panel: a column of code is prose-width, not sidebar-width. */}
         {filesExpanded && reading !== null ? (
@@ -5541,6 +5761,22 @@ function Conversation() {
               <h1 className="workhead__name">{desk.name}</h1>
             </header>
 
+            {/* Above the thread and outside it: a read-only fact belongs to the
+                view, not to the conversation, and a card inside the thread
+                would read as something the agent said. The history below is
+                still readable, which is the whole of what opening read-only
+                means. */}
+            {unavailable === null ? null : (
+              <Suspense fallback={null}>
+                <Recovery
+                  trouble={unavailable}
+                  onRelink={() => void relinkConversation()}
+                  onContinue={continueFromHere}
+                  choosing={relinking}
+                />
+              </Suspense>
+            )}
+
             {finding === null ? null : (
               <Suspense fallback={null}>
                 <FindInThread
@@ -5568,32 +5804,26 @@ function Conversation() {
               /* Nobody reopens a sitting to read the top of it. A conversation
                  of ten thousand turns draws its last few hundred, and the rest
                  is one press away. */
-              const paged = lastTurns(chat.turns, drawing);
-              // A step that took a picture stays on its own line: a picture
-              // folded into a collapsed run is a picture nobody sees. So does
-              // the advisor — nobody asked for a second model, so the line is
-              // the only evidence it happened, and a fold hides it.
-              const showing = new Set<string>();
-              for (const turn of paged.turns) {
+              /* A step that took a picture stays on its own line: a picture
+                 folded into a collapsed run is a picture nobody sees. So does
+                 the advisor — nobody asked for a second model, so the line is
+                 the only evidence it happened, and a fold hides it. */
+              const apart = new Set<string>();
+              for (const turn of chat.turns) {
                 if (turn.kind !== 'did') continue;
-                if (turn.shown !== undefined || isAdvisor(turn.label)) showing.add(turn.id);
+                if (turn.shown !== undefined || isAdvisor(turn.label)) apart.add(turn.id);
               }
-              const all = rows(paged.turns, showing);
-              const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
-              const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
-              /* Where each message stands, counted the one way this window and
-                 the record can agree on: how many things the person had said
-                 by then. A message with no words in it is not one of them —
-                 the shell leaves it out of its moments for the same reason, and
-                 counting it here would put every fork one exchange out. A
-                 reply stands wherever the question it answered stood. */
-              const boundaries = new Map<string, number>();
-              let saidSoFar = 0;
-              for (const one of all) {
-                if (one.kind === 'steps' || one.turn.kind !== 'said') continue;
-                if (one.turn.from === 'you' && one.turn.text.trim() !== '') saidSoFar += 1;
-                if (saidSoFar > 0) boundaries.set(one.turn.id, saidSoFar);
-              }
+              /* Only the rows on screen are in the document; the rest are two
+                 blocks of empty room and the arithmetic in `lib/windowed.ts`.
+                 The row this draws is the row the thread has always drawn, so
+                 the spacing, the mark a search lands on and the last thing said
+                 are all unchanged. */
+              const {
+                rows: all,
+                earlier,
+                lastReply: lastIdx,
+                stands: boundaries,
+              } = drawnFrom(chat.turns, drawing, apart);
               /* Only the rows on screen are in the document; the rest are two
                  blocks of empty room and the arithmetic in `lib/windowed.ts`.
                  The row this draws is the row the thread has always drawn, so
@@ -5606,13 +5836,13 @@ function Conversation() {
                   hidden={readingWhole && reading !== null}
                   bring={foundId}
                   lead={
-                    paged.earlier === 0 ? null : (
+                    earlier === 0 ? null : (
                       <button
                         type="button"
                         className="thread__earlier"
                         onClick={() => setDrawing((was) => was + AT_FIRST)}
                       >
-                        {threadWords.earlier(paged.earlier)}
+                        {threadWords.earlier(earlier)}
                       </button>
                     )
                   }
@@ -5627,15 +5857,25 @@ function Conversation() {
                         className={`thread__row ${row.turn.id === foundId ? 'thread__row--found' : ''}`}
                         data-turn={row.turn.id}
                       >
-                        <Turnstile
-                          turn={row.turn}
-                          onRespond={respond}
-                          onAnswerAsked={answerAsked}
-                          onDismiss={dismiss}
-                          onAnswerEstimate={answerEstimate}
-                          onAnswerPlan={answerPlan}
-                          onAskForAPlanAgain={askForAPlanAgain}
-                          onFixReview={fixReview}
+                        {/* Its own boundary: one row's code arriving must not
+                            hold up the column, and a row that is not drawn
+                            yet is a row that has nothing to say yet. */}
+                        <Suspense fallback={null}>
+                          <Turnstile
+                            turn={row.turn}
+                            onRespond={(turnId, callId, decision) =>
+                              respond(drawnFor, turnId, callId, decision)
+                          }
+                          onAnswerAsked={(turnId, answers) =>
+                            answerAsked(drawnFor, turnId, answers)
+                          }
+                          onDismiss={(turnId) => dismiss(drawnFor, turnId)}
+                          onAnswerEstimate={(turn, go) => answerEstimate(drawnFor, turn, go)}
+                          onAnswerPlan={(turnId, go, chosen) =>
+                            answerPlan(drawnFor, turnId, go, chosen)
+                          }
+                          onAskForAPlanAgain={(turnId) => askForAPlanAgain(drawnFor, turnId)}
+                          onFixReview={(turnId) => fixReview(drawnFor, turnId)}
                           onPostReview={postReview}
                           showMe={preferences.showMe}
                           isLast={idx === lastIdx}
@@ -5645,8 +5885,9 @@ function Conversation() {
                           // written while this conversation is working, and
                           // the shell refuses a fork of a boundary that has
                           // not finished happening.
-                          forkWaits={frontBusy && idx === all.length - 1}
-                        />
+                            forkWaits={frontBusy && idx === all.length - 1}
+                          />
+                        </Suspense>
                       </div>
                     )
                   }
@@ -5813,6 +6054,9 @@ function Conversation() {
               onSend={hand}
               onQueue={hand}
               onStop={halt}
+              // A conversation whose folder is gone can be read and not written
+              // to, and the box says so rather than swallowing the message.
+              {...(unavailable === null ? {} : { readOnly: unavailable.because })}
               figmaLinked={(connected?.tools ?? []).some((one) => one.name === 'figma')}
               onLinkFigma={letFigmaIn}
               autoFocus
@@ -5859,6 +6103,64 @@ function Conversation() {
           </div>
         )}
       </div>
+
+      {/* The pane beside the focused one, when there is one.
+          
+          It is drawn from the same desk as the column — every open conversation
+          of this project is held whole — so this is a second view of one
+          conversation and never a second session. What it does not do is take
+          typing: the hand is in the focused pane, and this one is for reading
+          what is happening next to what you are working on. That is what makes
+          two panes useful rather than two half-windows. */}
+      {otherPane !== null && otherPane.conversation !== null && desk !== null ? (
+        <aside className="beside" aria-label={`Pane showing ${titleOf(conversationIn(desk, otherPane.conversation).turns)}`}>
+          <header className="beside__head">
+            <h2 className="beside__name">
+              {titleOf(conversationIn(desk, otherPane.conversation).turns)}
+            </h2>
+          </header>
+          <div className="beside__scroll scroll--auto">
+            <ThreadRows
+              rows={drawnFrom(conversationIn(desk, otherPane.conversation).turns, AT_FIRST).rows}
+              scroller={besideRef}
+              draw={(row, idx, mark) =>
+                row.kind === 'steps' ? (
+                  <div className="thread__row" ref={mark}>
+                    <Steps steps={row.steps} showMe={preferences.showMe} />
+                  </div>
+                ) : (
+                  <div className="thread__row" ref={mark}>
+                    <Suspense fallback={null}>
+                      <Turnstile
+                        turn={row.turn}
+                        onRespond={(turnId, callId, decision) =>
+                          respond(ownerThere, turnId, callId, decision)
+                        }
+                      onAnswerAsked={(turnId, answers) =>
+                        answerAsked(ownerThere, turnId, answers)
+                      }
+                      onDismiss={(turnId) => dismiss(ownerThere, turnId)}
+                      onAnswerEstimate={(turn, go) => answerEstimate(ownerThere, turn, go)}
+                      onAnswerPlan={(turnId, go, chosen) =>
+                        answerPlan(ownerThere, turnId, go, chosen)
+                      }
+                      onAskForAPlanAgain={(turnId) => askForAPlanAgain(ownerThere, turnId)}
+                      onFixReview={(turnId) => fixReview(ownerThere, turnId)}
+                      onPostReview={postReview}
+                      showMe={preferences.showMe}
+                      isLast={idx === allThere - 1}
+                      onForkHere={forkHere}
+                        forkWaits={busyThere && idx === allThere - 1}
+                      />
+                    </Suspense>
+                  </div>
+                )
+              }
+              trail={busyThere ? <WorkingMark /> : null}
+            />
+          </div>
+        </aside>
+      ) : null}
 
       {overviewed && desk !== null ? (
         <Overview
@@ -6279,260 +6581,3 @@ function Conversation() {
 /** A step's own words on one feed line: what it was asked until it has said
  *  something, and then what it said. Read from whichever end of the text means
  *  something — see `opening`. */
-function saying(turn: Extract<Turn, { kind: "did" }>): string | undefined {
-  if (turn.progress === undefined) return turn.detail;
-  return isAdvisor(turn.label) ? opening(turn.progress) : lastSaid(turn.progress);
-}
-
-/**
- * One row of the conversation.
- *
- * Memoised, and on identity rather than a deep comparison: every arm of the
- * fold replaces the slot rather than editing the turn, so a turn that is the
- * same object is a turn that has not changed. Without this, a token landing in
- * the last turn redrew every row above it — three thousand of them, sixty times
- * a second, on a long conversation.
- *
- * The callbacks are rebuilt on every render of the window and never change what
- * a row draws, so comparing them would defeat the whole thing.
- */
-const Turnstile = memo(function Turnstile({
-  turn,
-  onRespond,
-  onAnswerAsked,
-  onDismiss,
-  onAnswerEstimate,
-  onAnswerPlan,
-  onAskForAPlanAgain,
-  onFixReview,
-  onPostReview,
-  showMe,
-  isLast,
-  saidBy,
-  onForkHere,
-  forkWaits,
-}: {
-  turn: Turn;
-  onRespond: (turnId: string, callId: string, decision: Decision) => void;
-  onAnswerAsked: (turnId: string, answers: Answers | null) => void;
-  onDismiss: (turnId: string) => void;
-  onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
-  onAnswerPlan: (
-    turnId: string,
-    go: boolean,
-    chosen?: {
-      kept: readonly string[];
-      dropped: readonly string[];
-      decision?: PlanDecision;
-    },
-  ) => void;
-  /** The model answered in prose rather than a list. Asks again, in the same
-   *  words the look-around uses, rather than leaving the card as a dead end. */
-  onAskForAPlanAgain: (turnId: string) => void;
-  onFixReview: (turnId: string) => void;
-  onPostReview: (verdict: ReviewVerdict) => Promise<boolean>;
-  /** Name the real command, path or operation under each step (BACKLOG D1).
-   *  The words themselves were recorded when the step happened, so turning this
-   *  on explains the conversation you already had. */
-  showMe: boolean;
-  isLast?: boolean;
-  /** How many things the person had said by this message, or null where the
-   *  message is not a place to stop a copy of the conversation at. */
-  saidBy?: number | null;
-  /** Fork the conversation at this message. */
-  onForkHere: (said: number) => void;
-  /** True on the newest message of a turn still being written, where there is
-   *  no finished exchange to stop at yet. */
-  forkWaits?: boolean;
-}) {
-  switch (turn.kind) {
-    case "said":
-      return (
-        <Message
-          from={turn.from}
-          streaming={turn.streaming}
-          isLast={isLast}
-          pictures={turn.pictures}
-          copy={wordsOf(turn)}
-          {...(saidBy === null || saidBy === undefined
-            ? {}
-            : {
-                action: {
-                  label: continuationWords.forkHere,
-                  hint: continuationWords.forkHereHint,
-                  onPress: () => onForkHere(saidBy),
-                  ...(forkWaits === true ? { waits: threadWords.forkWaits } : {}),
-                },
-              })}
-        >
-          {turn.text}
-        </Message>
-      );
-
-    case "did":
-      return (
-        <>
-          <ActivityLine
-            state={turn.state}
-            label={turn.label}
-            detail={saying(turn)}
-            real={showMe ? turn.real : undefined}
-          />
-          {turn.shown === undefined ? null : (
-            <Shown picture={turn.shown} label={turn.label} />
-          )}
-        </>
-      );
-
-    case "asked":
-      // Once it is answered the question stops being a control and becomes part
-      // of the record — a live pair of buttons for a decision already taken is
-      // how people learn to click without reading.
-      return turn.answered === null ? (
-        <Suspense fallback={null}>
-          <ConfirmChange
-            question={turn.question}
-            detail={turn.detail}
-            consequence={turn.consequence}
-            technical={showMe ? turn.real : undefined}
-            confirmLabel="Yes, go ahead"
-            cancelLabel="No, leave it"
-            onConfirm={() => onRespond(turn.id, turn.callId, "yes")}
-            onCancel={() => onRespond(turn.id, turn.callId, "no")}
-          />
-        </Suspense>
-      ) : (
-        <ActivityLine
-          state={turn.answered === "yes" ? "done" : "failed"}
-          label={turn.question}
-          detail={
-            turn.answered === "yes"
-              ? "You said yes."
-              : "You said no, so I left it alone."
-          }
-          real={showMe ? turn.real : undefined}
-        />
-      );
-
-    // Asked before a single file is touched, so that everything after it can
-    // happen with nobody watching. The card holds the picking; the turn only
-    // hears the answer.
-    case "asked-first":
-      return (
-        <Suspense fallback={null}>
-          <AskFirst
-            questions={turn.questions}
-            answers={turn.answers}
-            answered={turn.answered}
-            onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
-          />
-        </Suspense>
-      );
-
-    case "plan":
-      return (
-        <Suspense fallback={null}>
-          <PlanCard
-            steps={turn.steps}
-            caveats={turn.caveats}
-            answered={turn.answered}
-            questions={turn.questions}
-            onGo={(kept, dropped, decision) =>
-              onAnswerPlan(turn.id, true, { kept, dropped, decision })
-            }
-            onChange={() => onAnswerPlan(turn.id, false)}
-            onAskAgain={() => onAskForAPlanAgain(turn.id)}
-          />
-        </Suspense>
-      );
-
-    case "review":
-      return (
-        <Suspense fallback={null}>
-          <ReviewCard
-            verdict={turn.verdict}
-            asked={turn.asked}
-            onFix={() => onFixReview(turn.id)}
-            onPost={() => onPostReview(turn.verdict)}
-          />
-        </Suspense>
-      );
-
-    case "estimate":
-      // Same shape as any other question, and the same grammar: the option that
-      // spends less carries the visual weight. Every word of it is written by
-      // src/cost/phrasing.ts and none of it by this file.
-      return turn.answered === null ? (
-        <Suspense fallback={null}>
-          <ConfirmChange
-            question={turn.prompt.title}
-            detail={turn.prompt.body}
-            consequence={turn.prompt.note}
-            confirmLabel={turn.prompt.confirm}
-            cancelLabel={turn.prompt.alternative}
-            onConfirm={() => onAnswerEstimate(turn, true)}
-            onCancel={() => onAnswerEstimate(turn, false)}
-          />
-        </Suspense>
-      ) : (
-        // Answered, it stops being a control and becomes part of the record —
-        // the same shape the Guard's own questions take once they have been
-        // answered, for the same reason: a live pair of buttons for a decision
-        // already taken is how people learn to click without reading.
-        <ActivityLine
-          state="done"
-          label={turn.prompt.title}
-          detail={
-            turn.answered === "went-ahead"
-              ? "You said go ahead."
-              : "You said you would rather start smaller."
-          }
-        />
-      );
-
-    case "tidying":
-      // Behind this is Pi's own tidying of a long conversation. In front of it
-      // is one plain sentence, from src/cost/phrasing.ts — and, for anyone who
-      // asked, its real name underneath.
-      return (
-        <ActivityLine
-          state={turn.state}
-          label={turn.state === 'failed' ? longConversation.stayedAsIs : longConversation.tidying}
-          real={showMe ? behind.tidying : undefined}
-        />
-      );
-
-    case "holding":
-      // A service that could not answer, and the wait before asking again.
-      // Nothing to look at for up to half an hour, so the line says how long.
-      return (
-        <ActivityLine
-          state={turn.state}
-          label={
-            turn.state === 'failed'
-              ? busyService.gaveUp
-              : turn.state === 'done'
-                ? busyService.carriedOn
-                : busyService.waiting(turn.seconds)
-          }
-        />
-      );
-
-    case "trouble":
-      return (
-        <ErrorCard
-          what={turn.trouble.what}
-          because={turn.trouble.because}
-          actionLabel={turn.trouble.actionLabel}
-          onAction={() => onDismiss(turn.id)}
-          technicalDetails={turn.trouble.details}
-        />
-      );
-  }
-}, (before, after) =>
-  before.turn === after.turn &&
-  before.showMe === after.showMe &&
-  before.isLast === after.isLast &&
-  before.saidBy === after.saidBy &&
-  before.forkWaits === after.forkWaits &&
-  before.onForkHere === after.onForkHere);

@@ -1547,6 +1547,12 @@ let previewPlanMode = false;
       );
     },
 
+    /** A browser tab has no folders at all, so there is nothing to point a
+     *  conversation at. The refusal says so rather than pretending to. */
+    relinkConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
     terminalOpen(): Promise<Result<TerminalSession>> {
       return Promise.resolve(previewFail<TerminalSession>());
     },
@@ -2369,6 +2375,8 @@ function connect(): Bridge {
     continueConversation: (source, where) => api.continueConversation(source, where),
     forkConversation: (source, said, where) => api.forkConversation(source, said, where),
     archiveConversation: (id, on, where) => api.archiveConversation(id, on, where),
+    relinkConversation: (path, where) =>
+      api.relinkConversation?.(path, where) ?? Promise.resolve(previewFail<OpenedProject>()),
     onExtensionAsk: (listener) => api.onExtensionAsk(listener),
     answerExtension: (requestId, answer, where) => api.answerExtension(requestId, answer, where),
     worktreeNew: (wanted, where) => api.worktreeNew(wanted, where),

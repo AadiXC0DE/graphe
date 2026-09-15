@@ -94,12 +94,21 @@ export type Admission =
    *  noise: a stop they pressed themselves, a question they are reading. */
   | { verdict: 'refused'; because: Refusal; said: string };
 
+/** Who is writing in the folder, which is one state with more than one
+ *  consequence: a turn is turned down by it, and the sweep at launch leaves the
+ *  folder alone because of it. Written once, and each caller says what follows
+ *  from it here. */
+const WORKING_HERE = 'Another conversation is writing in this folder';
+
 /** Every word this decision puts on screen. Short, and each one says what to do
  *  instead, because a turn that did not start is otherwise indistinguishable
  *  from one that started and did nothing. */
 export const admissionWords = {
+  /** The state on its own, for a caller whose own consequence is the one that
+   *  belongs next to it. */
+  workingHere: WORKING_HERE,
   noModel: 'There is nothing set up to answer in this conversation, so that turn has not begun.',
-  folderBusy: 'Another conversation is writing in this folder, so that turn has not begun.',
+  folderBusy: `${WORKING_HERE}, so that turn has not begun.`,
   notGoing:
     'Nothing is running to steer, so that line was not sent. Send it as an ordinary message instead.',
 } as const;

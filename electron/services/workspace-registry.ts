@@ -320,16 +320,24 @@ export function relinkProject(
 /* -------------------------------------------------------------------------- */
 
 /** The workspace for a folder, if this project already knows it. A symlink to a
- *  workspace's folder resolves to the same record. */
+ *  workspace's folder resolves to the same record.
+ *
+ * `repoKey` is the repository that folder actually holds now, when the caller
+ * has looked. Given one, a record that was written against a different
+ * repository is not a match: the path is an attribute, and the same path
+ * holding somebody else's repository is a different workspace, not this one. */
 export function workspaceAtPath(
   index: WorkspaceIndex,
   projectId: string,
   path: string,
+  repoKey?: string | null,
 ): WorkspaceRecord | null {
   const here = canonical(path);
   for (const id of index.projects[projectId]?.workspaces ?? []) {
     const record = index.workspaces[id];
-    if (record !== undefined && record.cwd === here && record.state !== 'deleted') return record;
+    if (record === undefined || record.cwd !== here || record.state === 'deleted') continue;
+    if (repoKey != null && record.repoKey !== null && record.repoKey !== repoKey) continue;
+    return record;
   }
   return null;
 }
@@ -363,7 +371,7 @@ export function addWorkspace(
 ): { index: WorkspaceIndex; workspace: WorkspaceRecord; made: boolean } {
   const project = index.projects[wanted.projectId];
   if (project === undefined) throw new Error('no such project');
-  const known = workspaceAtPath(index, wanted.projectId, wanted.path);
+  const known = workspaceAtPath(index, wanted.projectId, wanted.path, wanted.repoKey);
   if (known !== null) return { index, workspace: known, made: false };
 
   const cwd = canonical(wanted.path);
@@ -403,6 +411,9 @@ export type WorkspaceFacts = {
   present: boolean;
   /** It is a checkout of the repository it claims. */
   repository: boolean;
+  /** The repository's own identity, read from the folder. Null for a folder
+   *  that is not a repository, and absent when nobody looked. */
+  repoKey?: string | null;
   /** Its branch, or null when detached or unknown. */
   branch: string | null;
   /** Its commit when it is detached; null when it is on a branch. */
@@ -410,6 +421,31 @@ export type WorkspaceFacts = {
   /** Git still registers it as a worktree of that repository. */
   registered?: boolean;
 };
+
+/**
+ * Where the repository's identity goes once somebody has read it.
+ *
+ * Written rather than derived on each use: reading it costs a git command, and
+ * the answer is only interesting at the moments a workspace is made, reopened
+ * or verified. A record without one cannot be matched against a folder that has
+ * one, so leaving it null is a gap rather than a neutral value.
+ */
+export function setRepoKey(
+  index: WorkspaceIndex,
+  workspaceId: string,
+  repoKey: string | null,
+  now: number,
+): WorkspaceIndex {
+  const record = index.workspaces[workspaceId];
+  if (record === undefined || record.repoKey === repoKey) return index;
+  return {
+    ...index,
+    workspaces: {
+      ...index.workspaces,
+      [workspaceId]: { ...record, repoKey, verifiedAt: now },
+    },
+  };
+}
 
 /**
  * The state a workspace is in, given what was actually found.
@@ -426,6 +462,11 @@ export function verifyWorkspace(
 ): WorkspaceRecord {
   const verifiedAt = now;
   if (!facts.present) return { ...record, state: 'missing', verifiedAt };
+  // A folder holding a different repository is not the workspace that was
+  // written down, however much it looks like the same place.
+  const held = facts.repository === true ? (facts.repoKey ?? record.repoKey) : null;
+  const elsewhere = record.repoKey !== null && held !== null && held !== record.repoKey;
+  if (elsewhere) return { ...record, state: 'recovery-required', verifiedAt };
   if (record.kind === 'worktree' && (facts.repository !== true || facts.registered === false)) {
     return { ...record, state: 'recovery-required', verifiedAt };
   }
@@ -436,6 +477,7 @@ export function verifyWorkspace(
   return {
     ...record,
     state: 'ready',
+    repoKey: held ?? record.repoKey,
     branch: facts.branch,
     detachedAt: detached ? (facts.detachedAt ?? record.detachedAt) : null,
     verifiedAt,

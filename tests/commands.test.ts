@@ -5,6 +5,8 @@
  *  Pi rather than to us — so half of this file is about the interposition being
  *  real, and the other half is one command on this machine genuinely failing to
  *  write outside the folder it was given.
+ *
+ *  Source text, not behaviour: the adapter building Pi's bash definition around our held runner; no behavioural test can reach it — a session hands back no tool surface.
  */
 
 import { execFile } from 'node:child_process';

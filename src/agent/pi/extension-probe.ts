@@ -14,8 +14,8 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { writeAtomically } from '../../lib/atomic';
@@ -57,6 +57,9 @@ export type Recorded = {
   commands: readonly string[];
   /** The factory itself asked for a turn while we watched. */
   sentTurns: boolean;
+  /** The entry says its tools finish what they start without its lifecycle
+   *  handlers. Nothing else can establish this from the outside. */
+  toolsOnly: boolean;
   /** The entry file as written, read for what the factory only does later. */
   source: string;
 };
@@ -69,6 +72,8 @@ export type CapabilityCard = {
   startsTurns: boolean;
   rewritesSystemPrompt: boolean;
   runsBackgroundWork: boolean;
+  /** The add-on's own word that its tools stand on their own. */
+  toolsOnly: boolean;
   /** Bytes of tool description this adds to every prompt. */
   toolPromptBytes: number;
   orchestrating: boolean;
@@ -98,6 +103,9 @@ export function cardFrom(recorded: Recorded): CapabilityCard {
     startsTurns,
     rewritesSystemPrompt,
     runsBackgroundWork,
+    // A card read by an older version has no such field; saying nothing is the
+    // answer that keeps the add-on whole.
+    toolsOnly: recorded.toolsOnly === true,
     toolPromptBytes,
     orchestrating: (hooks.includes('agent_end') && startsTurns) || runsBackgroundWork,
   };
@@ -149,7 +157,11 @@ function anything(): unknown {
   });
 }
 
-function record(id: string, source: string): { api: unknown; taken: () => Recorded } {
+function record(
+  id: string,
+  source: string,
+  toolsOnly: boolean,
+): { api: unknown; taken: () => Recorded } {
   const hooks: string[] = [];
   const tools: { name: string; description: string }[] = [];
   const commands: string[] = [];
@@ -188,7 +200,7 @@ function record(id: string, source: string): { api: unknown; taken: () => Record
     get: (target, key) => (key in target ? target[key as string] : anything()),
   });
 
-  return { api, taken: () => ({ id, hooks, tools, commands, sentTurns, source }) };
+  return { api, taken: () => ({ id, hooks, tools, commands, sentTurns, toolsOnly, source }) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -231,10 +243,10 @@ function factoryIn(module: unknown): Factory | null {
   return typeof held === 'function' ? (held as Factory) : null;
 }
 
-async function factoryAt(path: string): Promise<Factory | null> {
+async function moduleAt(path: string): Promise<unknown> {
   if (/\.(mjs|cjs|js)$/.test(path)) {
-    const plain = factoryIn(await import(/* @vite-ignore */ pathToFileURL(path).href));
-    if (plain !== null) return plain;
+    const plain = await import(/* @vite-ignore */ pathToFileURL(path).href);
+    if (factoryIn(plain) !== null) return plain;
   }
   const entry = jitiEntry();
   if (entry === null) return null;
@@ -242,7 +254,20 @@ async function factoryAt(path: string): Promise<Factory | null> {
     createJiti: (from: string, options?: Record<string, unknown>) => { import: (id: string) => Promise<unknown> };
   };
   const jiti = createJiti(pathToFileURL(path).href, { moduleCache: false });
-  return factoryIn(await jiti.import(path));
+  return await jiti.import(path);
+}
+
+/**
+ * What the entry says about itself, over and above what running it records.
+ *
+ * One thing so far: that its tools finish what they start without the add-on's
+ * lifecycle handlers. It has to be said by the add-on, because nothing outside
+ * it can tell a tool that answers within its own call from one whose result
+ * arrives later on a hook — and an add-on read wrongly that way is launched and
+ * never heard from again.
+ */
+function declaredToolsOnly(module: unknown): boolean {
+  return (module as { grapheToolsOnly?: unknown } | null)?.grapheToolsOnly === true;
 }
 
 /** The folder the extension lives in, which is what its author called it. */
@@ -271,19 +296,23 @@ export async function recordEntry(path: string): Promise<Recorded | null> {
   const source = await readFile(path, 'utf8').catch(() => '');
   if (source === '') return null;
 
-  const { api, taken } = record(idFor(path), source);
+  let taken: (() => Recorded) | null = null;
   try {
-    const factory = await factoryAt(path);
+    const loaded = await moduleAt(path);
+    if (loaded === null) return null;
+    const factory = factoryIn(loaded);
     if (factory === null) return null;
+    const begun = record(idFor(path), source, declaredToolsOnly(loaded));
+    taken = begun.taken;
     let bell: ReturnType<typeof setTimeout> | undefined;
     const patience = new Promise<never>((_resolve, reject) => {
       bell = setTimeout(() => reject(new Error('probe took too long')), PROBE_MS);
       (bell as unknown as { unref?: () => void }).unref?.();
     });
     try {
-      await Promise.race([Promise.resolve(factory(api)), patience]);
+      await Promise.race([Promise.resolve(factory(begun.api)), patience]);
     } finally {
-      if (bell !== undefined) clearTimeout(bell);
+      clearTimeout(bell);
     }
   } catch {
     // An extension we cannot read is one we will not vouch for either way.
@@ -549,8 +578,12 @@ async function filesUnder(folder: string, prefix = '', depth = 0): Promise<reado
  * describes is a policy decision made about something that is no longer there.
  * The whole folder is walked because a local extension is usually a directory
  * of modules, and the one that changed may not be the entry file.
+ *
+ * Exported because two decisions rest on the same question — what code is this
+ * — and a trust answered in January has to stop covering a file edited in
+ * March, not only an edited entry file.
  */
-async function fingerprintOf(path: string): Promise<string | null> {
+export async function contentFingerprint(path: string): Promise<string | null> {
   const entry = await readFile(path).catch(() => null);
   if (entry === null) return null;
   const folder = dirname(path);
@@ -573,7 +606,7 @@ async function cardFor(
   held: Record<string, Card>,
   runtime: RuntimeTag,
 ): Promise<{ card: CapabilityCard | null; stored: Card | null }> {
-  const fingerprint = await fingerprintOf(where);
+  const fingerprint = await contentFingerprint(where);
   if (fingerprint === null) return { card: null, stored: null };
   const key = `${runtime}\u0000${fingerprint}`;
   const remembered = held[where];
@@ -623,17 +656,129 @@ async function entriesIn(folder: string): Promise<readonly string[]> {
     .map((one) => join(folder, one.name));
 }
 
+/** Folders whose name says what kind of build it is rather than what the
+ *  add-on is called. */
+const GENERIC_FOLDERS = new Set(['dist', 'build', 'lib', 'out', 'src']);
+
+/** What an add-on is called, off its path: its folder, or the file itself when
+ *  it sits straight in one of the places extensions are found. */
+function nameOfAddon(entry: string): string {
+  const folder = dirname(entry);
+  const folderName = basename(folder);
+  const file = basename(entry);
+  if (folderName === 'extensions' || folderName === 'node_modules') {
+    return file.replace(/\.[^.]+$/, '');
+  }
+  if (GENERIC_FOLDERS.has(folderName)) return basename(dirname(folder));
+  return folderName;
+}
+
+/** What an add-on says about itself in its own `package.json`: the name it is
+ *  published under and the version on disk.
+ *
+ * Read rather than inferred, because both are facts about somebody else's work
+ * — the folder a bundled add-on unpacks into is called `dist`, and a version
+ * nobody can read is `null` rather than a guess. Null when there is no manifest
+ * to read at all, which a folder somebody wrote by hand does not have.
+ */
+export async function addonAt(entry: string): Promise<{
+  id: string;
+  version: string | null;
+  from: string;
+} | null> {
+  let folder = entry;
+  for (let up = 0; up < 3; up += 1) {
+    const raw = await readFile(join(folder, 'package.json'), 'utf8').catch(() => null);
+    if (raw !== null) {
+      try {
+        const held = JSON.parse(raw) as { name?: unknown; version?: unknown };
+        if (typeof held.name === 'string' && held.name !== '') {
+          return {
+            id: held.name,
+            version: typeof held.version === 'string' ? held.version : null,
+            from: folder,
+          };
+        }
+      } catch {
+        // A manifest nobody can read is not a manifest.
+      }
+    }
+    folder = dirname(folder);
+  }
+  return null;
+}
+
+/** What an add-on is called and which version is on disk: its own manifest
+ *  where it has one, and the folder it lives in where it does not. */
+export async function addonNamed(entry: string): Promise<{ id: string; version: string | null }> {
+  const said = await addonAt(entry);
+  return said === null
+    ? { id: nameOfAddon(entry), version: null }
+    : { id: said.id, version: said.version };
+}
+
+/** The `pi.extensions` of a manifest, as paths, or nothing. */
+function declaredEntries(raw: string): readonly string[] {
+  try {
+    const held = JSON.parse(raw) as { pi?: { extensions?: unknown } };
+    const entries = held.pi?.extensions;
+    if (!Array.isArray(entries)) return [];
+    return entries.filter((one): one is string => typeof one === 'string' && one !== '');
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Every extension that could load for this session.
+ * The file Pi would load for one entry found in a folder, and — when it says it
+ * ships extensions and none of them are there — what it named and does not have.
+ *
+ * Pi resolves a directory through its own manifest or its `index`, and never
+ * loads the directory itself. Read the same way here, so a card is keyed by the
+ * file that will actually run rather than by the folder beside it.
+ *
+ * A manifest with one missing file among several is not a broken add-on: what
+ * is there loads, and the rest is a package that half installed itself. Only
+ * "nothing it names is on disk" is reported, because only that leaves nothing
+ * to run.
+ */
+async function entryOf(
+  one: string,
+  isFolder: boolean,
+): Promise<{ entries: readonly string[]; missing: readonly string[] }> {
+  if (!isFolder) return { entries: /\.(?:[cm]?js|ts)$/.test(one) ? [one] : [], missing: [] };
+  const manifest = await readFile(join(one, 'package.json'), 'utf8').catch(() => null);
+  const declared = (manifest === null ? [] : declaredEntries(manifest)).map((path) => resolve(one, path));
+  const here = declared.filter((path) => existsSync(path));
+  if (here.length > 0) return { entries: here, missing: [] };
+  const index = ['index.ts', 'index.js', 'index.mjs']
+    .map((name) => join(one, name))
+    .find((path) => existsSync(path));
+  return { entries: index === undefined ? [] : [index], missing: declared };
+}
+
+/** One add-on found on this computer, and what it says about itself. */
+export type Discovered = {
+  /** The file Pi will load; the folder itself when nothing it names is there. */
+  where: string;
+  id: string;
+  version: string | null;
+  /** Files its own manifest names that are not on this disk. Non-empty only
+   *  when nothing it names is, so there is nothing for it to load. */
+  missing: readonly string[];
+};
+
+/**
+ * Every add-on that could load for this session, by the file that would run.
  *
  * A path missing from this list is one nothing looked at, and is left alone
  * rather than judged — "we did not check" is not evidence about what something
  * does.
  */
-export async function extensionPathsIn(
+export async function extensionsIn(
   agentDir: string,
   projectRoot?: string,
-): Promise<readonly string[]> {
+): Promise<readonly Discovered[]> {
   const places = [
     join(agentDir, 'extensions'),
     join(agentDir, 'npm', 'node_modules'),
@@ -641,7 +786,24 @@ export async function extensionPathsIn(
       ? []
       : [join(projectRoot, '.pi', 'extensions')]),
   ];
-  const found: string[] = [];
-  for (const place of places) found.push(...(await entriesIn(place)));
+  const found: Discovered[] = [];
+  for (const place of places) {
+    for (const one of await entriesIn(place)) {
+      const folder = await stat(one).then((it) => it.isDirectory()).catch(() => false);
+      const { entries, missing } = await entryOf(one, folder);
+      if (entries.length === 0 && missing.length === 0) continue;
+      for (const where of entries.length === 0 ? [one] : entries) {
+        found.push({ where, ...(await addonNamed(where)), missing });
+      }
+    }
+  }
   return found;
+}
+
+/** The same list, as paths alone, for callers that only need to probe them. */
+export async function extensionPathsIn(
+  agentDir: string,
+  projectRoot?: string,
+): Promise<readonly string[]> {
+  return (await extensionsIn(agentDir, projectRoot)).map((one) => one.where);
 }

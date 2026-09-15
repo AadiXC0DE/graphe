@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** Everything that was quietly ending a helper.
  *
  * Reported over and over as "the helpers stop without saying anything". It was
@@ -15,19 +16,107 @@
  *    a helper that has said nothing for five minutes — so waiting was fatal.
  *  - And Escape, pressed to close a popover in the composer row, stopped the
  *    run behind it.
+ *
+ *  Source text, not behaviour: the window's panel list and the helper's own reports; no behavioural test can reach them — App's wiring, and a child process.
  */
 
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 
+import { act, createElement, type ReactElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+import HowToWork from '../src/components/HowToWork';
+import ThinkingWith from '../src/components/ThinkingWith';
 import { HELPER_WAITS_MS, WAITS_MS } from '../src/agent/pi/transient';
+import type { ConnectionState } from '../src/lib/ipc';
 
-const read = (where: string): string =>
-  readFileSync(new URL(`../${where}`, import.meta.url), 'utf8');
+/* Relative to the repository, not to this module: under jsdom `import.meta.url`
+   is an http address and resolves nothing on disk. */
+const read = (where: string): string => readFileSync(join(process.cwd(), where), 'utf8');
 
 const tools = read('src/agent/pi/tools.ts');
 const runner = read('src/agent/pi/subagent-runner.ts');
 const app = read('src/App.tsx');
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+/** One account, so the picker has something to open on rather than being sent
+ *  straight to the connect screen. */
+const CONNECTED: ConnectionState = {
+  chosen: { providerId: 'anthropic', modelId: 'haiku' },
+  chosenThinking: 'off',
+  providers: [
+    {
+      providerId: 'anthropic',
+      name: 'Anthropic',
+      methods: [],
+      oauthLabel: null,
+      apiKeyLabel: null,
+      connected: true,
+      available: true,
+      subscription: false,
+      models: [
+        {
+          id: 'haiku',
+          label: 'Haiku',
+          available: true,
+          rates: { input: 0.8, output: 4 },
+          contextWindow: null,
+          takesImages: true,
+          thinking: ['off', 'low', 'high'],
+        },
+      ],
+    },
+  ],
+};
+
+/** Open a popover and press Escape from inside it, with a listener on the
+ *  window standing in for the one that stops the run. */
+function escapeFromInside(
+  draw: () => ReactElement,
+  chip: string,
+): { opened: boolean; closed: boolean; travelsOn: boolean; reached: boolean } {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() => {
+    root.render(draw());
+  });
+  const button = host.querySelector<HTMLButtonElement>(chip);
+  if (button === null) throw new Error(`${chip} is not drawn`);
+  act(() => {
+    button.click();
+  });
+  const opened = button.getAttribute('aria-expanded') === 'true';
+
+  /** Whether a press from inside the popover reaches the window. */
+  const pressed = (key: string): boolean => {
+    let heard = false;
+    const note = (): void => {
+      heard = true;
+    };
+    window.addEventListener('keydown', note);
+    act(() => {
+      button.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    });
+    window.removeEventListener('keydown', note);
+    return heard;
+  };
+
+  const travelsOn = pressed('a');
+  const reached = pressed('Escape');
+  const closed = button.getAttribute('aria-expanded') === 'false';
+
+  act(() => {
+    root.unmount();
+  });
+  host.remove();
+  return { opened, closed, travelsOn, reached };
+}
 
 describe('a helper can reach the internet', () => {
   it('is not sent through a door its runtime cannot use', () => {
@@ -104,9 +193,13 @@ describe('a press that closes something does not stop the run', () => {
       'skillsOpen',
       'connectedOpen',
       'addMore',
+      'worktreeOpen',
+      'addonAsk',
       'paletteOpen',
       'graphOpen',
       'reviewsOpen',
+      'reviewQueueOpen',
+      'clashPath',
       'changesOpen',
       'asking',
       'helpersAt',
@@ -118,13 +211,30 @@ describe('a press that closes something does not stop the run', () => {
   /* The composer row is the most-pressed surface in the app, and these two sit
      in it. Neither said the press was theirs, so it travelled on. */
   it('is kept by the popovers in the composer row', () => {
-    for (const where of ['src/components/HowToWork.tsx', 'src/components/ThinkingWith.tsx']) {
-      const source = read(where);
-      const at = source.indexOf("if (event.key !== 'Escape') return;");
-      expect(at, where).toBeGreaterThan(-1);
-      const body = source.slice(at, at + 300);
-      expect(body, where).toContain('event.stopPropagation();');
-      expect(body, where).toContain('event.preventDefault();');
+    const ways = escapeFromInside(
+      () => createElement(HowToWork, { plans: 'auto', onPlans: () => {} }),
+      '.ways__chip',
+    );
+    const thinking = escapeFromInside(
+      () =>
+        createElement(ThinkingWith, {
+          state: CONNECTED,
+          onSelect: () => {},
+          onConnect: () => {},
+        }),
+      '.thinking__chip',
+    );
+
+    for (const [which, one] of [
+      ['HowToWork', ways],
+      ['ThinkingWith', thinking],
+    ] as const) {
+      // It really opened, and a press it has no opinion about still reaches the
+      // window — so Escape not reaching it is the popover's doing.
+      expect(one.opened, which).toBe(true);
+      expect(one.travelsOn, which).toBe(true);
+      expect(one.closed, which).toBe(true);
+      expect(one.reached, which).toBe(false);
     }
   });
 

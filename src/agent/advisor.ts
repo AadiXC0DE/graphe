@@ -340,12 +340,14 @@ export function advisorSettings(
 /* Which tools came from where                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** One extension as Pi's loader hands it back, in the two fields anything here
- *  reads. Kept structural so no Pi shape has to travel with it. */
+/** One extension as Pi's loader hands it back, in the three fields anything
+ *  here reads. Kept structural so no Pi shape has to travel with it. */
 export type LoadedExtension = {
   path?: string | undefined;
   resolvedPath?: string | undefined;
   tools?: ReadonlyMap<string, unknown> | undefined;
+  /** The `/` commands it registered, with the description it gave each one. */
+  commands?: ReadonlyMap<string, { description?: string | undefined }> | undefined;
 };
 
 /**

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** An attached PDF, from the box to the model.
  *
  *  Every piece of this already existed and none of it was joined: the picker
@@ -9,22 +10,59 @@
  *  Everything here fails when the *join* comes apart again: the window not
  *  sending it, the wire filtering it out, or the shell not turning it into the
  *  words that go with the message.
+ *
+ *  Source text, not behaviour: the window, preload and shell join for a PDF; no behavioural test can reach it — Electron wiring.
  */
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { beforeAll, describe, expect, it } from 'vitest';
 
+import Composer from '../src/components/Composer';
 import { checkFile } from '../src/lib/attachments';
 
-const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-const PRELOAD = readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8');
-const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
-const COMPOSER = readFileSync(new URL('../src/components/Composer.tsx', import.meta.url), 'utf8');
+const APP = readFileSync(join(process.cwd(), 'src/App.tsx'), 'utf8');
+const PRELOAD = readFileSync(join(process.cwd(), 'electron/preload.ts'), 'utf8');
+const MAIN = readFileSync(join(process.cwd(), 'electron/main.ts'), 'utf8');
+
+beforeAll(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  globalThis.ResizeObserver ??= class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+});
+
+/** The composer as the window mounts it, so the picker is read off the box
+ *  rather than off the line that spells it. */
+function pickerAccepts(): string | null {
+  const host = document.createElement('div');
+  host.className = 'app';
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() => {
+    root.render(createElement(Composer, { onSend: () => undefined }));
+  });
+  const accept = host.querySelector('input[type="file"]')?.getAttribute('accept') ?? null;
+  act(() => {
+    root.unmount();
+  });
+  host.remove();
+  return accept;
+}
 
 describe('a PDF the person attached', () => {
+  /* Both halves of the same join: what the picker offers and what the box then
+     takes. A type added to one and not the other is a file that is offered and
+     refused, or taken and never offerable. */
   it('is taken by the box the picker offers it to', () => {
-    expect(COMPOSER).toContain("const ACCEPT = 'image/*,application/pdf'");
+    const accept = pickerAccepts() ?? '';
+    expect(accept).toContain('application/pdf');
+    expect(accept).toContain('image/*');
     expect(checkFile({ name: 'Brand.pdf', type: 'application/pdf', size: 2000 })).toEqual({
       ok: true,
       kind: 'document',
@@ -58,13 +96,15 @@ describe('a PDF the person attached', () => {
     expect(MAIN).toContain('const papers = await paperWords(attachments)');
   });
 
-  /* Two ways out of the handler — held back for a look first, or sent — and a
-     PDF that only made it into one of them is a PDF lost half the time. */
-  it('goes with the message down both paths out of the handler', () => {
+  /* The PDF's words have to be in what the model is handed, whether or not a
+     skill — or the project's shared context — was folded in beside them. */
+  it('goes with the message, whichever way the words are built', () => {
     expect(MAIN).toContain("const asked = [text, papers].filter");
-    const at = MAIN.indexOf('return await checkItFirst(');
-    expect(at).toBeGreaterThan(-1);
-    expect(MAIN.slice(at, at + 240)).toContain('asked,');
-    expect(MAIN).toContain('chosen.length === 0\n          ? asked');
+    // Indentation is no part of the join, so it is not asserted: the two
+    // branches that fold the shared context or a selected skill in have to be
+    // built from the words the papers are already in.
+    expect(MAIN).toMatch(/const withContext =\s*shared === null \? asked/);
+    expect(MAIN).toMatch(/chosen\.length === 0\s*\? withContext/);
+    expect(MAIN).toContain('await agent.prompt(withSkills, imageCards(attachments), { lookFirst, queue });');
   });
 });

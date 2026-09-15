@@ -417,6 +417,15 @@
   margin-top: var(--space-1);
 }
 
+/* The one thing a fork does not do: it branches the conversation, not the
+   files. Said where the two ways to start a second line of work are, because
+   that is the moment somebody is choosing between them. */
+.shelf__actsshare {
+  flex-basis: 100%;
+  margin-top: var(--space-1);
+  color: var(--text-faint);
+}
+
 /* Quiet: the shelf is for navigating, and these are here to be found rather
    than to be pressed. */
 .shelf__owncopydo,
@@ -598,6 +607,60 @@
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-1) var(--space-3);
+}
+
+/* Which list a thing is in, said once above each. Quieter than the band's own
+   caption: it is a scope, not a section. */
+.shelf__scope {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+/* Handing a thing between this chat and the project. Quiet until the row is
+   looked at, the same as the other row action, because the band is for
+   reading and this is here to be found. */
+.shelf__share {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__pin:hover .shelf__share,
+.shelf__pin:focus-within .shelf__share,
+.shelf__share:focus-visible {
+  opacity: 1;
+}
+
+.shelf__share:hover,
+.shelf__share:focus-visible {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.shelf__share:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf__share {
+    transition: none;
+  }
 }
 
 .shelf__thumb {

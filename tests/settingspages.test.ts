@@ -79,7 +79,6 @@ describe('the rows', () => {
       'theme',
       'show-me',
       'files',
-      'hold-back',
       'keep-logins',
       'always',
       'folder',

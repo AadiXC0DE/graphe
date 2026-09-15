@@ -7,6 +7,8 @@
  * in it. Now one conversation holds the file while it is open, and another
  * asking for a different advisor is left without a second opinion and told why,
  * rather than quietly being served the first one's model.
+ *
+ *  Source text, not behaviour: where the adapter holds, refuses and lets go the advisor file; no behavioural test can reach it — the calls are closures inside createSession.
  */
 
 import { readFileSync } from 'node:fs';

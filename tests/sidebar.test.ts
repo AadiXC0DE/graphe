@@ -136,27 +136,85 @@ describe('the one control that folds it', () => {
   });
 });
 
+/** Pressing, the way React hears it. */
+function press(node: Element | null): void {
+  if (node === null) throw new Error('nothing to press');
+  act(() => {
+    (node as HTMLElement).click();
+  });
+}
+
 describe('whose context each thing is', () => {
   const MINE = [{ id: 'r1', kind: 'image' as const, name: 'the mock.png', note: 'PNG' }];
+  const SHARED = [{ id: 'p1', name: 'the brief.pdf', note: 'what the site is for' }];
 
-  it('draws what this chat was given to work from', () => {
+  function band(where: HTMLElement): HTMLElement | null {
+    return where.querySelector<HTMLElement>('.shelf__band:not(.shelf__band--scroll)');
+  }
+
+  function scopes(where: HTMLElement): readonly string[] {
+    return [...where.querySelectorAll('.shelf__scope')].map((one) => one.textContent ?? '');
+  }
+
+  function pressIn(where: HTMLElement, label: string): HTMLButtonElement | null {
+    return (
+      [...where.querySelectorAll<HTMLButtonElement>('.shelf__share')].find((one) =>
+        (one.textContent ?? '').includes(label),
+      ) ?? null
+    );
+  }
+
+  it('draws what this chat was given to work from, under its own scope', () => {
     const where = draw({ pinned: MINE });
-    const band = where.querySelector('.shelf__band:not(.shelf__band--scroll)');
-    expect(band?.querySelector('.shelf__caption')?.textContent).toBe(CONTEXT_WORDS.title);
-    expect([...band!.querySelectorAll('.shelf__pin .shelf__rowname')].map((one) => one.textContent)).toEqual([
-      'the mock.png',
-    ]);
+    const here = band(where);
+    expect(here?.querySelector('.shelf__caption')?.textContent).toBe(CONTEXT_WORDS.title);
+    expect(scopes(where)).toEqual([CONTEXT_WORDS.mine]);
+    expect(
+      [...here!.querySelectorAll('.shelf__pin .shelf__rowname')].map((one) => one.textContent),
+    ).toEqual(['the mock.png']);
   });
 
-  it('draws no band at all when this chat was given nothing', () => {
-    expect(draw({ pinned: [] }).querySelector('.shelf__band:not(.shelf__band--scroll)')).toBeNull();
+  it('draws what the project offers every chat, labelled and apart', () => {
+    const where = draw({ pinned: MINE, shared: SHARED });
+    expect(scopes(where)).toEqual([CONTEXT_WORDS.mine, CONTEXT_WORDS.project]);
+    expect(
+      [...where.querySelectorAll('.shelf__scope ~ .shelf__list .shelf__pin .shelf__rowname')].map(
+        (one) => one.textContent,
+      ),
+    ).toContain('the brief.pdf');
   });
 
-  /* A reference is the conversation's, and there is nowhere else for one to go.
-     Nothing in the band offers to hand it to every other chat in the project,
-     or says that it has been: the band is a list, not a control. */
-  it('offers no way to take one out of the chat that was given it', () => {
-    const band = draw({ pinned: MINE }).querySelector('.shelf__band:not(.shelf__band--scroll)');
-    expect(band?.querySelector('button')).toBeNull();
+  it('draws no band at all when there is nothing to say', () => {
+    expect(band(draw({ pinned: [] }))).toBeNull();
+    expect(band(draw({ pinned: [], shared: [] }))).toBeNull();
+  });
+
+  /* The press this replaces said a reference had been given to the project
+     while nothing carried it there. Both are now real: sharing writes the
+     project's own list, which every new chat is then given, and the chat it
+     came from keeps what it was given. */
+  it('hands one of this chat’s own to the project when asked', () => {
+    const handed: string[] = [];
+    const where = draw({ pinned: MINE, onShare: (one: { id: string }) => handed.push(one.id) });
+    const share = pressIn(where, CONTEXT_WORDS.share);
+    expect(share).not.toBeNull();
+    press(share);
+    expect(handed).toEqual(['r1']);
+  });
+
+  it('takes one off the project’s list when asked', () => {
+    const stopped: string[] = [];
+    const where = draw({ shared: SHARED, onStopSharing: (id: string) => stopped.push(id) });
+    const stop = pressIn(where, CONTEXT_WORDS.unshare);
+    expect(stop).not.toBeNull();
+    press(stop);
+    expect(stopped).toEqual(['p1']);
+  });
+
+  /* A shelf with nowhere to put a shared item is a list rather than a control:
+     a press that cannot do anything is worse than no press. */
+  it('offers no press where the shelf cannot act on one', () => {
+    expect(pressIn(draw({ pinned: MINE }), CONTEXT_WORDS.share)).toBeNull();
+    expect(pressIn(draw({ shared: SHARED }), CONTEXT_WORDS.unshare)).toBeNull();
   });
 });

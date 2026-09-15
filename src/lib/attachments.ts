@@ -358,6 +358,33 @@ export function readDropped<F extends FileFacts>(payload: Dropped<F>): Landed<F>
 }
 
 /* -------------------------------------------------------------------------- */
+/* Letting go of a temporary address                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Let go of the temporary address a chip was drawn from.
+ *
+ * An object URL is a lease on bytes the page is holding: while it is alive the
+ * File behind it cannot be collected, so a session of dropping screenshots in
+ * and sending them holds every one of them until the window goes. The address
+ * is given up the moment its owner no longer needs to draw the picture —
+ * because the shell has written the bytes down under their own name and handed
+ * back a thumbnail, or because the chip came off the row. What comes back is
+ * the same attachment with nothing left to draw from, which the chip already
+ * knows how to render: a name and a mark.
+ *
+ * This is the one place an address is given up, so nothing is revoked twice and
+ * nothing still on screen goes blank.
+ */
+export function letGo<T extends object>(one: T & { preview?: string }): T {
+  const address = one.preview;
+  if (address === undefined) return one;
+  URL.revokeObjectURL(address);
+  const { preview: _let, ...rest } = one;
+  return rest as T;
+}
+
+/* -------------------------------------------------------------------------- */
 /* The drag counter                                                            */
 /* -------------------------------------------------------------------------- */
 

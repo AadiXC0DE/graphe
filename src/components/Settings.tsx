@@ -20,7 +20,9 @@ import type {
   ModelChoice,
   StorageNow,
   ThinkingLevel,
+  TrashView,
 } from '../lib/ipc';
+import Trash from './Trash';
 import { defaultComputerUse, type ComputerUse as ComputerUsePrefs } from '../work/computeruse';
 import { chordOf, saysChord } from '../lib/keys';
 import { THEME_WORDS, showing, type Theme } from '../lib/theme';
@@ -64,8 +66,6 @@ type Props = {
   startAt?: string | null;
   showMe: boolean;
   showFiles: boolean;
-  /** Check new work before it lands, rather than as it happens. */
-  holdBack: boolean;
   /** The browser this project drives keeps what it is signed in to. */
   keepLogins: boolean;
   /** What this project does without being asked, or null before it is read. */
@@ -84,7 +84,6 @@ type Props = {
   onTheme: (theme: Theme) => void;
   onToggleShowMe: () => void;
   onToggleShowFiles: () => void;
-  onToggleHoldBack: () => void;
   onToggleKeepLogins: () => void;
   onGo: (link: SettingsLink) => void;
   /** Which build this is, so a report can say. Nothing in the window said it
@@ -96,6 +95,14 @@ type Props = {
   onClearFinishedWork?: () => void;
   /** Empty one named folder. Offered only for the ones that never hold work. */
   onClearFolder?: (name: string) => void;
+  /** What has been deleted, and the rule it is kept under. Asked with what the
+   *  folders are taking, because it is the one folder there holding somebody's
+   *  own words. */
+  trash?: TrashView | null;
+  /** Put one deleted conversation back, named as the list names it. */
+  onTrashRestore?: (name: string) => void;
+  /** Throw away exactly the conversations picked on the section. */
+  onTrashEmpty?: (names: readonly string[]) => void;
   /** Everything worth sending when somebody says "it stopped", on the
    *  clipboard. Never a conversation, never a key. */
   onCopyDiagnostics?: () => void;
@@ -144,7 +151,6 @@ type Props = {
   shelfAtLaunch?: ShelfAtLaunch;
   onShelfAtLaunch?: (choice: ShelfAtLaunch) => void;
   nameConversations?: boolean;
-  askBeforeClosing?: boolean;
   snapBeforeApply?: boolean;
   replyLanguage?: string;
   onReplyLanguage?: (says: string) => void;
@@ -159,7 +165,6 @@ type Props = {
   onBehaviour?: (
     which:
       | 'nameConversations'
-      | 'askBeforeClosing'
       | 'snapBeforeApply'
       | 'notifySound'
       | 'badgeDock',
@@ -207,7 +212,7 @@ const ADDON_WORDS = {
 /** Rows whose control will not sit on the right-hand end of a row, so each one
  *  gets a card of its own. The model chip opens a menu over the card, which a
  *  card that clips its corners would cut in half. */
-const BLOCKS = new Set(['folders', 'theme', 'model', 'addons', 'new-model']);
+const BLOCKS = new Set(['folders', 'trash', 'theme', 'model', 'addons', 'new-model']);
 
 /** The three answers to which way the palette runs, in the order a segmented
  *  control reads them. */
@@ -271,12 +276,10 @@ export default function Settings({
   startAt = null,
   showMe,
   showFiles,
-  holdBack,
   theme,
   onTheme,
   onToggleShowMe,
   onToggleShowFiles,
-  onToggleHoldBack,
   keepLogins,
   onToggleKeepLogins,
   always,
@@ -290,6 +293,9 @@ export default function Settings({
   storage = null,
   onClearFolder,
   onClearFinishedWork,
+  trash = null,
+  onTrashRestore,
+  onTrashEmpty,
   onCopyDiagnostics,
   caps,
   appearance,
@@ -323,7 +329,6 @@ export default function Settings({
   shelfAtLaunch = 'remembered',
   onShelfAtLaunch,
   nameConversations = true,
-  askBeforeClosing = true,
   snapBeforeApply = true,
   replyLanguage = '',
   onReplyLanguage,
@@ -654,13 +659,6 @@ export default function Settings({
           </li>
         );
 
-      case 'hold-back':
-        return (
-          <li key={row.id} className={at}>
-            {flip(row, holdBack, onToggleHoldBack)}
-          </li>
-        );
-
       case 'keep-logins':
         return (
           <li key={row.id} className={at}>
@@ -788,18 +786,6 @@ export default function Settings({
               row,
               nameConversations,
               () => onBehaviour?.('nameConversations', !nameConversations),
-              onBehaviour === undefined,
-            )}
-          </li>
-        );
-
-      case 'ask-before-closing':
-        return (
-          <li key={row.id} className={at}>
-            {flip(
-              row,
-              askBeforeClosing,
-              () => onBehaviour?.('askBeforeClosing', !askBeforeClosing),
               onBehaviour === undefined,
             )}
           </li>
@@ -1080,6 +1066,14 @@ export default function Settings({
                   ))}
               </ul>
             )}
+          </li>
+        );
+
+      case 'trash':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">{words(row)}</div>
+            <Trash trash={trash} onRestore={onTrashRestore} onEmpty={onTrashEmpty} />
           </li>
         );
 

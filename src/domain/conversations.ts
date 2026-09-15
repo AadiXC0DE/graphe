@@ -108,16 +108,143 @@ export function recoverAfterRestart(facts: DurableFacts, alive: boolean): Runtim
   if (alive && facts.runtimeEpoch !== null) {
     return { state: facts.status, runtimeEpoch: facts.runtimeEpoch, ownerId: facts.ownerId };
   }
-  const inFlight =
-    facts.status === 'opening' ||
-    facts.status === 'queued' ||
-    facts.status === 'running' ||
-    facts.status === 'waiting-input' ||
-    facts.status === 'compacting' ||
-    facts.status === 'stopping';
   return {
-    state: inFlight ? 'interrupted' : facts.status,
+    state: inFlight(facts.status) ? 'interrupted' : facts.status,
     runtimeEpoch: null,
     ownerId: null,
   };
+}
+
+/** Whether a process dying right now would have been in the middle of
+ *  something. These are the states a restart interrupts, and the ones nothing
+ *  may put down: ending one of them ends work somebody asked for. */
+export function inFlight(state: SessionState): boolean {
+  return (
+    state === 'opening' ||
+    state === 'queued' ||
+    state === 'running' ||
+    state === 'waiting-input' ||
+    state === 'compacting' ||
+    state === 'stopping'
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The state of every conversation's runtime                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Where each conversation's runtime is, and what was last written down about
+ * it.
+ *
+ * The two are held together because they are the same question asked twice:
+ * `stateOf` is what is true now and dies with the process, `factsOf` is what a
+ * restart reads back. Nothing else decides a state, so a conversation cannot be
+ * reported as running by one caller and idle by another.
+ *
+ * Keyed by conversation, not by tab: two views of one conversation are one
+ * runtime, and closing a view is not closing a conversation.
+ */
+export class Sessions {
+  readonly #now = new Map<ConversationId, RuntimeState>();
+  readonly #written = new Map<ConversationId, DurableFacts>();
+  readonly #wrote: (facts: DurableFacts) => void;
+
+  /** `wrote` is told about every note as it changes, so the caller can put the
+   *  in-flight ones on disk without this class knowing about files. */
+  constructor(options: { wrote?: (facts: DurableFacts) => void } = {}) {
+    this.#wrote = options.wrote ?? (() => undefined);
+  }
+
+  /** Where a conversation's runtime is. One nothing has opened is `unloaded`,
+   *  which is a real answer rather than a missing one. */
+  stateOf(conversation: ConversationId): SessionState {
+    return this.#now.get(conversation)?.state ?? 'unloaded';
+  }
+
+  /** The last state written down for it, or null when nothing was. */
+  factsOf(conversation: ConversationId): DurableFacts | null {
+    return this.#written.get(conversation) ?? null;
+  }
+
+  /** Every note, in the order they were written: what a launch walks through. */
+  facts(): readonly DurableFacts[] {
+    return [...this.#written.values()].sort((one, two) => one.writtenAt - two.writtenAt);
+  }
+
+  /**
+   * A note read back off disk, before anything has opened the conversation.
+   *
+   * What a launch does with it is `recovered`'s to say; this is only the fact
+   * that it was written, and it is what makes `factsOf` answer after a restart
+   * with what the last process knew rather than with nothing.
+   */
+  remembered(facts: DurableFacts): DurableFacts {
+    this.#written.set(facts.conversationId, facts);
+    return facts;
+  }
+
+  /**
+   * Move a conversation.
+   *
+   * A move the table does not allow is refused rather than stored and repaired
+   * later, and the state it is in afterwards comes back either way — so a
+   * caller that guessed wrong learns where it really is. Asking for the state
+   * it is already in is not a move at all: it is the same writer saying the
+   * same thing, and `TRANSITIONS` refuses it because two *different* opens are
+   * two writers for one transcript.
+   */
+  move(
+    conversation: ConversationId,
+    to: SessionState,
+    at: number,
+    options: { ownerId?: OwnerId | null; workspaceId?: WorkspaceId | null } = {},
+  ): SessionState {
+    const from = this.stateOf(conversation);
+    if (from === to) return from;
+    if (!canTransition(from, to)) return from;
+    const facts: DurableFacts = {
+      conversationId: conversation,
+      // The workspace a conversation works in belongs to the registry, not to
+      // the runtime; null here means "this layer does not know", not "none".
+      workspaceId: options.workspaceId ?? null,
+      status: to,
+      ownerId: options.ownerId ?? null,
+      runtimeEpoch: this.#now.get(conversation)?.runtimeEpoch ?? null,
+      writtenAt: at,
+    };
+    this.#written.set(conversation, facts);
+    this.#now.set(conversation, {
+      state: to,
+      runtimeEpoch: facts.runtimeEpoch,
+      ownerId: facts.ownerId,
+    });
+    this.#wrote(facts);
+    return to;
+  }
+
+  /**
+   * What a restart made of one conversation's note.
+   *
+   * `alive` is the supervisor's finding, and it is only true for a runtime this
+   * launch actually reattached to; a launch that has reattached nothing passes
+   * false, which is what turns a note left mid-run into `interrupted`. Called
+   * with no note at all it leaves the conversation where it was: nothing was
+   * written down, so nothing was interrupted.
+   */
+  recovered(conversation: ConversationId, alive = false): RuntimeState {
+    const facts = this.#written.get(conversation);
+    if (facts === undefined) {
+      return this.#now.get(conversation) ?? { state: 'unloaded', runtimeEpoch: null, ownerId: null };
+    }
+    const back = recoverAfterRestart(facts, alive);
+    this.#now.set(conversation, back);
+    return back;
+  }
+
+  /** Take a conversation's runtime away. Its note stays: the note is what the
+   *  next launch reads, and forgetting a conversation is a different act. */
+  forget(conversation: ConversationId): void {
+    this.#now.delete(conversation);
+  }
 }

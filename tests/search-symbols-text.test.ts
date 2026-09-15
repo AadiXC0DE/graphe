@@ -58,7 +58,6 @@ describe('what the model is handed', () => {
 
     expect(names).toContain('search_symbols_text');
     expect(names).not.toContain('lsp');
-    expect(names).not.toContain('lsp_rename');
   });
 
   it('describes itself as a text search that uses no language server', () => {

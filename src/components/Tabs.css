@@ -228,21 +228,6 @@
   }
 }
 
-/* Which kind of thing a tab is. A conversation draws nothing — the ordinary
-   one needs no badge. */
-.tabs__kind {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 14px;
-  height: 14px;
-  color: var(--text-faint);
-}
-
-.tabs__tab--here .tabs__kind {
-  color: var(--text-muted);
-}
-
 /* --------------------------------------------------------------- the marks */
 
 .tabs__mark {

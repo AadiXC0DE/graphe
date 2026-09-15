@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** A long conversation, read without waiting for it and searched without
  *  scrolling it.
  *
@@ -5,24 +6,63 @@
  * events, one array. It draws the tail now and offers the rest. And the
  * browser's own find only ever reached what was drawn, which after that change
  * is the tail, so finding a word is the app's job.
+ *
+ *  Source text, not behaviour: which turns App draws, what it hands the find bar and how it marks a found row; no behavioural test can reach it — no test mounts App, and jsdom computes no stylesheet rule.
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { AT_FIRST, lastTurns } from '../src/lib/hydrate';
 import { findIn, nextFound, threadWords, wordsOf } from '../src/lib/threadview';
 import { said } from '../src/lib/thread';
 import type { Turn } from '../src/lib/thread';
+import FindInThread from '../src/components/FindInThread';
 
-const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
-const bar = readFileSync(
-  fileURLToPath(new URL('../src/components/FindInThread.tsx', import.meta.url)),
-  'utf8',
-);
-const styles = readFileSync(fileURLToPath(new URL('../src/App.css', import.meta.url)), 'utf8');
+// Read from the working directory: under jsdom, import.meta.url is a URL no
+// file reader will take.
+const source = (rel: string): string => readFileSync(join(process.cwd(), rel), 'utf8');
+
+const app = source('src/App.tsx');
+const bar = source('src/components/FindInThread.tsx');
+const styles = source('src/App.css');
+
+beforeAll(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+});
+
+const hosts: [HTMLElement, Root][] = [];
+afterEach(() => {
+  for (const [host, root] of hosts.splice(0)) {
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
+/** The find bar itself, drawn over a conversation. */
+function drawBar(turns: readonly Turn[], term: string): HTMLElement {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  hosts.push([host, root]);
+  act(() => {
+    root.render(
+      createElement(FindInThread, {
+        turns,
+        term,
+        onTerm: () => {},
+        at: null,
+        onAt: () => {},
+        onClose: () => {},
+      }),
+    );
+  });
+  return host;
+}
 
 const many = (count: number): readonly Turn[] =>
   Array.from({ length: count }, (_, at) => said('you', `Turn ${String(at)}`));
@@ -87,6 +127,9 @@ describe('finding a word in it', () => {
   });
 
   it('says nothing was found rather than showing an empty count', () => {
-    expect(bar).toContain('threadWords.nothingFound');
+    const count = (term: string): string =>
+      drawBar(turns, term).querySelector('.findthread__count')?.textContent ?? '';
+    expect(count('kubernetes')).toBe(threadWords.nothingFound);
+    expect(count('pricing')).toBe(threadWords.found(1, 2));
   });
 });

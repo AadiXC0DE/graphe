@@ -171,13 +171,10 @@ describe('D1 — the real name of what just happened', () => {
           kept: {},
           trusted: {},
           showFiles: false,
-          heldBack: {},
           keptLogins: {},
-          howMuch: null,
           ceiling: null,
           theme: 'system',
           nameConversations: true,
-          askBeforeClosing: true,
           snapBeforeApply: true,
           replyLanguage: '',
           whenRunFinishes: 'system',
@@ -199,7 +196,6 @@ describe('D1 — the real name of what just happened', () => {
       await writeFile(file, JSON.stringify({ preferences: { showMe: true } }), 'utf8');
       const all = (await PreferenceFile.open(file)).all();
       expect(all.nameConversations).toBe(true);
-      expect(all.askBeforeClosing).toBe(true);
       expect(all.snapBeforeApply).toBe(true);
       expect(all.badgeDock).toBe(true);
       expect(all.notifySound).toBe(false);
@@ -255,18 +251,6 @@ describe('D1 — the real name of what just happened', () => {
       const all = (await PreferenceFile.open(file)).all();
       expect(all.whenRunFinishes).toBe('system');
       expect(all.badgeDock).toBe(true);
-    });
-  });
-
-  it('holds back one project without changing another', async () => {
-    await inATemporaryFolder(async (folder) => {
-      const file = join(folder, 'preferences.json');
-      const preferences = await PreferenceFile.open(file);
-      await preferences.change({ heldBack: { ...preferences.all().heldBack, ['/one']: true } });
-      const read = await PreferenceFile.open(file);
-      // The project that asked is held back; the other is not asked for.
-      expect(read.all().heldBack['/one']).toBe(true);
-      expect(read.all().heldBack['/two']).toBeUndefined();
     });
   });
 

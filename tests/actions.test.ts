@@ -6,6 +6,8 @@
  * matter are the ones about agreement — every action has a name and a place,
  * no two answer to the same key, and what the palette prints is what the
  * keyboard does.
+ *
+ *  Source text, not behaviour: App.tsx's palette chords and the handler for its `files` key; no behavioural test can reach it — no test renders App.tsx.
  */
 
 import { readFileSync } from 'node:fs';
@@ -78,8 +80,8 @@ describe('AC-02 clashes', () => {
   /* A second key for one action is a habit, not a clash — but a second key that
      somebody else's action already answers to is. */
   it('counts an action’s other keys too', () => {
-    expect(clashesIn(readActions({ canvas: 'mod+shift+t' }))).toEqual([
-      { chord: 'mod+shift+t', ids: ['open', 'canvas'] },
+    expect(clashesIn(readActions({ history: 'mod+shift+t' }))).toEqual([
+      { chord: 'mod+shift+t', ids: ['open', 'history'] },
     ]);
     expect(clashesIn(readActions({ open: 'mod+shift+t' }))).toEqual([]);
   });
@@ -180,7 +182,6 @@ describe('AC-05 the search', () => {
   });
 
   it('puts what somebody half-remembers at the top', () => {
-    expect(matching('canvas', everything)[0]?.id).toBe('canvas');
     expect(matching('pull request', everything)[0]?.id).toBe('reviews');
   });
 
@@ -189,7 +190,7 @@ describe('AC-05 the search', () => {
   });
 
   it('only offers what can be reached from where you are', () => {
-    expect(matching('canvas', actionsFor('anywhere'))).toEqual([]);
+    expect(matching('history', actionsFor('anywhere'))).toEqual([]);
   });
 });
 

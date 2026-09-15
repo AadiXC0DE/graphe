@@ -3,6 +3,8 @@
  * It arrived as a line in whichever conversation happened to be open, routed
  * through a notice with no project on it, so with nothing open it went nowhere
  * at all and nothing in Settings ever mentioned it.
+ *
+ *  Source text, not behaviour: the update push from the shell to the sidebar row; it needs Electron and a release feed, so no test here can drive it.
  */
 
 import { readFileSync } from 'node:fs';

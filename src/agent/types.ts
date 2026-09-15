@@ -239,6 +239,24 @@ export type KeptThing = { what: string; where: string };
 /** One press offered under a notice. `id` is what comes back. */
 export type NoticeAction = { id: string; label: string };
 
+/** One send waiting for the folder rather than for Pi.
+ *
+ * Nothing of it has begun, so Pi has no queue to report it from: the shell is
+ * holding it, and the shell is what says when it goes. The id is the run it
+ * becomes, given before anything is sent — two sends of the same sentence are
+ * two waits, and each comes off the line by its own id rather than by reading
+ * like the other. The folder is the one it was queued for, read at send time: a
+ * workspace picked afterwards is a different request, and this one does not
+ * follow it.
+ */
+export type WaitingSend = {
+  id: string;
+  text: string;
+  workspace: string;
+  /** The conversation holding that folder, for "waiting on …". */
+  ahead: string;
+};
+
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
   | { type: 'message-end' }
@@ -395,6 +413,13 @@ export type AgentEvent =
   /** What is waiting behind the run. Both lists, because an interrupt and a
    *  follow-up are different promises and are shown as different things. */
   | { type: 'queued'; steering: readonly string[]; followUp: readonly string[] }
+  /** The sends waiting for the folder, whole, every time the line changes.
+   *
+   * A second chat in one workspace asked to send while a run held it. The line
+   * is the shell's, so the shell says all of it at once — as `running` does —
+   * rather than leaving the window to add and remove one at a time and guess
+   * which wait a message belongs to. */
+  | { type: 'queued-for-folder'; waiting: readonly WaitingSend[] }
   /** The words of a person's message the moment the agent begins on it. Pi
    *  reports the line draining by its own bookkeeping too, but that removal is
    *  exact-text and can silently no-op; this says directly that one of the

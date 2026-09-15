@@ -477,6 +477,7 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
     /* Held by the window beside the composer, not folded into the thread: a
        message waiting its turn is not something that has happened yet. */
     case 'queued':
+    case 'queued-for-folder':
       return false;
 
     /* The agent has begun on one of the queued messages. The waiting line

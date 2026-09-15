@@ -7,6 +7,8 @@
  *
  * And a card answered with a click is answered: only typing used to clear the
  * hold, so the first Yes ended the rounds for the rest of the job.
+ *
+ *  Source text, not behaviour: the window reading the shell's `busy` flag, and the shell clearing a hold when a card is answered; no behavioural test can reach it — the pair joins unrendered App.tsx to electron/main.ts across the IPC seam.
  */
 
 import { readFileSync } from 'node:fs';

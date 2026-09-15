@@ -6,6 +6,8 @@
  * worth guarding is that the list is real where the machine can be read, that
  * there is still a list where it cannot, and that the popup is drawn at window
  * coordinates rather than against whichever ancestor happens to be positioned.
+ *
+ *  Source text, not behaviour: the shell's `local-fonts` permission policy; no behavioural test can reach it — it is applied when the shell makes the window, which no test opens.
  */
 
 import { readFileSync } from 'node:fs';
@@ -15,8 +17,9 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import AppearanceBand from '../src/components/AppearanceBand';
 import FontPicker, { FONT_WORDS } from '../src/components/FontPicker';
-import { SYSTEM_FONT } from '../src/design/appearance';
+import { appearanceWords, defaultAppearance, SYSTEM_FONT } from '../src/design/appearance';
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,6 +51,18 @@ function draw(props: Partial<Parameters<typeof FontPicker>[0]> = {}): HTMLElemen
         ...props,
       }),
     );
+  });
+  return host;
+}
+
+/** The band itself, drawn with the two fonts it is handed. */
+function drawBand(appearance = defaultAppearance): HTMLElement {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  hosts.push([host, root]);
+  act(() => {
+    root.render(createElement(AppearanceBand, { appearance, onChange: () => {}, on: 'dark' }));
   });
   return host;
 }
@@ -205,8 +220,15 @@ describe('the window it runs in', () => {
   });
 
   it('is where the appearance band sends both fonts', () => {
-    const band = readFileSync(join(process.cwd(), 'src/components/AppearanceBand.tsx'), 'utf8');
-    expect(band).not.toContain('appearance__font');
-    expect(band.split('<FontPicker')).toHaveLength(3);
+    const host = drawBand({ ...defaultAppearance, uiFont: 'Inter', codeFont: 'JetBrains Mono' });
+    const chips = [...host.querySelectorAll('.fontpicker__chip')];
+    expect(chips.map((one) => one.getAttribute('aria-label'))).toEqual([
+      appearanceWords.uiFont.name,
+      appearanceWords.codeFont.name,
+    ]);
+    expect(chips[0]?.textContent).toContain('Inter');
+    expect(chips[1]?.textContent).toContain('JetBrains Mono');
+    // A family spelled by hand is what the picker replaced.
+    expect(host.querySelector('.appearance__font')).toBeNull();
   });
 });

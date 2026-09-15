@@ -77,6 +77,21 @@ describe('an add-on that drives', () => {
   });
 });
 
+describe('an add-on that says its tools stand on their own', () => {
+  it('records the declaration off the module it loaded', async () => {
+    const card = await probe(at('tools-alone'));
+    expect(card?.toolsOnly).toBe(true);
+    // It is still an add-on that drives: the declaration is about its tools,
+    // not about what it does with the ends of turns.
+    expect(card?.orchestrating).toBe(true);
+  });
+
+  it('is silent on the subject unless it says so', async () => {
+    const card = await probe(at('orchestrating'));
+    expect(card?.toolsOnly).toBe(false);
+  });
+});
+
 describe('an add-on that falls over', () => {
   it('comes back as nothing rather than as a failure somebody has to handle', async () => {
     await expect(probe(at('throws'))).resolves.toBeNull();

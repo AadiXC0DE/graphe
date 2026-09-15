@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { everything } from '../agent/pi/packages';
-import type { CarriedExtension } from '../lib/ipc';
+import type { AddonSetup, CarriedExtension, ExtensionHere, Stopping } from '../lib/ipc';
+import { COPY, useCopying } from '../lib/copying';
 import Switch from './Switch';
 import {
   REACHABLE,
@@ -70,6 +71,11 @@ export const SAYS = {
   carriedNote:
     'You did not choose these. They came down with the project. Everything else Graphe does is checked as it goes; these run as part of Graphe itself, so they stay off until you turn one on.',
   carriedRestart: 'Turning one on starts a fresh conversation in this project, so it can be loaded.',
+  stop: 'Stop',
+  hereHeading: 'What is here',
+  hereNote: 'Everything Graphe can load in this project, and what each one is doing.',
+  getNode: 'Get Node',
+  details: 'What it said',
 } as const;
 
 type Props = {
@@ -110,6 +116,19 @@ type Props = {
    *  they are a decision rather than a shelf, and they are not searched. */
   carried?: readonly CarriedExtension[];
   onTrustCarried?: (id: string, trust: boolean) => void;
+  /** Every add-on this project can see, and what each one is doing here. Read
+   *  when the screen opens: it changes when a session is built or trusted. */
+  here?: readonly ExtensionHere[];
+  /** Whether a change in flight can be ended here, and the line to draw where
+   *  it cannot — the shelf's own sentence, so the screen and a press agree. */
+  stopping?: Stopping;
+  onStop?: () => void;
+  /** What the last stop left on disk, in the shelf's own words. Cleared when
+   *  the next change starts, so it is never read as news about that one. */
+  stoppedSays?: string | null;
+  /** What installing one needs from this computer: nothing at all, or a line
+   *  and a way to install Node. Drawn before anybody presses Add. */
+  setup?: AddonSetup;
 };
 
 const FOCUSABLE =
@@ -147,9 +166,15 @@ export default function AddMore({
   onConnectByHand,
   carried = [],
   onTrustCarried,
+  here = [],
+  stopping,
+  onStop,
+  stoppedSays = null,
+  setup,
 }: Props) {
   const [term, setTerm] = useState('');
   const [showing, setShowing] = useState<Showing>('all');
+  const copy = useCopying();
   const panel = useRef<HTMLDivElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
@@ -243,6 +268,32 @@ export default function AddMore({
           </button>
         </header>
 
+        {/* What installing one needs before anybody presses Add. A line and a
+            way to act on it, because the press without npm ends in the
+            installer's own words. */}
+        {setup?.needed !== true ? null : (
+          <p className="addmore__setup">
+            <span className="addmore__setupso">{setup.line}</span>
+            <a
+              className="addmore__setuplink"
+              href={setup.download}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {SAYS.getNode}
+            </a>
+            {setup.command === null ? null : (
+              <button
+                type="button"
+                className="addmore__setuplink"
+                onClick={() => copy.copy(setup.command ?? '')}
+              >
+                {copy.copied ? COPY.done : `Copy ${setup.command}`}
+              </button>
+            )}
+          </p>
+        )}
+
         <div className="addmore__search">
           <input
             className="addmore__field"
@@ -303,6 +354,16 @@ export default function AddMore({
             </section>
           )}
 
+          {!showAdditions || here.length === 0 ? null : (
+            <section className="addmore__group" aria-label={SAYS.hereHeading}>
+              <h3 className="addmore__grouphead">{SAYS.hereHeading}</h3>
+              <p className="addmore__groupnote">{SAYS.hereNote}</p>
+              {here.map((one) => (
+                <HereRow key={one.where} one={one} />
+              ))}
+            </section>
+          )}
+
           {showReach ? (
             <section className="addmore__group" aria-label={SAYS.reachHeading}>
               <h3 className="addmore__grouphead">{SAYS.reachHeading}</h3>
@@ -331,6 +392,11 @@ export default function AddMore({
             <p className="addmore__quiet">{searching ? SAYS.noMatches : SAYS.emptyCatalogue}</p>
           ) : (
             <>
+              {/* What the last stop left on disk, in the shelf's own words —
+                  said here rather than left to be inferred from a row. */}
+              {stoppedSays === null ? null : (
+                <p className="addmore__stopped">{stoppedSays}</p>
+              )}
               {vouched.length === 0 ? null : (
                 <section className="addmore__group" aria-label={SAYS.vouchedHeading}>
                   <h3 className="addmore__grouphead">{SAYS.vouchedHeading}</h3>
@@ -343,6 +409,8 @@ export default function AddMore({
                       busy={busy}
                       onAdd={onAdd}
                       onRemove={onRemove}
+                      {...(stopping === undefined ? {} : { stopping })}
+                      {...(onStop === undefined ? {} : { onStop })}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -378,6 +446,8 @@ export default function AddMore({
                       busy={busy}
                       onAdd={onAdd}
                       onRemove={onRemove}
+                      {...(stopping === undefined ? {} : { stopping })}
+                      {...(onStop === undefined ? {} : { onStop })}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -403,15 +473,19 @@ function Row({
   pack,
   sentence,
   busy,
+  stopping,
   onAdd,
   onRemove,
+  onStop,
   capability,
 }: {
   pack: Pack;
   sentence: string;
   busy: string | null;
+  stopping?: Stopping;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  onStop?: () => void;
   capability?: string;
 }) {
   const working = busy === pack.id;
@@ -423,6 +497,13 @@ function Row({
           <span className="addmore__name">{pack.name}</span>
           <span className="addmore__summary">{sentence}</span>
         </div>
+        {/* Only while this row's own change is running, and only where this
+            copy of the app can end one. */}
+        {working && stopping?.canStop === true && onStop !== undefined ? (
+          <button type="button" className="addmore__action" onClick={onStop}>
+            {SAYS.stop}
+          </button>
+        ) : null}
         <button
           type="button"
           className={`addmore__action ${pack.installed ? 'addmore__action--off' : ''}`}
@@ -439,6 +520,12 @@ function Row({
         </button>
       </div>
 
+      {/* Where it cannot be ended, the shelf's own sentence says so. A Stop that
+          only ever answered "I cannot" would be worse than no press at all. */}
+      {working && stopping !== undefined && !stopping.canStop ? (
+        <span className="addmore__does">{stopping.says}</span>
+      ) : null}
+
       <div className="addmore__meta">
         <span className="addmore__kind">{SAYS.kinds[pack.kind]}</span>
         {pack.downloads === null ? null : (
@@ -451,6 +538,46 @@ function Row({
           registers, never from knowing its name. */}
       {capability === undefined ? null : (
         <span className="addmore__does">{capability}</span>
+      )}
+    </div>
+  );
+}
+
+/** One add-on this computer has: what it is, where it came from, how far it
+ *  reaches, and what it is doing here — or why it is not. */
+function HereRow({ one }: { one: ExtensionHere }) {
+  const state = one.state.charAt(0).toUpperCase() + one.state.slice(1);
+  return (
+    <div className="addmore__row">
+      <div className="addmore__rowtop">
+        <div className="addmore__text">
+          <span className="addmore__name">
+            {/* An add-on nothing could fingerprint has no name of its own, and
+                the file it would load is the honest thing to call it. */}
+            {one.id === '' ? one.where : one.id}
+            {one.version === null ? null : ` ${one.version}`}
+          </span>
+          <span className="addmore__summary">{one.says}</span>
+        </div>
+        <span className="addmore__state">{state}</span>
+      </div>
+
+      <div className="addmore__meta">
+        <span className="addmore__kind">{`${one.origin} · ${one.scope}`}</span>
+        {one.commands.length === 0 ? null : (
+          <span className="addmore__uses">{one.commands.map((name) => `/${name}`).join(' ')}</span>
+        )}
+      </div>
+
+      <span className="addmore__where">{one.where}</span>
+
+      {/* The loader's own words, kept behind a press: "it did not load" without
+          the reason is a shrug, and the reason is several lines long. */}
+      {one.problem === null ? null : (
+        <details className="addmore__hand">
+          <summary className="addmore__exactsummary">{`${SAYS.details}: ${one.problem}`}</summary>
+          <pre className="addmore__logtext">{one.logs.join('\n')}</pre>
+        </details>
       )}
     </div>
   );

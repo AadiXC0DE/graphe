@@ -20,6 +20,10 @@ export const threadWords = {
   found: (at: number, of: number): string => `${String(at)} of ${String(of)}`,
   nothingFound: 'Not in this conversation.',
   find: 'Find in this conversation',
+  /** Said on the press that forks the conversation at one message, while that
+   *  message is still being written — there is no finished exchange to stop a
+   *  copy at yet. */
+  forkWaits: 'Fork here waits until this turn finishes.',
 } as const;
 
 /* -------------------------------------------------------------------------- */

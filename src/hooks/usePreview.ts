@@ -23,8 +23,7 @@ import {
 
 import type { Room as PaneRoom } from '../components/BrowserPane';
 import { bridge } from '../lib/bridge';
-import { recordedIn, type Desks, type Recorded } from '../lib/projects';
-import type { Trouble } from '../lib/ipc';
+import type { Desks } from '../lib/projects';
 
 export type Preview = {
   /** How the window is split between the conversation and the page. */
@@ -46,19 +45,10 @@ export type Preview = {
   /** A served address the window may open on its own. True once per address,
    *  so a pane somebody deliberately closed is not reopened. */
   opensItself(address: string): boolean;
-  /** True while a walkthrough is being recorded in the page. */
-  recording: boolean;
-  /** The last walkthrough, waiting to be looked through. */
-  recorded: Recorded | null;
-  setRecorded: Dispatch<SetStateAction<Recorded | null>>;
-  record(want: boolean): void;
 };
 
-export function usePreview(options: {
-  desksNow: { current: Desks };
-  troubleHere: (trouble: Trouble) => void;
-}): Preview {
-  const { desksNow, troubleHere } = options;
+export function usePreview(options: { desksNow: { current: Desks } }): Preview {
+  const { desksNow } = options;
 
   const [pane, setPane] = useState<PaneRoom>('off');
   const paneNow = useRef<PaneRoom>('off');
@@ -71,8 +61,6 @@ export function usePreview(options: {
    *  belongs to, and the address it was pointed at. One view is shared by the
    *  whole window, so every call about the page names that project. */
   const pageHeld = useRef<{ project: string; address: string } | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recorded, setRecorded] = useState<Recorded | null>(null);
 
   /** The project a call about the page names: the one the page the shell has
    *  belongs to, or the one in front while there is no page yet. */
@@ -148,45 +136,6 @@ export function usePreview(options: {
     return true;
   }, []);
 
-  /**
-   * Record somebody using the page, and keep what it saw.
-   *
-   * Nothing is asked for first: the states worth arguing about — hovered,
-   * loading, empty, the message that shows for two seconds — only exist while
-   * somebody is using the page, so anything that has to be filled in beforehand
-   * is a state already gone. What comes back goes into the conversation, where
-   * everything else about the work already is.
-   */
-  const record = useCallback(
-    (want: boolean) => {
-      const mine = pageOwner();
-      if (mine === null) return;
-      if (want) {
-        setRecorded(null);
-        void bridge.watchStart(undefined, { project: mine }).then((answer) => {
-          if (!answer.ok) {
-            troubleHere(answer.trouble);
-            return;
-          }
-          setRecording(true);
-        });
-        return;
-      }
-      // Off the moment it is pressed, whatever the run turns out to hold: a
-      // control that stays lit while the pictures come back reads as one that
-      // did not hear the press.
-      setRecording(false);
-      void bridge.watchStop({ project: mine }).then((answer) => {
-        if (!answer.ok) {
-          troubleHere(answer.trouble);
-          return;
-        }
-        setRecorded(recordedIn(mine, answer.value));
-      });
-    },
-    [pageOwner, troubleHere],
-  );
-
   /* The page closes when the pane does, rather than lingering behind a window
      that is no longer showing it. Named for the project whose page it is: the
      shell will not close a page that belongs to another one. */
@@ -196,14 +145,6 @@ export function usePreview(options: {
     if (mine === null) return;
     void bridge.pageAt(null, null, false, { project: mine });
   }, [pane, pageOwner]);
-
-  /* Closing the pane takes the page with it, so a run against it is over
-     whether or not anybody pressed stop — and what it saw is kept, because
-     closing the page is not asking to throw the last few minutes away. */
-  useEffect(() => {
-    if (pane !== 'off' || !recording) return;
-    record(false);
-  }, [pane, recording, record]);
 
   return useMemo(() => ({
     pane,
@@ -217,9 +158,5 @@ export function usePreview(options: {
     pointAt,
     hidePage,
     opensItself,
-    recording,
-    recorded,
-    setRecorded,
-    record,
-  }), [pane, pageAt, movedPage, move, toggle, pointAt, hidePage, opensItself, recording, recorded, record]);
+  }), [pane, pageAt, movedPage, move, toggle, pointAt, hidePage, opensItself]);
 }

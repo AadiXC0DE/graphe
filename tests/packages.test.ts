@@ -12,8 +12,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CURATED,
+  NODE_DOWNLOAD,
   WARNING,
   installed,
+  npmSetup,
   packageShelf,
   readCatalog,
   reloadWords,
@@ -368,6 +370,7 @@ describe('CURATED', () => {
         tools: [{ name: one.id, description: one.why }],
         commands: [],
         sentTurns: false,
+        toolsOnly: false,
         source: one.why,
       });
       expect(card.orchestrating, one.id).toBe(false);
@@ -773,5 +776,231 @@ describe('a change to what is installed', () => {
 
     const off = await packageShelf(versionedHost({ 'pi-lens': '1.4.2' })).remove('pi-lens');
     expect(reloadWords(off)).toBe('Removed; reload this chat to let it go');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Stopping one, and what the installer said                                    */
+/* -------------------------------------------------------------------------- */
+
+/** An install that does not finish until somebody ends it, the way a real one
+ *  does not: the installer is a child process npm owns. */
+function stalled(versions: Record<string, string>, overrides: Partial<PackageHost> = {}) {
+  const ended: (() => void)[] = [];
+  const waiting = (): Promise<void> =>
+    new Promise<void>((_resolve, reject) => {
+      ended.push(() => reject(new Error('npm install was ended')));
+    });
+  const host = versionedHost(versions, {
+    add: waiting,
+    update: waiting,
+    ...overrides,
+  });
+  return { host, ended };
+}
+
+describe('stopping a change', () => {
+  it('ends the installer and says what it left on disk', async () => {
+    const versions: Record<string, string> = {};
+    const { host, ended } = stalled(versions, {
+      // What a killed installer leaves: the folder it had got as far as.
+      stop: async () => {
+        versions['pi-lens'] = '1.9.0';
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+    const said: string[] = [];
+    shelf.watching((progress) => said.push(progress.says));
+
+    const adding = shelf.add('pi-lens');
+    await flush();
+    const outcome = await shelf.stop();
+
+    expect(outcome).toEqual({
+      stopped: true,
+      says: 'Stopped adding Lens. Lens 1.9.0 is on disk.',
+    });
+    expect(await adding).toEqual({
+      ok: false,
+      stopped: true,
+      why: 'Stopped adding Lens. Lens 1.9.0 is on disk.',
+    });
+    // The one thing it must never say: that the change finished.
+    expect(said).toEqual(['Adding Lens…']);
+  });
+
+  it('says nothing was installed when the stop landed before anything did', async () => {
+    const { host, ended } = stalled({}, {
+      stop: async () => {
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+
+    const adding = shelf.add('pi-lens');
+    await flush();
+    expect(await shelf.stop()).toEqual({
+      stopped: true,
+      says: 'Stopped adding Lens. Nothing was installed.',
+    });
+    await adding;
+  });
+
+  it('says what an update kept when it is stopped half way', async () => {
+    const versions: Record<string, string> = { 'pi-lens': '1.4.2' };
+    const { host, ended } = stalled(versions, {
+      stop: async () => {
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+
+    const updating = shelf.update('pi-lens');
+    await flush();
+    expect(await shelf.stop()).toEqual({
+      stopped: true,
+      says: 'Stopped updating Lens. Lens 1.4.2 is on disk, unchanged.',
+    });
+    await updating;
+  });
+
+  it('says plainly when there was nothing to stop', async () => {
+    const shelf = packageShelf(versionedHost({}, { stop: async () => {} }));
+    expect(await shelf.stop()).toEqual({
+      stopped: false,
+      says: 'Nothing is being changed just now.',
+    });
+  });
+
+  it('does not claim to have stopped an installer it cannot reach', async () => {
+    // No `stop` on the host at all: nothing here can end it, so the change
+    // carries on and finishes, and the press is told that rather than told it
+    // worked.
+    const versions: Record<string, string> = {};
+    const { host, ended } = stalled(versions);
+    const shelf = packageShelf(host);
+    const adding = shelf.add('pi-lens');
+    await flush();
+
+    expect(await shelf.stop()).toEqual({ stopped: false, says: expect.stringMatching(/cannot end an install/) });
+    versions['pi-lens'] = '2.0.0';
+    for (const one of ended.splice(0)) one();
+    await adding;
+  });
+});
+
+describe('what the installer said', () => {
+  /** A host whose installer talks while it fails, the way npm does. */
+  function talkative(lines: readonly string[], overrides: Partial<PackageHost> = {}): PackageHost {
+    let listener: ((says: string) => void) | undefined;
+    return versionedHost({}, {
+      add: async () => {
+        for (const line of lines) listener?.(line);
+        throw new Error('npm error code 1');
+      },
+      watching: (handler) => {
+        listener = handler;
+      },
+      ...overrides,
+    });
+  }
+
+  it('keeps its own last lines and hands them to the failure', async () => {
+    const shelf = packageShelf(
+      talkative(['npm error code EEXIST', 'npm error path /Users/x/.pi/agent/node_modules']),
+    );
+
+    expect(await shelf.add('pi-lens')).toEqual({
+      ok: false,
+      why: 'I could not add that.',
+      logs: ['npm error code EEXIST', 'npm error path /Users/x/.pi/agent/node_modules'],
+    });
+  });
+
+  it('keeps a bounded amount of it, so the last lines are the ones kept', async () => {
+    const shelf = packageShelf(
+      talkative(Array.from({ length: 60 }, (_one, at) => `npm step ${String(at + 1)}`)),
+    );
+
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(false);
+    if (answer.ok) return;
+    expect(answer.logs).toHaveLength(40);
+    expect(answer.logs?.[0]).toBe('npm step 21');
+    expect(answer.logs?.at(-1)).toBe('npm step 60');
+  });
+
+  it('hands up no logs at all when the installer said nothing', async () => {
+    const answer = await packageShelf(talkative([])).add('pi-lens');
+    expect(answer.ok).toBe(false);
+    if (answer.ok) return;
+    expect(Object.keys(answer).sort()).toEqual(['ok', 'why']);
+  });
+
+  it('does not hand a later failure the lines an earlier one left', async () => {
+    const said: string[][] = [[], ['npm error code EEXIST']];
+    let attempt = 0;
+    let listener: ((says: string) => void) | undefined;
+    const shelf = packageShelf(
+      versionedHost({}, {
+        add: async () => {
+          for (const line of said[attempt] ?? []) listener?.(line);
+          attempt += 1;
+          throw new Error('npm error code 1');
+        },
+        watching: (handler) => {
+          listener = handler;
+        },
+      }),
+    );
+
+    expect(await shelf.add('pi-lens')).toEqual({ ok: false, why: 'I could not add that.' });
+    const second = await shelf.add('pi-lens');
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.logs).toEqual(['npm error code EEXIST']);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* What installing needs from this computer                                    */
+/* -------------------------------------------------------------------------- */
+
+describe('the npm line', () => {
+  it('says nothing at all when npm is here', () => {
+    const setup = npmSetup({ npm: true, brew: false });
+    expect(setup.needed).toBe(false);
+    expect(setup.line).toBe('');
+  });
+
+  it('names what is missing, and does not offer a command nobody can run', () => {
+    const setup = npmSetup({ npm: false, brew: false });
+    expect(setup.needed).toBe(true);
+    // The prerequisite, said before the press rather than after it.
+    expect(setup.line).toMatch(/npm/);
+    expect(setup.line).toMatch(/Node/);
+    expect(setup.command).toBeNull();
+    expect(setup.download).toBe(NODE_DOWNLOAD);
+  });
+
+  it('offers the one command where there is a Homebrew to run it with', () => {
+    const setup = npmSetup({ npm: false, brew: true });
+    expect(setup.command).toBe('brew install node');
+  });
+
+  it('offers the page that installs Node, wherever it is asked from', () => {
+    expect(NODE_DOWNLOAD).toBe('https://nodejs.org/en/download');
+    expect(npmSetup({ npm: false, brew: true }).download).toBe(NODE_DOWNLOAD);
+  });
+});
+
+describe('whether a change can be ended', () => {
+  it('says so before anybody presses, for a host that can', () => {
+    expect(packageShelf(versionedHost({}, { stop: async () => {} })).canStop).toBe(true);
+  });
+
+  it('says so for a host that cannot, so no press is offered', () => {
+    expect(packageShelf(versionedHost({})).canStop).toBe(false);
   });
 });

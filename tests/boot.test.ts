@@ -4,7 +4,10 @@
  *  turned on after the thing it was meant to cache has already been compiled
  *  saves nothing and says nothing; a top-level `await app.whenReady()` in an
  *  ESM entry wedges the process with no error printed at all. Neither is
- *  visible in a screenshot or a passing suite, so they are held here. */
+ *  visible in a screenshot or a passing suite, so they are held here.
+ *
+ *  Source text, not behaviour: the launch shim's ordering and where the model is cached; no behavioural test can reach it — Electron's entry and a first-run download.
+ */
 
 import { readFileSync } from 'node:fs';
 

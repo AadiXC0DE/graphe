@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 /** A build plan — the tasks, the progress, the resume. */
 
 import { describe, expect, it } from 'vitest';
@@ -69,16 +68,6 @@ describe('progress and next', () => {
   it('keeps a note with a task', () => {
     const said = note(plan, 1, 'tests pass');
     expect(said[0]?.note).toBe('tests pass');
-  });
-
-  /* The app used to close a step off at every reply boundary, on a guess about
-     how the reply had gone — so a turn that read three files and wrote a
-     paragraph ticked one, and a failing test failed one. Both helpers are gone;
-     the model says which step moved, by number. */
-  it('has no way left for the app to close a step on a guess', () => {
-    const source = readFileSync('src/work/buildplan.ts', 'utf8');
-    expect(source).not.toContain('export function finishTask');
-    expect(source).not.toContain('export function startTask');
   });
 
   it('adds newly discovered requirements as their own tasks', () => {

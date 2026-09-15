@@ -3,6 +3,8 @@
  * With the review queue as the default, work no longer arrives in the folder on
  * its own. A conversation's checkout reached the list; a board piece did not,
  * so a piece that finished had nowhere at all to be looked at.
+ *
+ *  Source text, not behaviour: what the shell does with a finished board piece; no behavioural test can reach it — electron/main.ts internals.
  */
 
 import { readFileSync } from 'node:fs';

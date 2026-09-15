@@ -28,7 +28,6 @@
 
 import type { Attachment } from '../components/Attachments';
 import type { Plans } from '../components/HowToWork';
-import type { Recording } from '../diff/flow';
 import type { Task, TaskObservation } from '../cost/estimate';
 import type { AgentNotice, Overview, PutBack, SavedVersion } from './ipc';
 import { applySpend, type SpendView } from './spend';
@@ -343,26 +342,6 @@ export function putBackTheBox(desks: Desks, owner: Owned, said: string): Desks {
     const was = one.draft ?? '';
     return { ...one, draft: was.trim() === '' ? said : intoTheBox(was, [said]) };
   });
-}
-
-/** A run of states somebody recorded on the page, and the project it was
- *  recorded in. */
-export type Recorded = {
-  recording: Recording;
-  project: string;
-};
-
-/**
- * What is worth keeping from a run that has just stopped.
- *
- * Null for a run that saw nothing. Pressing record, doing nothing and pressing
- * stop is not evidence, and a row in the conversation saying so is furniture.
- * Null too when there is no project to hang it on, so one project's states are
- * never left over the next one's conversation.
- */
-export function recordedIn(project: string | null, run: Recording | null): Recorded | null {
-  if (project === null || run === null || run.frames.length === 0) return null;
-  return { recording: run, project };
 }
 
 /** One message typed while the last one was still being answered. */

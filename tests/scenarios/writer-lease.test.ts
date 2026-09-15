@@ -292,3 +292,77 @@ describe('T20: an answer given twice, or after the run has stopped', () => {
     expect(locks.state(FOLDER).holder).toBeNull();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+
+describe('T21: a run waiting on its own child', () => {
+  it('lets the child in without taking the folder a second time', () => {
+    const locks = new WorkspaceLocks();
+    expect(locks.request(ticket('run-parent', { label: 'conversation A' }))).toEqual({
+      granted: true,
+      newlyHeld: true,
+    });
+
+    // A child working in its parent's folder is the parent working. Queueing it
+    // behind the run that is waiting for it is the deadlock this parameter
+    // exists to prevent.
+    expect(locks.request(ticket('run-child'), 'run-parent')).toEqual({
+      granted: true,
+      newlyHeld: false,
+    });
+    expect(locks.state(FOLDER).holder?.runId).toBe('run-parent');
+    expect(locks.state(FOLDER).waiting).toEqual([]);
+  });
+
+  it('frees the folder once, when the parent is the one that finishes', async () => {
+    const locks = new WorkspaceLocks();
+    locks.request(ticket('run-parent'));
+    locks.request(ticket('run-child'), 'run-parent');
+    const other = locks.request(ticket('run-other'));
+    if (other.granted) throw new Error('a chat that asked after the parent was let in');
+
+    // The child finishing is not the parent finishing: it took nothing, so it
+    // gives nothing up, and whoever is behind is still behind.
+    expect(locks.release(FOLDER, 'run-child')).toBeNull();
+    expect(locks.state(FOLDER).holder?.runId).toBe('run-parent');
+    expect(locks.state(FOLDER).waiting.map((one) => one.runId)).toEqual(['run-other']);
+
+    expect(locks.release(FOLDER, 'run-parent')?.runId).toBe('run-other');
+    expect(await other.when).toBe('granted');
+  });
+
+  it('queues a child whose parent only held the folder earlier', () => {
+    // Handed on to somebody else, the parent is no longer the holder: its child
+    // is an ordinary run behind them, not a run working inside its parent.
+    const locks = new WorkspaceLocks();
+    locks.request(ticket('run-parent'));
+    locks.release(FOLDER, 'run-parent');
+    locks.request(ticket('run-other'));
+    expect(locks.request(ticket('run-child'), 'run-parent').granted).toBe(false);
+    expect(locks.state(FOLDER).holder?.runId).toBe('run-other');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('T22: taking a wait back while the holder is still working', () => {
+  it('leaves the holder writing and moves the next one up', async () => {
+    const locks = new WorkspaceLocks();
+    locks.request(ticket('run-a', { label: 'conversation A' }));
+    const b = locks.request(ticket('run-b', { label: 'conversation B' }));
+    const c = locks.request(ticket('run-c', { label: 'conversation C' }));
+    if (b.granted || c.granted) throw new Error('the queue did not queue');
+
+    // Cancelling is about the wait, never about the run in front of it: the
+    // holder keeps the folder and keeps writing.
+    expect(locks.cancel(FOLDER, 'run-b')).toBe(true);
+    expect(await b.when).toBe('cancelled');
+    expect(locks.state(FOLDER).holder?.runId).toBe('run-a');
+    expect(locks.state(FOLDER).waiting.map((one) => one.runId)).toEqual(['run-c']);
+
+    // C moves up rather than waiting for a run that is no longer in the line.
+    expect(locks.release(FOLDER, 'run-a')?.runId).toBe('run-c');
+    expect(await c.when).toBe('granted');
+    expect(locks.state(FOLDER).holder?.runId).toBe('run-c');
+  });
+});

@@ -4,6 +4,8 @@
  * and named folders after itself, and nothing ever removed them: twenty-two
  * gigabytes in a day. A conversation has a folder now, the standing block says
  * where it is, and every child of that conversation writes into it.
+ *
+ *  Source text, not behaviour: where a conversation's scratch folder lives, and that the shell sweeps it; no behavioural test can reach it — both are private to main.ts and read electron's app.getPath.
  */
 
 import { readFileSync } from 'node:fs';

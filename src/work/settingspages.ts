@@ -219,15 +219,6 @@ export const ROWS: readonly Row[] = [
     also: ['title', 'name', 'rename', 'automatic'],
   },
   {
-    id: 'ask-before-closing',
-    page: 'behaviour',
-    name: 'Ask before closing a conversation that is still working',
-    kind: 'switch',
-    note: 'Closing one while it runs throws away the turn it was in the middle of.',
-    also: ['close', 'confirm', 'warn', 'running', 'quit'],
-    keys: 'mod+w',
-  },
-  {
     id: 'snap-before-apply',
     page: 'behaviour',
     name: 'Take a snapshot before work is brought into my folder',
@@ -393,6 +384,14 @@ export const ROWS: readonly Row[] = [
     also: ['disk', 'space', 'size', 'gb', 'worktrees', 'copies', 'scratch', 'logs'],
   },
   {
+    id: 'trash',
+    page: 'storage',
+    name: 'Deleted conversations',
+    note: 'Every conversation that was deleted is kept rather than destroyed, with the moment it went. Put one back where it came from, or throw away the ones you pick.',
+    kind: 'choice',
+    also: ['trash', 'delete', 'deleted', 'restore', 'put back', 'recover', 'empty', 'bin'],
+  },
+  {
     id: 'storage',
     page: 'storage',
     name: 'Clear finished work',
@@ -460,14 +459,6 @@ export const ROWS: readonly Row[] = [
   },
 
   /* --------------------------------------------------------------- privacy */
-  {
-    id: 'hold-back',
-    page: 'privacy',
-    name: 'Check new work first',
-    note: 'Where there is something to look at, changes are made in a copy and shown to you before anything reaches your files. Off, your files change as the work happens.',
-    kind: 'switch',
-    also: ['review', 'safety', 'copy', 'before', 'approve'],
-  },
   {
     id: 'keep-logins',
     page: 'privacy',

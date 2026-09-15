@@ -8,6 +8,8 @@
  * Measured in a browser rather than asserted here: see the note below. What
  * this pins is that the rules which do the shrinking apply at every width,
  * because they used to live only inside a narrow-composer query.
+ *
+ *  Source text, not behaviour: the row's shrink rules; no behavioural test can reach it — jsdom computes no flex sizing and no container query.
  */
 
 import { readFileSync } from 'node:fs';

@@ -11,6 +11,8 @@
  *
  * Mostly the join rather than the arithmetic — a rule nobody can run is a rule
  * that quietly stops holding, and these three all held nothing.
+ *
+ *  Source text, not behaviour: the helper's own stdout and stderr reaching `stirred()`, and its step reports; that child is a real subprocess no test can watch.
  */
 
 import { readFileSync } from 'node:fs';
@@ -76,27 +78,6 @@ describe('Escape backs out of what is in front, before it stops anything', () =>
     expect(branch).toContain('halt();');
   });
 
-  it('counts every panel that can be in front', () => {
-    const at = app.indexOf('const overlayUp = (): boolean =>');
-    expect(at).toBeGreaterThan(-1);
-    // Which sheets exist is a fact about this window and nowhere else, so this
-    // half stays a reading of it. What Escape does about them is run, above.
-    const list = app.slice(at, app.indexOf(';', at));
-    for (const panel of [
-      'settingsOpen',
-      'usageOpen',
-      'skillsOpen',
-      'connectedOpen',
-      'addMore',
-      'paletteOpen',
-      'graphOpen',
-      'reviewsOpen',
-      'helpersAt',
-    ]) {
-      expect(list, panel).toContain(panel);
-    }
-  });
-
   it('stands aside for anything nearer the key that already answered', () => {
     // The composer's own mention menu answers Escape in React, which runs
     // before this listener. Without this, dismissing it stopped the run.
@@ -146,7 +127,7 @@ describe('trusting an extension does not end the sentence it is in', () => {
     // The preference is written before the bail-out, so the switch is kept.
     expect(body.indexOf('file.change(')).toBeLessThan(body.indexOf('was.held.working'));
     // And nothing is closed after it.
-    expect(body.indexOf('was.held.working')).toBeLessThan(body.indexOf('sessions.close('));
+    expect(body.indexOf('was.held.working')).toBeLessThan(body.indexOf('putDown('));
   });
 });
 

@@ -92,12 +92,20 @@ export type Opening =
   | { kind: 'most-recent' }
   /** A conversation that does not exist yet. `workspace` names the workspace it
    *  starts in; leaving it out means the project's own folder. A new chat never
-   *  picks a workspace by counting the conversations already open. */
-  | { kind: 'fresh'; workspace?: string; forkFrom?: string };
+   *  picks a workspace by counting the conversations already open. `key` is the
+   *  press that asked for it, so a request sent twice makes one conversation
+   *  while a second press, with a key of its own, still makes a second one. */
+  | { kind: 'fresh'; workspace?: string; forkFrom?: string; key?: string };
 
-export function openingFor(asked: unknown, fresh = false): Opening {
+/** The press is only carried when there is one: a key that came from nowhere is
+ *  the same as no key, and the caller here is the window, which is not trusted
+ *  with the shape of anything. */
+export function openingFor(asked: unknown, fresh = false, key?: unknown): Opening {
   if (typeof asked === 'string' && asked.trim() !== '') return { kind: 'carry-on', path: asked };
-  return fresh ? { kind: 'fresh' } : { kind: 'most-recent' };
+  if (!fresh) return { kind: 'most-recent' };
+  return typeof key === 'string' && key.trim() !== ''
+    ? { kind: 'fresh', key: key.trim() }
+    : { kind: 'fresh' };
 }
 
 /** A new conversation, in a workspace somebody chose. */

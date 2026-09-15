@@ -69,10 +69,46 @@ jobs:
       - run: npm run build
       - run: npm run app:build
 
-  e2e:
-    name: End to end
-    # The fake model runs the real shell, and the boundary it runs behind only
-    # exists on macOS.
+      # What a launch has to download, off the renderer build above. The main
+      # chunk is the dominant cost — over the 450 KB the app promises, and most
+      # of what a launch reads — so the numbers are recorded rather than blocked
+      # on: the check's own exit status is kept, and the table goes into the
+      # artifact and the job summary. The budget itself is held by the failing
+      # expectation in tests/operations/build-budget.test.ts.
+      - name: Measure the launch budget
+        continue-on-error: true
+        run: |
+          set +e
+          node scripts/perf-report.mjs --check --json=launch-budget.json > perf-report.txt 2>&1
+          status=$?
+          cat perf-report.txt
+          {
+            echo '### Launch budget'
+            echo '```'
+            cat perf-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      # Kept whether the number is over or not, so a regression has something to
+      # be compared against.
+      - name: Keep the launch budget
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-budget
+          path: |
+            perf-report.txt
+            launch-budget.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  integration:
+    name: Integration (in process)
+    # A whole turn against a scripted model, run through the shell's own
+    # decision modules with no window: integration coverage, not the real
+    # Electron suite, which is `electron-smoke` below. macOS because the
+    # boundary this runs behind only exists on the product's own platform.
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

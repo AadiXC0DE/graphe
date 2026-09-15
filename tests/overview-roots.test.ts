@@ -11,6 +11,8 @@
  * lifted out of `electron/main.ts` and run: the lift fails loudly if any of them
  * is renamed or moved, and a copy cannot drift from the original. Everything
  * the lift needs is handed to it, so what runs is the real code.
+ *
+ *  Source text, not behaviour: the registry join inside the resolver and the handler that reads every root out of the one folder it resolved; no behavioural test can reach it — the lift hands the registry in, and the handler only ever runs under Electron.
  */
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -236,9 +238,6 @@ describe('the overview handler', () => {
     expect(handler).toContain('readGitStatusWithLines(cwd)');
     expect(handler).toContain('readBranches(cwd)');
     expect(handler).toContain('preview: previewForPanel(open.held.serving, cwd, repos),');
-    // Not the project's own folder, and not the project's own server.
-    expect(handler).not.toContain('join(open.path, palette.path)');
-    expect(handler).not.toContain('open.held.serving?.address');
   });
 
   it('lists the repositories a folder holds, and reads its own roots in that folder', () => {

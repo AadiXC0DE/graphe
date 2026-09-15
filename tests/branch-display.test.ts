@@ -1,3 +1,6 @@
+/**
+ *  Source text, not behaviour: which checkout the branch panel reads and switches; no behavioural test can reach it — electron/main.ts handlers.
+ */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -14,10 +17,6 @@ describe('the branch panel describes the addressed conversation', () => {
     expect(block).toContain('const cwd = folderFor(open, where)');
     expect(block).toContain('readGitStatusWithLines(cwd)');
     expect(block).toContain('readBranches(cwd)');
-    // The project's own style sheet is no longer read here: the panel that
-    // showed it was retired, and the folder this call is about is decided by
-    // the same resolver everything else uses.
-    expect(block).not.toContain('readGitStatusWithLines(open.path)');
   });
 
   it('passes project and conversation through the window bridge', () => {

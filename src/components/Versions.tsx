@@ -20,10 +20,6 @@ type Props = {
    *  row: the answer is the same for every row, and repeating it forty times
    *  would turn the timeline into a log. */
   showMe?: boolean;
-  /** What each version looked like, by id. Data URIs — the window draws no
-   *  file paths. Without them the rail still works; it just has fewer pictures
-   *  and nothing to compare. */
-  pictures?: Readonly<Record<string, string>>;
   /** The ones somebody chose to keep. Left off, the rail remembers them for as
    *  long as it is on screen. */
   kept?: readonly string[];
@@ -56,10 +52,9 @@ type Props = {
  * and moves nothing. The rail itself fades in once, and after that the only thing
  * that ever animates is the undo strip arriving.
  *
- * ## Pictures, a day at a time
+ * ## Moments, a day at a time
  *
- * A designer looking for the moment before it went wrong is looking for it by
- * eye, so the picture is the object and the words are the caption. They come in
+ * A card is a named moment and the time it happened. They come in
  * day-sized groups — today open, older days folded — and each day shows a
  * handful before offering the rest, because a rail that draws two hundred cards
  * is a rail nobody reaches the bottom of.
@@ -79,7 +74,6 @@ export default function Versions({
   onDismissPutBack,
   busy,
   showMe,
-  pictures,
   kept,
   onKeep,
   bare,
@@ -87,7 +81,6 @@ export default function Versions({
   /** The card whose name is being written. Clicking a card means "this one",
    *  and naming is the one thing there is to do with that. */
   const [naming, setNaming] = useState<string | null>(null);
-  const [onlyChanged, setOnlyChanged] = useState(true);
   /** Groups somebody has folded or unfolded by hand, over the default. */
   const [folding, setFolding] = useState<Readonly<Record<string, boolean>>>({});
   /** Days showing everything rather than the first handful. */
@@ -97,20 +90,16 @@ export default function Versions({
 
   const keptIds = kept ?? keptHere;
   const beingNamed = naming === null ? null : (versions.find((one) => one.id === naming) ?? null);
-  const canCompare = versions.some((one) => Boolean(pictures?.[one.id]));
-
-  const { groups, folded } = useMemo(
+  const { groups } = useMemo(
     () =>
       groupVersions(versions, {
         now: Date.now(),
         kept: keptIds,
-        onlyChanged,
-        pictureOf: (one) => pictures?.[one.id],
         // A moment somebody named, and the one on screen, are worth showing
-        // whether or not a pixel moved.
+        // whatever else is folded away.
         spare: (one) => one.current || one.named,
       }),
-    [versions, keptIds, onlyChanged, pictures],
+    [versions, keptIds],
   );
 
   function keep(version: SavedVersion) {
@@ -153,28 +142,6 @@ export default function Versions({
       ) : null}
 
       <div className="rail__list">
-        {/* Only offered once there are pictures to compare — a switch that can
-            never change anything is worse than no switch. */}
-        {canCompare ? (
-          <div className="rail__band">
-            <button
-              type="button"
-              className="rail__only"
-              aria-pressed={onlyChanged}
-              title="When on, moments where the picture did not change are hidden, usually a save with nothing visible to show."
-              onClick={() => setOnlyChanged(!onlyChanged)}
-            >
-              <span className="rail__onlydot" aria-hidden="true" />
-              Hide look-alikes
-            </button>
-            {onlyChanged && folded > 0 ? (
-              <span className="rail__folded" title="Moments where the picture did not change, usually a save with no visible difference.">
-                {folded} {folded === 1 ? 'looked the same' : 'looked the same'}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
         {groups.map((group) => {
           const open = folding[group.key] ?? group.openByDefault;
           const all = showingAll[group.key] === true;
@@ -208,7 +175,6 @@ export default function Versions({
                       <Moment
                         key={version.id}
                         version={version}
-                        picture={pictures?.[version.id]}
                         /* Inside a day the header says which day, so the time
                            is enough. A kept version could be from any of them. */
                         when={
@@ -281,16 +247,15 @@ function theRest<T>(group: VersionGroup<T>, rest: number): string {
 }
 
 /**
- * One moment, as a picture.
+ * One moment.
  *
- * The card is the picture: everything else is a caption under it. Keeping is a
- * mark in the corner of the picture rather than a menu item, because the thing
- * being kept is the thing you are looking at. It is small, but the target around
- * it is not — see the note in the stylesheet.
+ * The card says what the save is called and when it happened, and it is what
+ * opens that version. Keeping is a mark in the corner rather than a menu item,
+ * because the thing being kept is the thing you are looking at. It is small,
+ * but the target around it is not — see the note in the stylesheet.
  */
 function Moment({
   version,
-  picture,
   when,
   kept,
   busy,
@@ -300,7 +265,6 @@ function Moment({
   onPutBack,
 }: {
   version: SavedVersion;
-  picture?: string;
   when: string;
   kept: boolean;
   busy?: boolean;
@@ -324,17 +288,10 @@ function Moment({
         aria-current={version.current ? 'true' : undefined}
       >
         <span className="moment__still">
-          {picture ? (
-            // No alt: the title sits right under it, and saying it twice makes
-            // a screen reader read every card in the rail twice.
-            <img className="moment__shot" src={picture} alt="" />
-          ) : (
-            <span className="moment__words">{version.title}</span>
-          )}
+          <span className="moment__words">{version.title}</span>
         </span>
 
         <span className="moment__caption">
-          {picture ? <span className="moment__title">{version.title}</span> : null}
           <span className="moment__when">
             <span className="moment__time">{when}</span>
             {version.current ? <span className="moment__badge">On screen</span> : null}

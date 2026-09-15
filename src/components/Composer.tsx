@@ -16,7 +16,6 @@ import Asking from './Asking';
 import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
-import type { Turn } from '../lib/thread';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel, Workflow } from '../lib/ipc';
 import {
@@ -26,6 +25,7 @@ import {
   dragging,
   extensionOf,
   figmaLink,
+  letGo,
   readDropped,
   readableSize,
   shallower,
@@ -130,8 +130,6 @@ type Props = {
   /** How full this conversation is, for the ring in the row. Null before the
    *  model has answered once. */
   room?: RoomState | null;
-  /** The conversation, for the split behind the ring. */
-  turns?: readonly Turn[];
   /** True while it is being shortened. */
   tidying?: boolean;
   /** Shorten it now, by hand. */
@@ -209,6 +207,14 @@ const MAX_HEIGHT = 220;
  *  absorbs rounding; more than this and somebody is genuinely scrolled up. */
 const PINNED_SLACK = 48;
 
+/** Where a command came from: the project, this computer, or the add-on that
+ *  registered it. The third is why an add-on's command is not just another way
+ *  of working — it runs in Pi's command context, not as a prompt. */
+function saysOrigin(one: Workflow): string {
+  if (one.source === 'extension') return one.from ?? 'An add-on';
+  return one.source === 'project' ? 'This project' : 'Your computer';
+}
+
 function resize(el: HTMLTextAreaElement | null): void {
   if (el === null) return;
   const before = el.offsetHeight;
@@ -268,7 +274,6 @@ export default function Composer({
   anywhere = true,
   outLoud = true,
   room,
-  turns,
   tidying,
   onTidy,
   howFar,
@@ -367,6 +372,12 @@ export default function Composer({
     : (workflows ?? [])
         .filter((one) => `${one.name} ${one.description}`.toLowerCase().includes(command.query.toLowerCase()))
         .slice(0, 6);
+
+  /** The rows a press would actually run. A name something else already answers
+   *  to is still shown, with the reason on it, but it is not what Enter picks —
+   *  two providers for one word is the thing the list is here to make visible. */
+  const runnable = commands.filter((one) => one.shadowed == null);
+  const highlighted = runnable[mentionAt] ?? runnable[0];
 
   const chooseCommand = (workflow: Workflow): void => {
     const after = value.slice(areaRef.current?.selectionStart ?? value.length);
@@ -518,7 +529,10 @@ export default function Composer({
   const remove = useCallback(
     (id: string) => {
       const going = attachedRef.current.find((item) => item.id === id);
-      if (going?.preview !== undefined) URL.revokeObjectURL(going.preview);
+      // The address the chip was drawn from goes with the chip, and only here:
+      // one place gives up an object URL, so none is given up while it is still
+      // on screen.
+      if (going !== undefined) letGo(going);
       setRefused(null);
       change(attachedRef.current.filter((item) => item.id !== id));
     },
@@ -553,20 +567,23 @@ export default function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (command !== null && commands.length > 0) {
+    // An Enter that ends an IME composition belongs to the composition, not to
+    // the box: Korean and Chinese input confirm with it, and sending there
+    // would submit a half-written sentence.
+    if (e.nativeEvent.isComposing) return;
+    if (command !== null && runnable.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         setMentionAt((was) =>
           e.key === 'ArrowDown'
-            ? (was + 1) % commands.length
-            : (was + commands.length - 1) % commands.length,
+            ? (was + 1) % runnable.length
+            : (was + runnable.length - 1) % runnable.length,
         );
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        const chosen = commands[mentionAt] ?? commands[0];
-        if (chosen !== undefined) chooseCommand(chosen);
+        if (highlighted !== undefined) chooseCommand(highlighted);
         return;
       }
       if (e.key === 'Escape') {
@@ -892,23 +909,26 @@ export default function Composer({
       />
 
       {command === null || commands.length === 0 ? null : (
-        <div className="composer__skills" role="listbox" aria-label="Ways of working">
-          <p><span>/</span> A way of working this project has written down</p>
-          {commands.map((one, index) => (
+        <div className="composer__skills" role="listbox" aria-label="Commands">
+          <p><span>/</span> A way of working, or a command an add-on added</p>
+          {commands.map((one) => (
             <button
               key={one.command}
               type="button"
               role="option"
-              aria-selected={index === mentionAt}
-              className={index === mentionAt ? 'composer__skill--active' : ''}
+              aria-selected={one === highlighted}
+              className={one === highlighted ? 'composer__skill--active' : ''}
+              disabled={one.shadowed != null}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => chooseCommand(one)}
             >
               <span>
                 <strong>{one.command}</strong>
-                <small>{one.description}</small>
+                {/* What it does, or why it cannot run — never both, and never
+                    a row that looks pressable and is not. */}
+                <small>{one.shadowed ?? one.description}</small>
               </span>
-              <em>{one.source === 'project' ? 'This project' : 'Your computer'}</em>
+              <em>{saysOrigin(one)}</em>
             </button>
           ))}
         </div>
@@ -1036,7 +1056,6 @@ export default function Composer({
           room={room ?? null}
           tidying={tidying === true}
           busy={busy}
-          {...(turns === undefined ? {} : { turns })}
           {...(onTidy === undefined ? {} : { onTidy })}
         />
 

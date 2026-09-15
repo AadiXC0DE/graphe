@@ -228,14 +228,10 @@ export async function sweep(picked: readonly Sweepable[]): Promise<{ removed: nu
 /* npm                                                                         */
 /* -------------------------------------------------------------------------- */
 
-/** Is `npm` reachable from here?
- *
- *  Add-ons install through it and `npx`-based tools need it. A Mac that has
- *  never had Node on it has neither, and the failure without this is a page
- *  that says an install went wrong rather than a page that says what is
- *  missing. Nothing is run: the file is looked for on PATH. */
-export async function npmOnPath(): Promise<boolean> {
-  const names = process.platform === 'win32' ? ['npm.cmd', 'npm.exe'] : ['npm'];
+/** Is one of these names on PATH, and runnable? Nothing is run: the file is
+ *  looked for, which is the whole question for a program somebody may not
+ *  have installed. */
+async function onPath(names: readonly string[]): Promise<boolean> {
   for (const folder of (process.env['PATH'] ?? '').split(delimiter)) {
     if (folder === '') continue;
     for (const name of names) {
@@ -246,4 +242,23 @@ export async function npmOnPath(): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Is `npm` reachable from here?
+ *
+ *  Add-ons install through it and `npx`-based tools need it. A Mac that has
+ *  never had Node on it has neither, and the failure without this is a page
+ *  that says an install went wrong rather than a page that says what is
+ *  missing. */
+export async function npmOnPath(): Promise<boolean> {
+  return onPath(process.platform === 'win32' ? ['npm.cmd', 'npm.exe'] : ['npm']);
+}
+
+/** Is Homebrew reachable from here?
+ *
+ *  The npm line on the add-ons screen offers `brew install node` to somebody
+ *  who has Homebrew and the download page alone to somebody who does not: a
+ *  command they cannot run is worse than no command at all. */
+export async function brewOnPath(): Promise<boolean> {
+  return onPath(['brew']);
 }

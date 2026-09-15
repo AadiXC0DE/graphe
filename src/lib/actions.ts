@@ -85,7 +85,6 @@ export const ACTIONS: readonly Action[] = [
   { id: 'files', says: 'Show everything in this project', where: 'in a project', chord: 'mod+shift+f' },
   { id: 'changes', says: 'Review the working diff', where: 'in a project', chord: null },
   { id: 'history', says: 'Look through the history', where: 'in a project', chord: null },
-  { id: 'canvas', says: 'Open the canvas', where: 'in a project', chord: null },
   { id: 'reviews', says: 'Read the pull requests', where: 'in a project', chord: null },
   { id: 'commands', says: 'Show the commands', where: 'in a project', chord: 'mod+`' },
 

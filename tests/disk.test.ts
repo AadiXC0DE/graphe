@@ -3,6 +3,8 @@
  * Twenty-two gigabytes in a day, and Settings said none of it: the sweep
  * counted "finished copies" only, so a copy carrying a gigabyte of installed
  * packages was invisible to the person whose disk it was.
+ *
+ *  Source text, not behaviour: the shell's two storage handlers, and the sweep's landed-and-cold rule; no behavioural test can reach them — electron/main.ts is not importable here, and nothing calls the sweep with a settled-after.
  */
 
 import { readFileSync } from 'node:fs';

@@ -12,11 +12,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { GRAPHE_OWNED, reconcile } from '../../src/agent/advisor';
 import { budgetMs, forgetOverruns, recentOverruns, withHookBudget, type Overrun } from '../../src/agent/pi/hook-budget';
@@ -30,6 +28,7 @@ import {
   withinBudget,
 } from '../../src/agent/pi/standing';
 import { parseProposal } from '../../src/agent/plan';
+import { piecesOf } from '../../src/agent/pi/prompt';
 import { implementationPlanFromResearch, stepsFromReport } from '../../src/agent/research';
 import type { AgentEvent, Money } from '../../src/agent/types';
 import { changeDesk, noDesks, openDesk, receive } from '../../src/lib/projects';
@@ -673,14 +672,23 @@ describe('S-16 a house-rules file nobody could carry whole', () => {
   });
 
   it('is held where it is read rather than after the prompt is assembled', () => {
-    const prompt = readFileSync(
-      fileURLToPath(new URL('../../src/agent/pi/prompt.ts', import.meta.url)),
-      'utf8',
-    );
     // Every instruction file is its own repository section, capped by path, so
     // the rest of it is one named read away rather than cut off mid-sentence.
-    expect(prompt).toContain('most: AGENTS_BUDGET');
-    expect(prompt).toContain("of: 'repository'");
+    const { sections } = piecesOf(
+      [
+        'You are an expert coding assistant.',
+        '',
+        '<project_context>',
+        '<project_instructions path="/p/AGENTS.md">',
+        'Rule one.',
+        '</project_instructions>',
+        '</project_context>',
+      ].join('\n'),
+      { contextFiles: [{ path: '/p/AGENTS.md', content: 'Rule one.' }] },
+    );
+    const repository = sections.find((one) => one.of === 'repository');
+    expect(repository?.at).toBe('/p/AGENTS.md');
+    expect(repository?.most).toBe(AGENTS_BUDGET);
   });
 });
 
@@ -757,17 +765,6 @@ describe('S-22 a file git has never seen', () => {
     expect(files).toHaveLength(1);
     expect(files[0]?.kind).toBe('added');
     expect(files[0]?.hunks[0]?.newLines).toBe(2);
-  });
-});
-
-describe('S-24 the shelf’s two states', () => {
-  it('expose the same places in the same order', async () => {
-    // Rendered in `tests/sidebar.test.ts`; what is asserted here is that one
-    // list is the only source, so the two cannot drift again.
-    const { readFileSync } = await import('node:fs');
-    const shelf = readFileSync(`${process.cwd()}/src/components/Sidebar.tsx`, 'utf8');
-    expect(shelf).toContain('function placesOf(p: Props): readonly Place[] {');
-    expect(shelf.match(/places\.map\(/g)).toHaveLength(2);
   });
 });
 

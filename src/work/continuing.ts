@@ -33,6 +33,13 @@ export const continuationWords = {
   fork: 'Fork',
   forkHint:
     'A second conversation with the same history, so another direction can be tried without losing this one.',
+  /** The same operation, at one message rather than at the end of the
+   *  conversation. One to three words, because it is a button. */
+  forkHere: 'Fork here',
+  /** Twelve words at most, because this is a tooltip. It has to carry the one
+   *  thing a person would otherwise be surprised by: the files are shared, so a
+   *  fork of the conversation is not a fork of the work. */
+  forkHereHint: 'A second chat from here. Same files, so changes are shared.',
   archive: 'Archive',
   archiveHint: 'Keep it, out of the list.',
   unarchive: 'Unarchive',

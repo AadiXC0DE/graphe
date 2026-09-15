@@ -37,7 +37,6 @@ function twenty(): readonly Tab[] {
     title: index === 5 || index === 12 ? 'the hero, tighter' : `conversation ${String(index + 1)}`,
     project: index % 2 === 0 ? 'paper-street' : 'atlas-studio',
     projectPath: index % 2 === 0 ? '/a' : '/b',
-    kind: index === 19 ? ('canvas' as const) : ('chat' as const),
     state: states[index] ?? 'idle',
   }));
 }

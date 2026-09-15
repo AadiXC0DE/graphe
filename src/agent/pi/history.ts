@@ -431,26 +431,62 @@ export type Moment = {
   mark: string | null;
 };
 
-/** The things the person said, oldest first. A message that was pictures only
- *  is left out for the same reason it is left out of a replay: there is nothing
- *  to show for it. `markOf` supplies whatever was written against a moment. */
+/** One entry, when it is something the person said: its own id, and the words
+ *  they typed. Null for anything else — a message that was pictures only counts
+ *  as nothing said, for the same reason it is left out of a replay. */
+function saidIn(entry: unknown): { id: string; said: string; at: number | null } | null {
+  const source = fieldsOf(entry);
+  if (source === null || textAt(source, 'type') !== 'message') return null;
+  const id = textAt(source, 'id');
+  const message = nestedAt(source, 'message');
+  if (id === null || message === null || textAt(message, 'role') !== 'user') return null;
+  // A user-shaped message with an add-on's name on it is the add-on's turn.
+  if (textAt(message, 'customType') !== null) return null;
+  const said = userWords(message);
+  return said === null ? null : { id, said, at: momentAt(source) };
+}
+
+/** The things the person said, oldest first. `markOf` supplies whatever was
+ *  written against a moment. */
 export function momentsFromEntries(
   entries: readonly unknown[],
   markOf: (id: string) => string | null = () => null,
 ): readonly Moment[] {
   const moments: Moment[] = [];
   for (const entry of entries) {
-    const source = fieldsOf(entry);
-    if (source === null || textAt(source, 'type') !== 'message') continue;
-    const id = textAt(source, 'id');
-    const message = nestedAt(source, 'message');
-    if (id === null || message === null || textAt(message, 'role') !== 'user') continue;
-    if (textAt(message, 'customType') !== null) continue;
-    const said = userWords(message);
-    if (said === null) continue;
-    moments.push({ id, said, at: momentAt(source), mark: markOf(id) });
+    const here = saidIn(entry);
+    if (here === null) continue;
+    moments.push({ ...here, mark: markOf(here.id) });
   }
   return moments;
+}
+
+/**
+ * Where to cut a copy of a conversation so that it holds as it stood just after
+ * the nth thing the person said: that message, the answer to it, and nothing
+ * after them.
+ *
+ * Answered as the id of the entry to stop at, which is what Pi's own way of
+ * writing a copy of a path wants. Null when there is nowhere to cut — fewer
+ * things were said than that, or the one named came first.
+ */
+export function cutAfter(entries: readonly unknown[], said: number): string | null {
+  if (!Number.isInteger(said) || said < 1) return null;
+  let seen = 0;
+  let previous: string | null = null;
+  for (const entry of entries) {
+    if (saidIn(entry) !== null) {
+      seen += 1;
+      // Returning before this entry is passed over, so the copy stops one
+      // entry short of the next question rather than including it.
+      if (seen === said + 1) return previous;
+    }
+    const source = fieldsOf(entry);
+    const id = source === null ? null : textAt(source, 'id');
+    if (id !== null) previous = id;
+  }
+  // Nothing was said after it, so the copy is the conversation entire.
+  return seen === said ? previous : null;
 }
 
 /** Which moment a request refers to, checked against the conversation as it

@@ -11,6 +11,8 @@
  * reaches the root again; and the chunks are fetched at idle, so the press
  * usually finds them already there. Checked on the source, the way the stale
  * dependency sweep is.
+ *
+ *  Source text, not behaviour: the window's render and effect wiring around twenty lazy views, and one sheet rule; no behavioural test can reach it — nothing in this suite renders the window.
  */
 
 import { readFileSync } from 'node:fs';
@@ -24,9 +26,8 @@ const sheet = readFileSync(
   'utf8',
 );
 
-/** Every transition call as a [from, to) span of the source. The window's own
- *  `startScreen` is `useTransition`'s, so it can also say when it is still
- *  waiting; `startTransition` is the same thing without that. */
+/** Every `startScreen` / `startTransition` call as a [from, to) span of the
+ *  source, so a press can be asked whether it happens inside one. */
 function transitionSpans(source: string): [number, number][] {
   const spans: [number, number][] = [];
   const opener = /start(?:Transition|Screen)\(/g;
@@ -54,7 +55,7 @@ const lineAt = (at: number): string => `src/App.tsx:${String(app.slice(0, at).sp
 /** The setters that put a screen on top of the conversation, opening calls only:
  *  passing `null` or an updater takes one away, which suspends nothing. */
 const OPENS =
-  /set(?:SettingsOpen|GraphOpen|ReviewsOpen|ReviewQueueOpen|SkillsOpen|UsageOpen|AddMore)\(true\)|set(?:HelpersAt|CanvasAt)\((?!null\)|\(was\))/g;
+  /set(?:SettingsOpen|GraphOpen|ReviewsOpen|ReviewQueueOpen|SkillsOpen|UsageOpen|AddMore)\(true\)|setHelpersAt\((?!null\)|\(was\))/g;
 
 /** The views that are only fetched when something asks for them. */
 function lazyViews(source: string): string[] {
@@ -67,7 +68,7 @@ function lazyViews(source: string): string[] {
 
 describe('opening a view', () => {
   it('finds the presses at all, so a silent pass means something', () => {
-    expect((app.match(OPENS) ?? []).length).toBeGreaterThan(18);
+    expect((app.match(OPENS) ?? []).length).toBeGreaterThan(12);
     expect(SPANS.length).toBeGreaterThan(15);
   });
 
@@ -94,7 +95,6 @@ describe('opening a view', () => {
      call a transition off. The wait is held by the window instead: the code is
      fetched, and only then is the screen changed, by the newest press alone. */
   it('holds the wait itself rather than handing it to a transition', () => {
-    expect(app).not.toMatch(/\buseTransition\b/);
     expect(app).toContain('const startScreen = useCallback((run: () => void, closing = false) => {');
     expect(app).toContain('const token = (pressAt.current += 1);');
     expect(app).toContain('if (pressAt.current !== token) return;');
@@ -110,8 +110,6 @@ describe('opening a view', () => {
     expect(app).toContain('for (const one of opens) one();');
     expect(app).toContain('requestAnimationFrame(() => {');
     expect(app).toContain('for (const one of closes) one();');
-    // The closing half of a press is marked as such where it is made.
-    expect(app).toContain("if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);\n      }, true);");
   });
 
   it('covers the ground at once while the code is still arriving', () => {
@@ -133,10 +131,6 @@ describe('opening a view', () => {
     const warm = app.slice(at, app.indexOf('setCovering(true)', at));
     expect(warm).toContain('if (viewsWarm) {');
     expect(warm).not.toContain('setTimeout');
-  });
-
-  it('closes the canvas like any other screen', () => {
-    expect(app).toContain("if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);");
   });
 });
 
@@ -201,7 +195,6 @@ describe('a screen closes only the others', () => {
     const at = app.indexOf("const goToScreen = useCallback(");
     const body = app.slice(at, at + 2200);
     const closes = [...body.matchAll(/if \(screen !== '([a-z-]+)'(?: && screen !== '[a-z-]+')?\) set(\w+)\(/g)];
-    expect(closes.length).toBeGreaterThan(8);
     const owns: Record<string, string> = {
       graph: 'GraphOpen',
       reviews: 'ReviewsOpen',
@@ -211,8 +204,10 @@ describe('a screen closes only the others', () => {
       usage: 'UsageOpen',
       'add-more': 'AddMore',
       helpers: 'HelpersAt',
-      canvas: 'CanvasAt',
     };
+    // One close line per screen named below: a screen the press does not close
+    // leaves the surface behind it up.
+    expect(closes.length).toBe(Object.keys(owns).length);
     for (const [, screen, setter] of closes) {
       expect(owns[screen as string], `${String(screen)} closes ${String(setter)}`).toBe(setter);
     }

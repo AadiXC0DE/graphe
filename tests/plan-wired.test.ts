@@ -9,6 +9,8 @@
  * an unanswered plan the moment it lands, which is right for a plan nobody was
  * waiting on — and wrong for one that asked a question, because answering your
  * own question is not asking one.
+ *
+ *  Source text, not behaviour: the window's plan-answer joins and the shell's plan gate; no behavioural test can reach them — neither App.tsx nor electron/main.ts loads in a test.
  */
 
 import { readFileSync } from 'node:fs';
@@ -173,12 +175,11 @@ describe('the window actually sends what was decided', () => {
 /**
  * Plan is a gate, and a gate with a door beside it is not one.
  *
- * A session is built in four places — the conversation, the copy made when
- * somebody has asked to see work checked first, a pull request's own checkout,
- * and a piece on the board. Three of them were opened without the gate, so with
- * "check it first" on, the very message Plan was holding ran in a copy with
- * every tool it started with. What this asserts is not a wording: it is that a
- * fifth session, added later, cannot quietly be the fourth hole.
+ * A session is built in three places — the conversation, a pull request's own
+ * checkout, and a piece on the board. Each was opened without the gate at some
+ * point, so with Plan on, the very message it was holding ran with every tool
+ * the session started with. What this asserts is not a wording: it is that a
+ * fourth session, added later, cannot quietly be the third hole.
  */
 describe('every session Plan has to reach', () => {
   const SHELL = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
@@ -204,9 +205,9 @@ describe('every session Plan has to reach', () => {
   }
 
   it('finds every place a session is opened', () => {
-    // Four today. A fifth is not a failure — it is a prompt to say whether the
-    // gate belongs in it, which is exactly what the next case asks.
-    expect(sessionsBuilt().length).toBeGreaterThanOrEqual(4);
+    // Three today. A fourth is not a failure — it is a prompt to say whether
+    // the gate belongs in it, which is exactly what the next case asks.
+    expect(sessionsBuilt().length).toBeGreaterThanOrEqual(3);
   });
 
   it('opens none of them without saying whether Plan is on', () => {

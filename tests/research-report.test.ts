@@ -1,5 +1,6 @@
 /** What a research run shows while it works, and what happens to the plan it
- *  ends with. Both of these used to fail quietly, which is the worst way. */
+ *  ends with. Both of these used to fail quietly, which is the worst way.
+ *  Source text, not behaviour: the looking-into line reaching the window above the box; no behavioural test can reach it — nothing renders App.tsx. */
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';

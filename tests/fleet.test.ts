@@ -9,6 +9,8 @@
  * The last of those is tested against a real child process, because "it stops"
  * and "we stopped adding it up" are exactly the two things that looked the same
  * from inside the app.
+ *
+ *  Source text, not behaviour: the helper's stderr is wired to the sign of life; no behavioural test can reach it — the child would have to be a real helper.
  */
 
 import { spawn } from 'node:child_process';

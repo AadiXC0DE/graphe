@@ -4,7 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
-import { createWorktree, type RunGit } from '../src/history/worktree';
+import { createWorktree, repoKeyOf, type RunGit } from '../src/history/worktree';
 import { writeAtomically } from '../src/lib/atomic';
 import { keepOutOfCommits } from './excludes';
 import { canonical } from './services/workspace-registry';
@@ -154,19 +154,6 @@ async function cleanAt(run: RunGit, folder: string): Promise<boolean> {
   const { code, out } = await run(['status', '--porcelain'], { cwd: folder });
   if (code !== 0 || out === undefined) return false;
   return out.split('\n').every((line) => line.trim() === '');
-}
-
-/** What git calls this repository. The same answer from every checkout of it,
- *  which is what makes it an identity rather than a location. */
-async function repoKeyOf(run: RunGit, project: string): Promise<string | null> {
-  const absolute = await run(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
-    cwd: project,
-  });
-  const said = absolute.code === 0 ? (absolute.out ?? '').trim() : '';
-  if (said !== '') return canonical(said);
-  const relative = await run(['rev-parse', '--git-common-dir'], { cwd: project });
-  const plain = (relative.out ?? '').trim();
-  return plain === '' ? null : canonical(resolve(project, plain));
 }
 
 /* -------------------------------------------------------------------------- */

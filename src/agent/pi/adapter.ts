@@ -67,6 +67,7 @@ import { readdir, realpath } from 'node:fs/promises';
 import {
   NOTES_CARRIED,
   WORTH_KEEPING,
+  cutAfter,
   eventsFromEntries,
   momentToReturnTo,
   momentsFromEntries,
@@ -87,7 +88,8 @@ import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { maskToolResult } from './redact';
 import {
   cardsFor,
-  extensionPathsIn,
+  contentFingerprint,
+  extensionsIn,
   saysCard,
   type CapabilityCard,
 } from './extension-probe';
@@ -95,6 +97,7 @@ import {
 import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
 import {
   dialogsOver,
+  uiContextOver,
   unsupportedTerminal,
   type AskTheWindow,
   type ExtensionAnswer,
@@ -104,9 +107,11 @@ import {
   dropsEntirely,
   dropsLifecycleHooks,
   policyFor,
+  saysToolsOnlyRefused,
   type Policy,
   type SessionKind,
 } from './extension-policy';
+import { admit, type TurnOrigin } from '../../work/admission';
 
 /** The folder an add-on lives in, which is what its author called it. */
 function nameFromPath(where: string): string {
@@ -141,7 +146,6 @@ import {
   type FoundAccount as FoundOnDisk,
 } from './importers';
 
-import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
@@ -163,6 +167,8 @@ import {
 } from '../advisor';
 import { SUBAGENT_SETTINGS_FILE, artifactsBesideSessions, subagentsLoaded } from './subagents';
 import { GRAPHE_ONLY, apartTools, saysToolConflict } from './tool-conflicts';
+import { leadingWord, type AddonCommand } from './commands';
+import type { ExtensionReport } from './extension-states';
 import { idFor } from '../../projects/carried';
 import type { ModelChoice, ThinkingLevel } from '../../lib/ipc';
 
@@ -977,6 +983,21 @@ export type GrapheSession = {
   /** The extensions this folder brought with it, and which of them loaded.
    *  Empty for a project that carries none, which is almost all of them. */
   readonly carried: readonly Carried[];
+  /**
+   * The `/` commands the add-ons loaded into this conversation offer, as Pi
+   * holds them right now.
+   *
+   * Asked again rather than remembered: a command whose add-on went away while
+   * a message waited behind another chat is gone from here, and the shell can
+   * say so instead of sending the words to the model as a sentence.
+   */
+  commands(): readonly AddonCommand[];
+  /**
+   * Every add-on this conversation could load and what it knows about each:
+   * whether the code loaded here, what it will do, what it registered, and the
+   * loader's own reason when it did not.
+   */
+  extensions(): readonly ExtensionReport[];
   /** Calls waiting on a person right now, oldest first. */
   readonly awaitingAnswer: readonly string[];
   /** The conversation this session started with, as the events that would have
@@ -995,6 +1016,16 @@ export type GrapheSession = {
   /** The moments this conversation could be taken back to — each of the things
    *  the person said, oldest first, with any mark left on it. */
   readonly moments: readonly Moment[];
+  /**
+   * A copy of this conversation written into a session file of its own, holding
+   * it as it stood just after the nth thing the person said — that exchange and
+   * its answer, with whatever tidying Pi did inside it kept.
+   *
+   * Null when there is nowhere to cut, or the runtime will not write a copy.
+   * The files in the project are untouched: a fork branches the conversation,
+   * never the work.
+   */
+  forkAfter(said: number): string | null;
   /**
    * Go back to one of those moments and carry on from there in a different
    * direction. Resolves with the words said then, so they can be said
@@ -1387,14 +1418,15 @@ function cancelledLike(ask: ExtensionAsk): ExtensionAnswer {
 /** One extension that came down with the folder somebody opened. */
 export type Carried = { id: string; name: string; where: string; trusted: boolean };
 
-/** What the fingerprint is taken of. A file we cannot read is not a file we can
- *  recognise again, so it gets no id and is never loaded. */
-function sourceOf(where: string): string {
-  try {
-    return readFileSync(where, 'utf8');
-  } catch {
-    return '';
-  }
+/** What the fingerprint is taken of: every file the add-on would load, not only
+ *  the entry one. A folder is usually several modules, and the one somebody
+ *  edited may be the one the entry imports — a yes that kept covering that
+ *  would be a yes about code that is no longer there.
+ *
+ *  A file we cannot read is not a file we can recognise again, so it gets no id
+ *  and is never loaded. */
+function sourceOf(fingerprints: ReadonlyMap<string, string>) {
+  return (where: string): string => fingerprints.get(where) ?? '';
 }
 
 /** The name to put in front of somebody: the folder the extension lives in,
@@ -1417,7 +1449,11 @@ function nameOfExtension(root: string, where: string): string {
  * decision its loading waits for. An installed add-on was chosen by hand and is
  * already in that position.
  */
-function probePermitted(projectRoot: string, trusts: (id: string) => boolean) {
+function probePermitted(
+  projectRoot: string,
+  trusts: (id: string) => boolean,
+  sourceOf: (where: string) => string,
+) {
   const root = projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
   return (where: string): boolean => {
     if (!where.startsWith(root)) return true;
@@ -1443,6 +1479,7 @@ function probePermitted(projectRoot: string, trusts: (id: string) => boolean) {
 function theirsTrustedAndPolicied(
   projectRoot: string,
   trusts: (id: string) => boolean,
+  sourceOf: (where: string) => string,
   seen: (carried: readonly Carried[]) => void,
   policy: {
     kind: SessionKind;
@@ -2478,9 +2515,23 @@ const MOST_AFTER_SAYINGS = 3;
   const cards = new Map<string, CapabilityCard | null>();
   const leftOut: { where: string; policy: Policy; card: CapabilityCard | null }[] = [];
   const cardsFolder = join(agentDir, 'graphe-extension-cards');
-  const mayProbe = probePermitted(options.projectRoot, options.trusts ?? (() => false));
+  /* Every add-on that could load here, by the file that would run, with the
+     name and version its own manifest gives it. Read once: nothing about a
+     loaded extension changes while the conversation it was built for is alive. */
+  const discovered = await extensionsIn(agentDir, options.projectRoot);
+  const paths = discovered.map((one) => one.where);
+  /* What each add-on's code is made of, taken once: three decisions rest on it
+     — whether a card may be read at all, whether it loads, and the id a yes is
+     keyed by. All three have to agree, or a trust switch would answer one
+     question and the loader another. */
+  const fingerprints = new Map<string, string>();
+  for (const one of discovered) {
+    fingerprints.set(one.where, (await contentFingerprint(one.where)) ?? '');
+  }
+  const whatCode = sourceOf(fingerprints);
+  const mayProbe = probePermitted(options.projectRoot, options.trusts ?? (() => false), whatCode);
   for (const [where, card] of await cardsFor(
-    await extensionPathsIn(agentDir, options.projectRoot),
+    paths,
     cardsFolder,
     mayProbe,
     // Read from the package that is actually loaded, never assumed.
@@ -2488,9 +2539,26 @@ const MOST_AFTER_SAYINGS = 3;
   )) {
     cards.set(where, card);
   }
+  /* The project's own add-ons, and only the ones somebody said yes to.
+     Pi keeps a whole project `.pi` folder out of a session until the project is
+     trusted, which would take the project's skills and prompts with it — and
+     those are read here by a person choosing them, not by opening a folder. So
+     the add-ons somebody answered for are handed over by name, and the rest of
+     the folder stays unread. The override below still decides what actually
+     loads; this is only what Pi is allowed to see. */
+  const projectRootWithSep =
+    options.projectRoot.endsWith(sep) ? options.projectRoot : options.projectRoot + sep;
+  const trustedCarried = discovered
+    .filter((one) => one.where.startsWith(projectRootWithSep))
+    .filter((one) => {
+      const id = idFor(nameOfExtension(projectRootWithSep, one.where), whatCode(one.where));
+      return id !== '' && (options.trusts ?? (() => false))(id);
+    })
+    .map((one) => one.where);
   const loader = new pi.DefaultResourceLoader({
     cwd: options.projectRoot,
     agentDir,
+    additionalExtensionPaths: trustedCarried,
     // Nothing of Graphe's is appended here. Pi assembles the project's
     // instruction files and the skills it found into the prompt itself, and
     // what this app adds travels as sections of its own in `graphe-prompt`
@@ -2503,6 +2571,7 @@ const MOST_AFTER_SAYINGS = 3;
     extensionsOverride: theirsTrustedAndPolicied(
       options.projectRoot,
       options.trusts ?? (() => false),
+      whatCode,
       (found) => {
         carried = found;
       },
@@ -2646,9 +2715,12 @@ const MOST_AFTER_SAYINGS = 3;
    * every settle in this app hostage for up to half an hour. Past the budget
    * the handler is let go of and the event carries on.
    *
-   * And an add-on classified as one that starts turns of its own keeps its
-   * tools but loses its hooks in an ordinary conversation, because Graphe is
-   * already deciding when a turn begins and two of those is the bug.
+   * Hooks are never dropped as a way of coping with an add-on that starts turns
+   * of its own: an add-on whose tool starts work and whose hook delivers the
+   * result would be launched and never heard from again. It runs whole with its
+   * hooks, or it is off. Tools-only is the one exception, and only where the
+   * add-on itself says its tools stand on their own — `policyFor` never returns
+   * it otherwise, and the person is told once, below.
    */
   const budgetHooks = (): void => {
     withHookBudget(loader.getExtensions(), (over) => {
@@ -2667,9 +2739,14 @@ const MOST_AFTER_SAYINGS = 3;
     const where = (one as { resolvedPath?: string; path?: string }).resolvedPath ?? '';
     if (!cards.has(where)) continue;
     const card = cards.get(where) ?? null;
-    if (!dropsLifecycleHooks(policyFor(card, options.sessionKind ?? 'conversation', options.addonsChosen))) {
-      continue;
+    const verdict = policyFor(card, options.sessionKind ?? 'conversation', options.addonsChosen);
+    /* They asked for tools only and this add-on cannot be run that way. Said
+       out loud rather than quietly giving them the whole add-on: the switch
+       they set is not the switch they got. */
+    if (options.addonsChosen === 'tools-only' && verdict === 'on') {
+      options.onEvent({ type: 'notice', what: saysToolsOnlyRefused(card) });
     }
+    if (!dropsLifecycleHooks(verdict)) continue;
     const handlers = (one as { handlers?: Map<string, unknown[]> }).handlers;
     if (!(handlers instanceof Map)) continue;
     for (const event of LIFECYCLE_HOOKS) handlers.delete(event);
@@ -2699,6 +2776,83 @@ const MOST_AFTER_SAYINGS = 3;
   /** The advisor's own tools, kept apart because a chip turns them on and off
    *  without rebuilding the conversation. */
   const advisorTools = advisorToolNames(loadedExtensions);
+
+  /** What to call the add-on at this path, so the Add-ons screen, a command's
+   *  origin and a tool's owner are never three names for one thing. */
+  const whoAt = (where: string): string => {
+    const named = discovered.find((one) => one.where === where)?.id;
+    if (named !== undefined && named !== '') return named;
+    const card = cards.get(where) ?? null;
+    return card === null || card.id === '' ? nameFromPath(where) : card.id;
+  };
+
+  /**
+   * The `/` commands the add-ons loaded into this conversation offer.
+   *
+   * Read off Pi's own registries every time it is asked rather than remembered,
+   * so a command whose add-on was removed while a message waited behind another
+   * chat is simply not here — which is how the shell knows not to hand it to
+   * the model as prose.
+   */
+  const commandsHere = (): readonly AddonCommand[] => {
+    const found: AddonCommand[] = [];
+    for (const one of loader.getExtensions().extensions as readonly LoadedExtension[]) {
+      const commands = one.commands;
+      if (!(commands instanceof Map)) continue;
+      const from = whoAt(one.resolvedPath ?? one.path ?? '');
+      for (const [name, command] of commands) {
+        if (typeof name !== 'string' || name === '') continue;
+        found.push({ name, description: command?.description ?? '', from });
+      }
+    }
+    return found;
+  };
+  /** Whether this text is a command one of the add-ons here answers to. */
+  const isACommandHere = (text: string): boolean => {
+    const word = leadingWord(text);
+    return word !== null && commandsHere().some((one) => one.name === word);
+  };
+  /**
+   * Every extension this conversation could load, and what this conversation
+   * knows about each one.
+   *
+   * Read live, from the loader that is holding it: a card is what the code
+   * would do, this is what it did here — loaded or not, what the policy left of
+   * it, the commands it registered, and the loader's own reason when its code
+   * threw on the way in.
+   */
+  const extensionReports = (): readonly ExtensionReport[] => {
+    const loaded = new Map<string, LoadedExtension>();
+    for (const one of loader.getExtensions().extensions as readonly LoadedExtension[]) {
+      const where = one.resolvedPath ?? one.path ?? '';
+      if (where !== '') loaded.set(where, one);
+    }
+    const failures = new Map<string, string>();
+    for (const one of loader.getExtensions().errors) failures.set(one.path, one.error);
+
+    return [...discovered].map(({ where, id, version }) => {
+      const here = loaded.get(where);
+      const card = cards.get(where) ?? null;
+      const failed = failures.get(where) ?? failures.get(id) ?? null;
+      return {
+        where,
+        id,
+        version,
+        loaded: here !== undefined,
+        looked: cards.has(where),
+        policy:
+          here === undefined
+            ? null
+            : policyFor(card, options.sessionKind ?? 'conversation', options.addonsChosen),
+        commands: [...(here?.commands?.keys() ?? [])].filter((name) => typeof name === 'string'),
+        problem:
+          failed === null
+            ? null
+            : { says: 'It did not load when this chat was opened.', logs: [failed] },
+      };
+    });
+  };
+
   let advises = options.advisor ?? null;
   let advisorThinks = options.advisorThinking ?? undefined;
   /** Named once here, because `prompt` shadows `options` with its own. */
@@ -3134,67 +3288,15 @@ const MOST_AFTER_SAYINGS = 3;
   const terminal = unsupportedTerminal(sayUnsupported);
   try {
     await session.bindExtensions({
-      uiContext: {
-        select: dialogs.select,
-        confirm: dialogs.confirm,
-        input: dialogs.input,
-        editor: dialogs.editor,
-        notify: (message: string, type?: 'info' | 'warning' | 'error') => {
+      uiContext: uiContextOver({
+        dialogs,
+        terminal,
+        notify: (what) => {
           // Never dropped, and never dressed up: a warning is drawn as a
           // warning, and the add-on's own words are what is said.
-          options.onEvent({
-            type: 'notice',
-            what: type === 'error' || type === 'warning' ? `${type}: ${message}` : message,
-          });
+          options.onEvent({ type: 'notice', what });
         },
-        // A status line is a terminal's footer. There is no footer here, so it
-        // is recorded and said once rather than invented into some corner of
-        // the window that would then be showing something nobody put there.
-        setStatus: () => terminal.note('setStatus'),
-        setWorkingMessage: () => undefined,
-        setWorkingVisible: () => undefined,
-        setWorkingIndicator: () => undefined,
-        setHiddenThinkingLabel: () => undefined,
-        setTitle: () => undefined,
-        // Terminal-only, and said so rather than silently succeeding.
-        onTerminalInput: () => {
-          terminal.note('onTerminalInput');
-          return () => undefined;
-        },
-        setWidget: () => terminal.note('setWidget'),
-        setFooter: () => terminal.note('setFooter'),
-        setHeader: () => terminal.note('setHeader'),
-        custom: () => terminal.fail('custom'),
-        pasteToEditor: () => terminal.note('pasteToEditor'),
-        setEditorText: () => terminal.note('setEditorText'),
-        getEditorText: () => {
-          terminal.note('getEditorText');
-          return '';
-        },
-        addAutocompleteProvider: () => terminal.note('addAutocompleteProvider'),
-        setEditorComponent: () => terminal.note('setEditorComponent'),
-        getEditorComponent: () => {
-          terminal.note('getEditorComponent');
-          return undefined;
-        },
-        get theme() {
-          return terminal.theme();
-        },
-        getAllThemes: () => {
-          terminal.note('getAllThemes');
-          return [];
-        },
-        getTheme: () => {
-          terminal.note('getTheme');
-          return undefined;
-        },
-        setTheme: () => {
-          terminal.note('setTheme');
-          return { success: false, error: 'this window has no terminal theme' };
-        },
-        getToolsExpanded: () => false,
-        setToolsExpanded: () => terminal.note('setToolsExpanded'),
-      },
+      }),
       mode: 'rpc',
       // An add-on that falls over is reported rather than swallowed: the
       // person sees which one, and the run carries on without it.
@@ -3332,6 +3434,24 @@ const MOST_AFTER_SAYINGS = 3;
     }
   };
 
+  /**
+   * The door every turn begins at, asked before it does.
+   *
+   * What this seam can see is whether a run is going: `isStreaming` is the same
+   * fact `listening` answers with, and the reason a steered line needs it asked
+   * is that Pi drains its queue from inside a run in flight and drops anything
+   * pushed after that — quietly, with nothing returned to say so. What it
+   * cannot see is the folder lease (the shell's workspace lock), the round
+   * budget (the continuation owner), or which of the turns the app decided for
+   * itself is arriving: a message somebody queued behind a run and one the app
+   * queued for itself are the same call here. Those are admitted where they are
+   * decided, in `electron/continuation-owner.ts`.
+   */
+  const mayBegin = (origin: TurnOrigin): void => {
+    const verdict = admit({ origin }, { going: session.isStreaming });
+    if (verdict.verdict === 'refused') throw new AdapterError(verdict.said);
+  };
+
   return {
     async prompt(
       text: string,
@@ -3339,6 +3459,7 @@ const MOST_AFTER_SAYINGS = 3;
       options?: { lookFirst?: boolean; queue?: 'followUp' },
     ): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
+      mayBegin('user');
       sayRulesDiagnostics();
       sayAdvisorStuck();
       // Once a sitting, before the first request goes anywhere.
@@ -3371,7 +3492,11 @@ const MOST_AFTER_SAYINGS = 3;
          conversation asking for a different advisor changed what another was in
          the middle of using. The choice is written once, when this conversation
          takes the file, and given back when it is done with it. */
-      const looking = options?.lookFirst === true;
+      /* A command is not a request to look first, whatever the switch says: the
+         words after the slash belong to the add-on's handler, and appending
+         anything to them is the app editing a command somebody typed. */
+      const asCommand = isACommandHere(text);
+      const looking = options?.lookFirst === true && !asCommand;
       if (looking) {
         planning = true;
         proposed = '';
@@ -3394,13 +3519,19 @@ const MOST_AFTER_SAYINGS = 3;
         // A sitting starts with the notes it will need, so the memory is used
         // without anyone having to know it exists. Only the first question of
         // a sitting carries them, and only when there is something to carry.
+        //
+        // A command is the exception, and it is the whole exception: Pi reads a
+        // leading `/word` off the front of the text to decide what to run, so
+        // notes in front of one are notes that turn a command into a sentence
+        // about it. Nothing is lost — a command that wants the context asks for
+        // it through its own session.
         let said = looking ? `${text}\n\n${PLAN_WORDS.asked}` : text;
         if (firstTurn) {
           firstTurn = false;
           if (memory !== null) {
             try {
               const notes = await memory.recall('', { limit: 4 });
-              if (notes.length > 0) {
+              if (notes.length > 0 && !asCommand) {
                 said = `${NOTES_CARRIED}\n${notes
                   .map((note) => `- ${note.content}`)
                   .join('\n')}\n\n${said}`;
@@ -3640,6 +3771,7 @@ const MOST_AFTER_SAYINGS = 3;
 
     async steer(text: string, images?: readonly ImageCard[]): Promise<void> {
       if (closed) throw new AdapterError('That project is no longer open.');
+      mayBegin('steer');
       // Same envelope the prompt makes: nobody outside this file hears the
       // word `ImageContent`. Pi's steer lands the message mid-turn and lets
       // the current run carry on — it does not start a separate one.
@@ -3779,6 +3911,14 @@ const MOST_AFTER_SAYINGS = 3;
       return carried;
     },
 
+    commands(): readonly AddonCommand[] {
+      return commandsHere();
+    },
+
+    extensions(): readonly ExtensionReport[] {
+      return extensionReports();
+    },
+
     get addons(): readonly {
       name: string;
       says: string;
@@ -3904,6 +4044,18 @@ const MOST_AFTER_SAYINGS = 3;
 
     get moments(): readonly Moment[] {
       return momentsNow();
+    },
+
+    forkAfter(said: number): string | null {
+      if (closed) return null;
+      try {
+        const cut = cutAfter(manager.buildContextEntries(), said);
+        return cut === null ? null : (manager.createBranchedSession(cut) ?? null);
+      } catch {
+        // Nothing to copy is a fork that did not happen, which the shell says
+        // in its own words rather than letting this throw across the seam.
+        return null;
+      }
     },
 
     async tryAnotherDirection(momentId: string): Promise<string | null> {

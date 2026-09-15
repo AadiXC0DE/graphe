@@ -24,17 +24,12 @@ import {
   type Connected,
   type ConnectedHealth,
   type ConnectedState,
-  type EveryKind,
+  type ConnectionState,
   type ConnectOutcome,
   type ConnectStep,
-  type ConnectionState,
-  type Decided,
   type Decision,
-  type HandedOver,
-  type Landing,
-  type WentOnline,
-  type Fetched,
   type FileEntry,
+  type Fetched,
   type FoundAccount,
   type GrapheApi,
   type ComputerStatus,
@@ -43,6 +38,8 @@ import {
   type ModelChoice,
   type OpenedProject,
   type Overview,
+  type SetupHere,
+  type SetupState,
   type WorktreePlan,
   type TerminalChunk,
   type TerminalExit,
@@ -50,7 +47,6 @@ import {
   type TerminalSession,
   type ExtensionRequest,
   type ExtensionAnswer,
-  type InStep,
   type Page,
   type Pointed,
   type PlainPreference,
@@ -69,9 +65,12 @@ import {
   type Pack,
   type Result,
   type AddonReport,
+  type StoppedAddition,
+  type AttachmentCopy,
+  type KeptAttachments,
+  type TrashView,
   type CarriedExtension,
   type Room,
-  type SideOfWork,
   type Skill,
   type AlwaysDoes,
   type AlwaysRow,
@@ -82,22 +81,18 @@ import {
   type BuildAdvance,
   type ContinuationNotice,
   type NewerVersion,
+  type AppNotice,
   type StorageNow,
   type SavedVersion,
   type ShowOutcome,
-  type VariationSpec,
-  type VariationsOutcome,
   type HowFar,
   type Money,
-  type Recording,
   type ShowProgress,
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
   type TokenUsageView,
   type WindowState,
-  type VisualFrames,
-  type VisualNotice,
   type Where,
   type FileVerdict,
   type HowItLands,
@@ -338,12 +333,6 @@ const api: GrapheApi = {
     }
     return ipcRenderer.invoke(CHANNEL.nameVersion, versionId, name, named(where)) as Promise<
       Result<readonly SavedVersion[]>
-    >;
-  },
-
-  versionPictures(where?: Where): Promise<Result<Readonly<Record<string, string>>>> {
-    return ipcRenderer.invoke(CHANNEL.versionPictures, named(where)) as Promise<
-      Result<Readonly<Record<string, string>>>
     >;
   },
 
@@ -614,19 +603,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.buildCancel, named(where)) as Promise<Result<null>>;
   },
 
-  flowLoad(where?: Where): Promise<Result<readonly import('../src/work/canvas').Flow[]>> {
-    return ipcRenderer.invoke(CHANNEL.flowLoad, named(where)) as Promise<Result<readonly import('../src/work/canvas').Flow[]>>;
-  },
-
-  flowSave(flow: import('../src/work/canvas').Flow, where?: Where): Promise<Result<null>> {
-    return ipcRenderer.invoke(CHANNEL.flowSave, flow, named(where)) as Promise<Result<null>>;
-  },
-
-
-  flowForget(id: string, where?: Where): Promise<Result<null>> {
-    return ipcRenderer.invoke(CHANNEL.flowForget, id, named(where)) as Promise<Result<null>>;
-  },
-
   appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>> {
     return ipcRenderer.invoke(CHANNEL.appsHere) as Promise<
       Result<{ editors: readonly string[]; terminals: readonly string[] }>
@@ -722,25 +698,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.show, at, point === true, named(where)) as Promise<Result<ShowOutcome>>;
   },
 
-  variationsServe(
-    parts: { subject: string; variations: readonly VariationSpec[] },
-    where?: Where,
-  ): Promise<Result<VariationsOutcome>> {
-    if (
-      typeof parts !== 'object' ||
-      parts === null ||
-      typeof parts.subject !== 'string' ||
-      !Array.isArray(parts.variations)
-    ) {
-      return Promise.resolve(refuse<VariationsOutcome>('I could not tell what to compare.'));
-    }
-    return ipcRenderer.invoke(
-      CHANNEL.variationsServe,
-      parts as { subject: string; variations: readonly VariationSpec[] },
-      named(where),
-    ) as Promise<Result<VariationsOutcome>>;
-  },
-
   onPointed(listener: (pointed: Pointed) => void): () => void {
     const forward = (_source: IpcRendererEvent, pointed: Pointed): void => {
       listener(pointed);
@@ -765,10 +722,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.pages, named(where)) as Promise<Result<readonly Page[]>>;
   },
 
-  shareReview(where?: Where): Promise<Result<string | null>> {
-    return ipcRenderer.invoke(CHANNEL.shareReview, named(where)) as Promise<Result<string | null>>;
-  },
-
   conversations(where?: Where): Promise<Result<readonly Conversation[]>> {
     return ipcRenderer.invoke(CHANNEL.conversations, named(where)) as Promise<Result<readonly Conversation[]>>;
   },
@@ -776,16 +729,22 @@ const api: GrapheApi = {
   openConversation(
     path: string | null,
     workspace?: string | null,
+    key?: string | null,
     where?: Where,
   ): Promise<Result<OpenedProject>> {
     const one = typeof path === 'string' && path.trim() !== '' ? path : null;
     // A workspace means a new conversation in it, so a path and a workspace
     // together would be two answers to one question. The path loses.
     const wanted = typeof workspace === 'string' && workspace.trim() !== '' ? workspace : null;
+    // The press is only carried for a fresh conversation: a saved one is
+    // already idempotent by its own address.
+    const pressed = typeof key === 'string' && key.trim() !== '' ? key : null;
+    const fresh = wanted !== null || one === null;
     return ipcRenderer.invoke(
       CHANNEL.openConversation,
       wanted === null ? one : null,
       wanted,
+      fresh ? pressed : null,
       named(where),
     ) as Promise<Result<OpenedProject>>;
   },
@@ -848,10 +807,17 @@ const api: GrapheApi = {
     >;
   },
 
-  forkConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>> {
-    return ipcRenderer.invoke(CHANNEL.conversationFork, source ?? null, named(where)) as Promise<
-      Result<OpenedProject>
-    >;
+  forkConversation(
+    source?: string | null,
+    said?: number | null,
+    where?: Where,
+  ): Promise<Result<OpenedProject>> {
+    return ipcRenderer.invoke(
+      CHANNEL.conversationFork,
+      source ?? null,
+      typeof said === 'number' ? said : null,
+      named(where),
+    ) as Promise<Result<OpenedProject>>;
   },
 
   archiveConversation(
@@ -891,6 +857,25 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.worktreePlan, named(where)) as Promise<Result<WorktreePlan>>;
   },
 
+  setupFiles(where?: Where): Promise<Result<SetupHere>> {
+    return ipcRenderer.invoke(CHANNEL.setupFiles, named(where)) as Promise<Result<SetupHere>>;
+  },
+
+  setupChoose(files: readonly string[], where?: Where): Promise<Result<SetupHere>> {
+    const wanted = Array.isArray(files) ? files.filter((one) => typeof one === 'string') : [];
+    return ipcRenderer.invoke(CHANNEL.setupChoose, wanted, named(where)) as Promise<
+      Result<SetupHere>
+    >;
+  },
+
+  setupInstall(where?: Where): Promise<Result<SetupState>> {
+    return ipcRenderer.invoke(CHANNEL.setupInstall, named(where)) as Promise<Result<SetupState>>;
+  },
+
+  setupState(where?: Where): Promise<Result<SetupState>> {
+    return ipcRenderer.invoke(CHANNEL.setupState, named(where)) as Promise<Result<SetupState>>;
+  },
+
   worktreeNew(wanted: { base?: string | null }, where?: Where): Promise<Result<OpenedProject>> {
     const base = typeof wanted.base === 'string' && wanted.base.trim() !== '' ? wanted.base : null;
     return ipcRenderer.invoke(CHANNEL.worktreeNew, base, named(where)) as Promise<
@@ -906,6 +891,56 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.deleteConversation, path, named(where)) as Promise<
       Result<readonly Conversation[]>
     >;
+  },
+
+  keepAttachments(
+    files: readonly PromptAttachment[],
+    held?: readonly string[],
+  ): Promise<Result<KeptAttachments>> {
+    const clean = (Array.isArray(files) ? files : []).filter(
+      (one) =>
+        one !== null &&
+        typeof one === 'object' &&
+        (one.kind === 'image' || one.kind === 'document') &&
+        typeof one.name === 'string' &&
+        typeof one.mimeType === 'string' &&
+        typeof one.bytes === 'string' &&
+        one.bytes !== '',
+    );
+    const carrying = (Array.isArray(held) ? held : []).filter(
+      (one): one is string => typeof one === 'string' && one !== '',
+    );
+    return ipcRenderer.invoke(CHANNEL.keepAttachments, clean, carrying) as Promise<
+      Result<KeptAttachments>
+    >;
+  },
+
+  attachmentCopy(id: string): Promise<Result<AttachmentCopy | null>> {
+    if (typeof id !== 'string' || id === '') {
+      return Promise.resolve(refuse<AttachmentCopy | null>('I could not tell which picture you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.attachmentCopy, id) as Promise<Result<AttachmentCopy | null>>;
+  },
+
+  trashList(): Promise<Result<TrashView>> {
+    return ipcRenderer.invoke(CHANNEL.trashList) as Promise<Result<TrashView>>;
+  },
+
+  trashRestore(name: string): Promise<Result<string | null>> {
+    if (typeof name !== 'string' || name === '') {
+      return Promise.resolve(refuse<string | null>('I could not tell which conversation you meant.'));
+    }
+    return ipcRenderer.invoke(CHANNEL.trashRestore, name) as Promise<Result<string | null>>;
+  },
+
+  trashEmpty(names: readonly string[]): Promise<Result<readonly string[]>> {
+    const clean = (Array.isArray(names) ? names : []).filter(
+      (one): one is string => typeof one === 'string' && one !== '',
+    );
+    // Nothing named means nothing to throw away, and it must never mean all of
+    // it: the trash empties what a person pointed at and nothing else.
+    if (clean.length === 0) return Promise.resolve({ ok: true, value: [] });
+    return ipcRenderer.invoke(CHANNEL.trashEmpty, clean) as Promise<Result<readonly string[]>>;
   },
 
   packages(term?: string): Promise<Result<readonly Pack[]>> {
@@ -925,6 +960,12 @@ const api: GrapheApi = {
       return Promise.resolve(refuse<readonly Pack[]>('I could not tell which one you meant.'));
     }
     return ipcRenderer.invoke(CHANNEL.removePackage, id) as Promise<Result<readonly Pack[]>>;
+  },
+
+  /** Nothing to name: one change runs at a time, and the shelf answers for
+   *  whichever one that is. */
+  stopPackage(): Promise<Result<StoppedAddition>> {
+    return ipcRenderer.invoke(CHANNEL.stopPackage) as Promise<Result<StoppedAddition>>;
   },
 
   onWindowState(listener: (state: WindowState) => void): () => void {
@@ -964,23 +1005,6 @@ const api: GrapheApi = {
     ipcRenderer.on(CHANNEL.events, forward);
     return () => {
       ipcRenderer.off(CHANNEL.events, forward);
-    };
-  },
-
-  visualFrames(changeId: string): Promise<Result<VisualFrames>> {
-    if (typeof changeId !== 'string' || changeId.trim() === '') {
-      return Promise.resolve(refuse<VisualFrames>('I could not tell which change you meant.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.visualFrames, changeId) as Promise<Result<VisualFrames>>;
-  },
-
-  onVisualChange(listener: (notice: VisualNotice) => void): () => void {
-    const forward = (_source: IpcRendererEvent, notice: VisualNotice): void => {
-      listener(notice);
-    };
-    ipcRenderer.on(CHANNEL.visualChange, forward);
-    return () => {
-      ipcRenderer.off(CHANNEL.visualChange, forward);
     };
   },
 
@@ -1145,15 +1169,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.pageHidden, hidden, named(where)) as Promise<Result<null>>;
   },
 
-  watchStart(says: string | undefined, where: Where): Promise<Result<null>> {
-    const words = typeof says === 'string' ? says : undefined;
-    return ipcRenderer.invoke(CHANNEL.watchStart, words, named(where)) as Promise<Result<null>>;
-  },
-
-  watchStop(where: Where): Promise<Result<Recording | null>> {
-    return ipcRenderer.invoke(CHANNEL.watchStop, named(where)) as Promise<Result<Recording | null>>;
-  },
-
   spendLimit(): Promise<Result<SpendLimit | null>> {
     return ipcRenderer.invoke(CHANNEL.spendLimit) as Promise<Result<SpendLimit | null>>;
   },
@@ -1208,17 +1223,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.openLink, url) as Promise<Result<null>>;
   },
 
-  landing(where?: Where): Promise<Result<Landing>> {
-    return ipcRenderer.invoke(CHANNEL.landing, named(where)) as Promise<Result<Landing>>;
-  },
-
-  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>> {
-    if (typeof on !== 'boolean') {
-      return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.setHoldBack, on, named(where)) as Promise<Result<Preferences>>;
-  },
-
   setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>> {
     if (typeof on !== 'boolean') {
       return Promise.resolve(refuse<Preferences>('I could not tell whether that was on or off.'));
@@ -1259,41 +1263,8 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.ownStyles) as Promise<Result<{ css: string; file: string }>>;
   },
 
-  setHowMuch(id: string): Promise<Result<Preferences>> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      return Promise.resolve(refuse<Preferences>('I could not tell which line that was.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.setHowMuch, id) as Promise<Result<Preferences>>;
-  },
-
-  decideOnWork(letIn: boolean, observed: boolean, where?: Where): Promise<Result<Decided>> {
-    if (typeof letIn !== 'boolean' || typeof observed !== 'boolean') {
-      return Promise.resolve(refuse<Decided>('I could not tell what you decided.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.decideOnWork, letIn, observed, named(where)) as Promise<Result<Decided>>;
-  },
-
-  /* The two that can send something off this computer. Both refuse anything but
-     an explicit `true`, so a call that arrives without one cannot be a press. */
-  handToDeveloper(confirmed: boolean, where?: Where): Promise<Result<HandedOver>> {
-    if (confirmed !== true) {
-      return Promise.resolve(refuse<HandedOver>('Nothing has left this computer.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.handToDeveloper, true, named(where)) as Promise<Result<HandedOver>>;
-  },
-
-  putOnline(confirmed: boolean, where?: Where): Promise<Result<WentOnline>> {
-    if (confirmed !== true) {
-      return Promise.resolve(refuse<WentOnline>('Nothing has left this computer.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.putOnline, true, named(where)) as Promise<Result<WentOnline>>;
-  },
-
   /* ---------------------------------------------- while you are not looking */
 
-  awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
-    return ipcRenderer.invoke(CHANNEL.awayEverywhere) as Promise<Result<readonly AwayNotice[]>>;
-  },
   connectedLook(where?: Where): Promise<Result<ConnectedState>> {
     return ipcRenderer.invoke(CHANNEL.connectedLook, named(where)) as Promise<Result<ConnectedState>>;
   },
@@ -1330,26 +1301,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.keepGoing, text, untilDone === true, named(where)) as Promise<
       Result<Away>
     >;
-  },
-
-  startAfter(text: string, after: string, where?: Where): Promise<Result<Away>> {
-    if (typeof text !== 'string' || text.trim() === '') {
-      return Promise.resolve(refuse<Away>('There was nothing to get on with.'));
-    }
-    if (typeof after !== 'string' || after.trim() === '') {
-      return Promise.resolve(refuse<Away>('I could not tell what it was meant to wait for.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.startAfter, text, after, named(where)) as Promise<Result<Away>>;
-  },
-
-  putAfter(id: string, after: string | null, where?: Where): Promise<Result<Away>> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
-    }
-    if (after !== null && (typeof after !== 'string' || after.trim() === '')) {
-      return Promise.resolve(refuse<Away>('I could not tell what it was meant to wait for.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.putAfter, id, after, named(where)) as Promise<Result<Away>>;
   },
 
   stopAway(id: string, where?: Where): Promise<Result<Away>> {
@@ -1394,59 +1345,6 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.sayToAway, id, text, named(where)) as Promise<Result<Away>>;
   },
 
-  keepSet(ids: readonly string[], where?: Where): Promise<Result<Away>> {
-    if (!Array.isArray(ids) || ids.some((one) => typeof one !== 'string' || one.trim() === '')) {
-      return Promise.resolve(refuse<Away>('I could not tell which pieces of work those were.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.keepSet, [...ids], named(where)) as Promise<Result<Away>>;
-  },
-
-  compareWays(ways: string, where?: Where): Promise<Result<readonly SideOfWork[]>> {
-    if (typeof ways !== 'string' || ways.trim() === '') {
-      return Promise.resolve(refuse<readonly SideOfWork[]>('There was nothing to compare.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.compareWays, ways, named(where)) as Promise<
-      Result<readonly SideOfWork[]>
-    >;
-  },
-
-  addRepeat(
-    doing: string,
-    every: EveryKind,
-    at: { hour: number; minute: number },
-    on?: number,
-    where?: Where,
-  ): Promise<Result<Away>> {
-    const known = every === 'day' || every === 'weekday' || every === 'week' || every === 'month';
-    if (
-      typeof doing !== 'string' ||
-      doing.trim() === '' ||
-      !known ||
-      typeof at !== 'object' ||
-      at === null ||
-      typeof at.hour !== 'number' ||
-      typeof at.minute !== 'number'
-    ) {
-      return Promise.resolve(refuse<Away>('I could not tell what to do, or when.'));
-    }
-    const which = typeof on === 'number' ? on : undefined;
-    return ipcRenderer.invoke(CHANNEL.addRepeat, doing, every, at, which, named(where)) as Promise<Result<Away>>;
-  },
-
-  switchRepeat(id: string, on: boolean, where?: Where): Promise<Result<Away>> {
-    if (typeof id !== 'string' || id.trim() === '' || typeof on !== 'boolean') {
-      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.switchRepeat, id, on, named(where)) as Promise<Result<Away>>;
-  },
-
-  forgetRepeat(id: string, where?: Where): Promise<Result<Away>> {
-    if (typeof id !== 'string' || id.trim() === '') {
-      return Promise.resolve(refuse<Away>('I could not tell which one you meant.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.forgetRepeat, id, named(where)) as Promise<Result<Away>>;
-  },
-
   onAway(listener: (notice: AwayNotice) => void): () => void {
     const forward = (_source: IpcRendererEvent, notice: AwayNotice): void => {
       listener(notice);
@@ -1489,6 +1387,20 @@ const api: GrapheApi = {
     ipcRenderer.on(CHANNEL.newerVersion, forward);
     return () => {
       ipcRenderer.off(CHANNEL.newerVersion, forward);
+    };
+  },
+
+  appNotices(): Promise<Result<readonly AppNotice[]>> {
+    return ipcRenderer.invoke(CHANNEL.appNotices) as Promise<Result<readonly AppNotice[]>>;
+  },
+
+  onAppNotice(listener: (notice: AppNotice) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: AppNotice): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.appNotice, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.appNotice, forward);
     };
   },
 
@@ -1541,29 +1453,6 @@ const api: GrapheApi = {
 
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
     return ipcRenderer.invoke(CHANNEL.clearFinishedWork);
-  },
-
-  inStep(where?: Where): Promise<Result<InStep>> {
-    return ipcRenderer.invoke(CHANNEL.inStep, named(where)) as Promise<Result<InStep>>;
-  },
-
-  followDesign(address: string, where?: Where): Promise<Result<InStep>> {
-    if (typeof address !== 'string' || address.trim() === '') {
-      return Promise.resolve(refuse<InStep>('There was no address to follow.'));
-    }
-    return ipcRenderer.invoke(CHANNEL.followDesign, address, named(where)) as Promise<Result<InStep>>;
-  },
-
-  lookAgain(where?: Where): Promise<Result<InStep>> {
-    return ipcRenderer.invoke(CHANNEL.lookAgain, named(where)) as Promise<Result<InStep>>;
-  },
-
-  caughtUp(where?: Where): Promise<Result<InStep>> {
-    return ipcRenderer.invoke(CHANNEL.caughtUp, named(where)) as Promise<Result<InStep>>;
-  },
-
-  stopFollowing(where?: Where): Promise<Result<InStep>> {
-    return ipcRenderer.invoke(CHANNEL.stopFollowing, named(where)) as Promise<Result<InStep>>;
   },
 };
 

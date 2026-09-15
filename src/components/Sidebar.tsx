@@ -1,11 +1,12 @@
 import { cloneElement, Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { bridge } from '../lib/bridge';
-import type { Conversation, NewerVersion, RecentProject } from '../lib/ipc';
+import type { Conversation, NewerVersion, ProjectItem, RecentProject } from '../lib/ipc';
+import { inFlight } from '../domain/conversations';
 import { ago } from '../lib/when';
 import type { Reference } from '../lib/projects';
 import { continuationWords } from '../work/continuing';
 import { byDay, foldOlder, matching, needsDayLabels, needsSearch } from '../lib/shelf';
-import { keepAsking, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
+import { keepAsking, mergeInto, offersOwnCopy, OWN_COPY_WORDS } from '../lib/owncopy';
 import { MOST_SHOWN } from './ProjectPicker';
 import './Sidebar.css';
 
@@ -26,6 +27,22 @@ export const ACTS_WORDS = {
   /** Said under a row whose Fork cannot be pressed. A fork taken mid-turn
    *  copies a conversation that had not finished happening. */
   forkWaits: 'Fork waits until this conversation stops working.',
+  /** The press that ends a turn, and the word the row uses while one is going.
+   *  Stop is its own action: closing a tab leaves a running conversation
+   *  running, so this is the only thing that ends one. */
+  stop: 'Stop',
+  stopHint: 'End the turn this conversation is in the middle of',
+  working: 'Still working',
+  /** The other way to start a second line of work from this row: in a copy of
+   *  the project, on a branch of its own, rather than in the same files. The
+   *  card behind it is the one that already exists. */
+  worktree: 'New worktree',
+  worktreeHint: 'Start a conversation in a copy of this project instead',
+  /** Said under the row's own menu, where the choice is between carrying on in
+   *  the same files and starting in a copy. A sentence rather than a label:
+   *  this one is the thing a fork does not do, and it is worth a line. */
+  forkSharesFiles:
+    'A fork branches the conversation, not the project: both chats work in the same files, and nothing already changed is rewound.',
 } as const;
 
 /** What is asked of the conversations in one row, in one place. Left out
@@ -35,6 +52,11 @@ type Acts = {
   onContinueConversation: (path: string) => void;
   onForkConversation: (path: string) => void;
   onArchiveConversation: (path: string, on: boolean) => void;
+  /** Left out where the shelf cannot end a run; the row then offers no Stop. */
+  onStopConversation?: (path: string) => void;
+  /** Left out where there is no card behind it, and where git is missing —
+   *  a copy of a project is made with git. */
+  onNewWorktree?: () => void;
 };
 
 type Props = {
@@ -44,6 +66,15 @@ type Props = {
   onBrowse: () => void;
   /** What the agent has been given to work from, this sitting, in this chat. */
   pinned: readonly Reference[];
+  /** What this project offers every chat in it. A chat's own references are
+   *  the conversation's; these belong to the project, and every new chat is
+   *  given them. Empty is the ordinary day. */
+  shared?: readonly ProjectItem[];
+  /** Give one of this chat's own references to the whole project. Optional: a
+   *  shelf that cannot is still whole, and then the band is a list. */
+  onShare?: (one: Reference) => void;
+  /** And take one off the project's list. */
+  onStopSharing?: (id: string) => void;
   /** The conversations this project has had, newest first. */
   conversations: readonly ShelfConversation[];
   /** Which one is on screen, by its own path. */
@@ -57,6 +88,10 @@ type Props = {
   onForkConversation?: (path: string) => void;
   /** Out of the list, or back into it. Never close, and never delete. */
   onArchiveConversation?: (path: string, on: boolean) => void;
+  /** End the run in one of them, named rather than whichever is in front. The
+   *  press that belongs beside a row still working, and the only way to end a
+   *  turn whose tab has been closed. */
+  onStopConversation?: (path: string) => void;
   /** The conversations working right now, by their own path. A fork of one of
    *  them is refused: a fork taken mid-turn copies something that had not
    *  finished happening. */
@@ -113,15 +148,33 @@ type Place = {
   count?: number;
 };
 
-/** What the band above the conversations is called. */
+/** What the band above the conversations is called, and what the two lists in
+ *  it are. Which of the two a thing is in is the whole question the band
+ *  answers: a chat's own references were given to that chat, and what the
+ *  project shares is given to every chat in it. */
 export const CONTEXT_WORDS = {
   title: 'Context',
+  /** What this chat was given to work from. */
+  mine: 'This chat',
+  /** What the project offers every new chat, labelled as the plan asks. */
+  project: 'Project context',
+  share: 'Share with project',
+  shareHint: 'Give this to every chat in the project, including ones started later.',
+  unshare: 'Stop sharing',
+  unshareHint: 'Take it off the project’s list. This chat keeps what it was given.',
 } as const;
 
-/** One thing in the Context band: something this chat was sent or worked
- *  from. A reference belongs to the conversation it was brought into, so the
- *  band has one list and nothing to mark. */
-function Pin({ one }: { one: Reference }) {
+/** One thing in the Context band: something this chat was sent or worked from,
+ *  or something the project offers every chat. A reference belongs to the
+ *  conversation it was brought into; the others belong to the project, and the
+ *  press beside each one is how a thing changes hands. */
+function Pin({
+  one,
+  action,
+}: {
+  one: { id: string; name: string; note: string; kind?: Reference['kind']; preview?: string };
+  action?: { label: string; hint: string; onPress: () => void };
+}) {
   return (
     <li className="shelf__pin">
       {one.kind === 'image' && one.preview !== undefined ? (
@@ -130,6 +183,17 @@ function Pin({ one }: { one: Reference }) {
         <span className="shelf__thumb shelf__thumb--none" aria-hidden="true" />
       )}
       <span className="shelf__rowname">{one.name}</span>
+      {action === undefined ? null : (
+        <button
+          type="button"
+          className="shelf__share"
+          onClick={action.onPress}
+          title={action.hint}
+          aria-label={`${action.label}: ${one.name}`}
+        >
+          {action.label}
+        </button>
+      )}
     </li>
   );
 }
@@ -179,6 +243,9 @@ export default function Sidebar(props: Props) {
   onOpen,
   onBrowse,
   pinned,
+  shared = [],
+  onShare,
+  onStopSharing,
   conversations,
   openConversation,
   onOpenConversation,
@@ -186,6 +253,7 @@ export default function Sidebar(props: Props) {
   onContinueConversation,
   onForkConversation,
   onArchiveConversation,
+  onStopConversation,
   working = [],
   onNewWorktree,
   onDeleteConversation,
@@ -201,6 +269,14 @@ export default function Sidebar(props: Props) {
   /** Which row has an "are you sure" standing over it, by its own path. */
   const [asking, setAsking] = useState<string | null>(null);
   const asked = keepAsking(asking, openConversation);
+  /** What a merge from this row would say: the copy it is in, and the project
+   *  it lands in. The folder a copy lives in is named after the conversation,
+   *  so the title is the name people will recognise. */
+  const mergeLabel = (title: string): string =>
+    mergeInto({
+      source: title,
+      target: openPath === null ? 'your project' : (openPath.split('/').filter(Boolean).at(-1) ?? openPath),
+    });
   /** Which row has its actions open, by its own path. One at a time: the shelf
    *  is a list, and a stack of open menus over it is not. */
   const [menuAt, setMenuAt] = useState<string | null>(null);
@@ -225,7 +301,13 @@ export default function Sidebar(props: Props) {
     onForkConversation === undefined ||
     onArchiveConversation === undefined
       ? null
-      : { onContinueConversation, onForkConversation, onArchiveConversation };
+      : {
+          onContinueConversation,
+          onForkConversation,
+          onArchiveConversation,
+          ...(onStopConversation === undefined ? {} : { onStopConversation }),
+          ...(onNewWorktree === undefined ? {} : { onNewWorktree }),
+        };
 
   const searchable = needsSearch(onTheList.length);
   const found = useMemo(
@@ -370,7 +452,15 @@ export default function Sidebar(props: Props) {
                             }}
                           >
                             <span className="shelf__rowname">{one.title}</span>
-                            <span className="shelf__rowsub">{ago(one.at)}</span>
+                            {/* A turn in flight is the shell's fact, not the
+                                window's: a conversation whose tab was closed is
+                                still working, and a row that stopped saying so
+                                made it look like a chat sitting still. */}
+                            <span className="shelf__rowsub">
+                              {workingHere.has(one.path) || inFlight(one.state ?? 'unloaded')
+                                ? ACTS_WORDS.working
+                                : ago(one.at)}
+                            </span>
                           </button>
                           {acts === null ? null : (
                             <button
@@ -417,7 +507,7 @@ export default function Sidebar(props: Props) {
                         {acts === null || menuAt !== one.path ? null : (
                           <Acts
                             title={one.title}
-                            working={workingHere.has(one.path)}
+                            working={workingHere.has(one.path) || inFlight(one.state ?? 'unloaded')}
                             onContinue={() => {
                               setMenuAt(null);
                               acts.onContinueConversation(one.path);
@@ -430,6 +520,22 @@ export default function Sidebar(props: Props) {
                               setMenuAt(null);
                               acts.onArchiveConversation(one.path, true);
                             }}
+                            {...(acts.onStopConversation === undefined
+                              ? {}
+                              : {
+                                  onStop: () => {
+                                    setMenuAt(null);
+                                    acts.onStopConversation?.(one.path);
+                                  },
+                                })}
+                            {...(acts.onNewWorktree === undefined
+                              ? {}
+                              : {
+                                  onNewWorktree: () => {
+                                    setMenuAt(null);
+                                    acts.onNewWorktree?.();
+                                  },
+                                })}
                           />
                         )}
                         {/* Under the row rather than another mark on it: a copy
@@ -470,7 +576,8 @@ export default function Sidebar(props: Props) {
                                 <button
                                   type="button"
                                   className="shelf__owncopydo"
-                                  title={OWN_COPY_WORDS.bringHint}
+                                  title={mergeLabel(one.title)}
+                                  aria-label={mergeLabel(one.title)}
                                   onClick={() => onBringWorkBack(one.path)}
                                 >
                                   {OWN_COPY_WORDS.bring}
@@ -554,14 +661,56 @@ export default function Sidebar(props: Props) {
             )}
           </section>
 
-          {pinned.length === 0 ? null : (
+          {pinned.length === 0 && shared.length === 0 ? null : (
             <section className="shelf__band">
               <h2 className="shelf__caption">{CONTEXT_WORDS.title}</h2>
-              <ul className="shelf__list">
-                {pinned.map((one) => (
-                  <Pin key={one.id} one={one} />
-                ))}
-              </ul>
+              {/* This chat's own, and the project's, each said for what it is:
+                  the two used to be one list, and a reference somebody dropped
+                  into one chat read as something every chat had been given. */}
+              {pinned.length === 0 ? null : (
+                <>
+                  <h3 className="shelf__scope">{CONTEXT_WORDS.mine}</h3>
+                  <ul className="shelf__list">
+                    {pinned.map((one) => (
+                      <Pin
+                        key={one.id}
+                        one={one}
+                        {...(onShare === undefined
+                          ? {}
+                          : {
+                              action: {
+                                label: CONTEXT_WORDS.share,
+                                hint: CONTEXT_WORDS.shareHint,
+                                onPress: () => onShare(one),
+                              },
+                            })}
+                      />
+                    ))}
+                  </ul>
+                </>
+              )}
+              {shared.length === 0 ? null : (
+                <>
+                  <h3 className="shelf__scope">{CONTEXT_WORDS.project}</h3>
+                  <ul className="shelf__list">
+                    {shared.map((one) => (
+                      <Pin
+                        key={one.id}
+                        one={one}
+                        {...(onStopSharing === undefined
+                          ? {}
+                          : {
+                              action: {
+                                label: CONTEXT_WORDS.unshare,
+                                hint: CONTEXT_WORDS.unshareHint,
+                                onPress: () => onStopSharing(one.id),
+                              },
+                            })}
+                      />
+                    ))}
+                  </ul>
+                </>
+              )}
             </section>
           )}
 
@@ -657,15 +806,36 @@ function Acts({
   onContinue,
   onFork,
   onArchive,
+  onStop,
+  onNewWorktree,
 }: {
   title: string;
   working: boolean;
   onContinue: () => void;
   onFork: () => void;
   onArchive: () => void;
+  /** Only offered while a turn really is in flight, and only by a shelf that
+   *  can end one: a Stop beside a conversation that is sitting still is a
+   *  press with nothing behind it. */
+  onStop?: () => void;
+  /** The other way to start a second line of work from this history, and left
+   *  out where there is no card behind it — or where git is missing, since a
+   *  copy of a project is made with git. */
+  onNewWorktree?: () => void;
 }) {
   return (
     <li className="shelf__acts">
+      {working && onStop !== undefined ? (
+        <button
+          type="button"
+          className="shelf__actsdo"
+          title={ACTS_WORDS.stopHint}
+          aria-label={`${ACTS_WORDS.stop} ${title}`}
+          onClick={onStop}
+        >
+          {ACTS_WORDS.stop}
+        </button>
+      ) : null}
       <button
         type="button"
         className="shelf__actsdo"
@@ -694,6 +864,25 @@ function Acts({
       >
         {continuationWords.archive}
       </button>
+      {/* The other way to start a second line of work on this history: in a
+          copy of the project rather than in these files. The card behind it is
+          the one that already exists — this is the way to it from the row
+          somebody is looking at. */}
+      {onNewWorktree === undefined ? null : (
+        <button
+          type="button"
+          className="shelf__actsdo"
+          title={ACTS_WORDS.worktreeHint}
+          aria-label={`${ACTS_WORDS.worktree} ${title}`}
+          onClick={onNewWorktree}
+        >
+          {ACTS_WORDS.worktree}
+        </button>
+      )}
+      {/* Said where the choice is made. A fork branches the conversation, not
+          the folder: both chats write the same files, and a change either one
+          makes is a change the other will see. */}
+      <p className="shelf__actsshare">{ACTS_WORDS.forkSharesFiles}</p>
       {working ? <p className="shelf__actswhy">{ACTS_WORDS.forkWaits}</p> : null}
     </li>
   );

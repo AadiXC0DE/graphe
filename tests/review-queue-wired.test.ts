@@ -9,11 +9,12 @@
  *
  * The carry itself is real git: a per-file decision is only worth anything if
  * the file it names is the only one that moves.
+ *
+ *  Source text, not behaviour: the settle-to-list join and the review doors across the shell boundary; no behavioural test can reach it — the handlers are in electron/main.ts and App.tsx, which nothing imports.
  */
 
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -281,6 +282,5 @@ describe('the bridge is whole', () => {
   it('remembers the list and the mirroring cards between sittings', () => {
     expect(MAIN).toContain('function reviewIndexFile(');
     expect(MAIN).toContain('const restoredReview = await readReviewQueue(path);');
-    expect(existsSync(fileURLToPath(new URL('../src/components/ReviewQueue.tsx', import.meta.url)))).toBe(true);
   });
 });

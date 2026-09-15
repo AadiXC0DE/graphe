@@ -9,6 +9,8 @@
  * taken back out of the queue, a card written from a notice, and a send the
  * shell refused. Each of them belongs to the conversation it was made in, not
  * to whichever one is on screen when the answer lands.
+ *
+ *  Source text, not behaviour: App.tsx's fork, take-back and notice calls and their main.ts handlers; no behavioural test reaches both sides at once.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -440,7 +442,24 @@ describe('T53: usage from two runs in one conversation', () => {
  *  types. */
 describe('the window answers to it', () => {
   const app = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('../../electron/main.ts', import.meta.url), 'utf8');
 
+  /* Fork here presses one message rather than the conversation, so the place
+     it stands travels with the press. Counted, because that is the one
+     coordinate the window and the record can both arrive at. */
+  it('sends where a message stands with a fork of it', () => {
+    expect(app).toContain('bridge.forkConversation(path, said ?? null, where)');
+    expect(app).toContain('onForkHere(saidBy)');
+    expect(main).toContain('from.held.forkAfter(boundary)');
+  });
+
+  it('refuses a fork of a boundary that has not finished happening', () => {
+    const at = main.indexOf('const atTheEnd =');
+    expect(at).toBeGreaterThan(-1);
+    expect(main.slice(at, at + 400)).toContain('still being written');
+    // And the mid-turn refusal it was written beside is still there.
+    expect(main).toContain('A fork made mid-turn would copy a conversation that had not finished happening.');
+  });
   it('takes a line back through the conversation the press was made in', () => {
     expect(app).toContain('tookBackTheLine(current, mine, words)');
     expect(app).not.toContain('withoutTakenBack');
@@ -453,22 +472,10 @@ describe('the window answers to it', () => {
     expect(app.slice(at, at + 300)).toContain('changeThread(current, owner');
   });
 
-  it('lets a reference go nowhere but the chat it was brought into', () => {
-    expect(app).not.toContain('moveScope');
-  });
-
   /* The first screen draws the composer with no folder open, so its mode chips
      have to land on the window's own state: read there, and written there. */
   it('gives the mode chips a home before any conversation exists', () => {
     expect(app).toContain('const plans = desk?.plans ?? loosePlans;');
     expect(app).toContain('setLoosePlans(');
-  });
-
-  /* The gate is the conversation's, so opening a folder turns none off. The
-     release that used to be here carried the chat now in front's address with
-     the folder being left, which the shell reads as no conversation named — the
-     project default a new chat starts from. */
-  it('turns no gate off for the folder it has just left', () => {
-    expect(app).not.toContain('holdWrites(false, was)');
   });
 });

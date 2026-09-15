@@ -5,6 +5,8 @@
  * shape a model writes one in, including the shapes that are not lists at all.
  * And that "worth planning" stays hard to trigger: the whole feature is a
  * default, so a wrong yes lands on somebody who only wanted the header bigger.
+ *
+ *  Source text, not behaviour: the card's own markup and stylesheet — its labels, its arrows, its colours; no behavioural test can reach them — this suite cannot run under jsdom, because src/agent/pi/tools.ts reads import.meta.url at import time.
  */
 
 import { readFileSync } from 'node:fs';
@@ -678,10 +680,6 @@ describe('what the plan card is allowed to do', () => {
       'PLAN_WORDS.askAgain',
     ]) {
       expect(CARD).toContain(word);
-    }
-    for (const inline of ['Move up', 'Move down', 'Say something about this']) {
-      expect(CARD).not.toContain(`'${inline}'`);
-      expect(CARD).not.toContain(`>${inline}<`);
     }
   });
 

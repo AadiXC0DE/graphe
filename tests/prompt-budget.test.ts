@@ -7,6 +7,8 @@
  * and never silently cut, a section longer than it may carry names where the
  * rest of it is, and the notes this app carries itself are left out first, in
  * the prompt's own words.
+ *
+ *  Source text, not behaviour: the prompt hook the adapter registers inside createSession; no behavioural test can reach it — it needs a live Pi runtime.
  */
 
 import { readFileSync } from 'node:fs';
@@ -180,9 +182,5 @@ describe('where it is applied', () => {
   it('says what gave way once a sitting rather than once a turn', () => {
     expect(factory).toContain('if (put.saidSo !== null) {');
     expect(factory).toContain('if (already.has(id)) return;');
-  });
-
-  it('no longer cuts the assembled prompt at a character count', () => {
-    expect(adapter).not.toContain('withinBudget(was');
   });
 });

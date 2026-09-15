@@ -8,6 +8,8 @@
  * After that: a saved file that has been hand-edited must cost somebody the one
  * line they got wrong rather than their whole appearance, and a font name goes
  * into a stylesheet, so it is checked rather than trusted.
+ *
+ *  Source text, not behaviour: every token the panel writes is declared in tokens.css; no behavioural test can reach it — jsdom computes no custom properties, so a token that does nothing reads exactly like one that works.
  */
 
 import { readFileSync } from 'node:fs';

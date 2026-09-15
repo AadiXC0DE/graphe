@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 const IPC = readFileSync(new URL('../src/lib/ipc.ts', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const INSPECTOR = readFileSync(new URL('../src/hooks/useInspector.ts', import.meta.url), 'utf8');
 const OVERVIEW = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
 const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
 const PRELOAD = readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8');
@@ -189,7 +190,10 @@ describe('the window hears about the projects', () => {
   });
 
   it('asks each project for its own timeline', () => {
-    expect(APP).toContain("bridge.versions({ project: path, repo: one.name })");
+    // The ask and the field it lands on both live with the panel queries now —
+    // see src/hooks/useInspector.ts, which owns what each of these reads.
+    expect(INSPECTOR).toContain("bridge.versions({ project: path, repo: one.name })");
+    expect(INSPECTOR).toContain('repoVersions: perRepo }');
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });
 

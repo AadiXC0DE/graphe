@@ -16,13 +16,20 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { noDesks, openDesk, parkThread, receive, showThread } from '../src/lib/projects';
+import { conversationIn, noDesks, openDesk, parkThread, receive, showThread, type Desks } from '../src/lib/projects';
 import type { AgentEvent } from '../src/agent/types';
 
 const main = readFileSync(fileURLToPath(new URL('../electron/main.ts', import.meta.url)), 'utf8');
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
 
 const project = '/work/site';
+
+/** Whether a run is in flight in a named conversation of the project just
+ *  opened. The question is about that conversation, so it is asked of it. */
+function busyIn(held: Desks, address: string | null): boolean {
+  const desk = held.byPath[project];
+  return desk === undefined ? false : conversationIn(desk, address).busy;
+}
 
 function desks(...events: readonly AgentEvent[]) {
   let held = openDesk(noDesks, { path: project, name: 'site' });
@@ -32,29 +39,28 @@ function desks(...events: readonly AgentEvent[]) {
 
 describe('the shell says whether a run is in flight', () => {
   it('is not in flight before anything says so', () => {
-    expect(desks().byPath[project]?.busy).toBe(false);
+    expect(busyIn(desks(), null)).toBe(false);
   });
 
   it('is in flight from the moment the shell says on', () => {
-    expect(desks({ type: 'busy', on: true }).byPath[project]?.busy).toBe(true);
+    expect(busyIn(desks({ type: 'busy', on: true }), null)).toBe(true);
   });
 
   it('is not in flight again once the shell says off', () => {
-    expect(
-      desks({ type: 'busy', on: true }, { type: 'busy', on: false }).byPath[project]?.busy,
-    ).toBe(false);
+    expect(busyIn(desks({ type: 'busy', on: true }, { type: 'busy', on: false }), null)).toBe(false);
   });
 
   /* A settle is the end of a run whatever else was said, so a `busy: false`
      that never arrives cannot leave the composer a spinner for the sitting. */
   it('is not in flight after a settle', () => {
-    expect(desks({ type: 'busy', on: true }, { type: 'settled' }).byPath[project]?.busy).toBe(false);
+    expect(busyIn(desks({ type: 'busy', on: true }, { type: 'settled' }), null)).toBe(false);
   });
 
   it('is true with no turns at all, which is the whole point', () => {
-    const desk = desks({ type: 'busy', on: true }).byPath[project];
-    expect(desk?.turns).toEqual([]);
-    expect(desk?.busy).toBe(true);
+    const held = desks({ type: 'busy', on: true });
+    const desk = held.byPath[project]!;
+    expect(conversationIn(desk, null).turns).toEqual([]);
+    expect(conversationIn(desk, null).busy).toBe(true);
   });
 });
 
@@ -63,29 +69,26 @@ describe('it belongs to the conversation it was said about', () => {
     let held = openDesk(noDesks, { path: project, name: 'site' });
     held = receive(held, { project, event: { type: 'busy', on: true }, conversation: '/a' });
     // Nothing knows about /a yet, so nothing is claimed for it.
-    expect(held.byPath[project]?.busy).toBe(false);
+    expect(busyIn(held, null)).toBe(false);
   });
 
   it('follows a conversation across a switch', () => {
     let held = openDesk(noDesks, { path: project, name: 'site' });
-    held = showThread(
-      { ...held, byPath: { ...held.byPath, [project]: { ...held.byPath[project]!, address: '/a', parked: { '/b': { turns: [] } }, order: ['/a', '/b'] } } },
-      project,
-      '/b',
-    );
+    held = showThread(held, project, '/a', { turns: [] });
+    held = showThread(held, project, '/b', { turns: [] });
     held = receive(held, { project, event: { type: 'busy', on: true } });
-    expect(held.byPath[project]?.busy).toBe(true);
+    expect(busyIn(held, '/b')).toBe(true);
     held = showThread(held, project, '/a');
-    expect(held.byPath[project]?.busy).toBe(false);
+    expect(busyIn(held, '/a')).toBe(false);
     held = showThread(held, project, '/b');
-    expect(held.byPath[project]?.busy).toBe(true);
-    expect(parkThread(held, project, '/a').byPath[project]?.busy).toBe(true);
+    expect(busyIn(held, '/b')).toBe(true);
+    expect(busyIn(parkThread(held, project, '/a'), '/b')).toBe(true);
   });
 });
 
 describe('the window answers to it', () => {
   it('reads busy as busy, not only the shapes in the thread', () => {
-    expect(app).toContain('(desk !== null && desk.busy)');
+    expect(app).toContain('(desk !== null && chat.busy)');
   });
 
   it('measures a turn it sent for itself, so the estimate has something to file', () => {

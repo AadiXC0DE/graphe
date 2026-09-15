@@ -18,6 +18,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import Tabs, { type Tab } from '../src/components/Tabs';
 import { moveThread, noDesks, openDesk, showThread, threadsIn, type Desks } from '../src/lib/projects';
+import { NOTHING_SAID } from '../src/state/conversations';
 
 const project = '/work/site';
 
@@ -104,7 +105,11 @@ function three(): Desks {
       [project]: {
         ...desk,
         address: '/a',
-        parked: { '/b': { turns: [] }, '/c': { turns: [] } },
+        conversations: {
+          '/a': { ...NOTHING_SAID },
+          '/b': { ...NOTHING_SAID },
+          '/c': { ...NOTHING_SAID },
+        },
         order: ['/a', '/b', '/c'],
       },
     },

@@ -86,7 +86,7 @@ describe('drawing the tail of a long conversation', () => {
   });
 
   it('is drawn by the thread, and asking for more asks for a page at a time', () => {
-    expect(app).toContain('const paged = lastTurns(desk.turns, drawing);');
+    expect(app).toContain('const paged = lastTurns(chat.turns, drawing);');
     expect(app).toContain('setDrawing((was) => was + AT_FIRST)');
   });
 
@@ -104,7 +104,7 @@ describe('finding a word in it', () => {
 
   it('searches every turn, not the ones on screen', () => {
     expect(findIn(turns, 'pricing').map((one) => one.at)).toEqual([0, 2]);
-    expect(app).toContain('turns={desk.turns}');
+    expect(app).toContain('turns={chat.turns}');
   });
 
   it('carries the line each result sits on, so a result is legible unopened', () => {

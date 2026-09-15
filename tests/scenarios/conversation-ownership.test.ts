@@ -49,6 +49,7 @@ import {
   type Reference,
 } from '../../src/lib/projects';
 import { said } from '../../src/lib/thread';
+import { NOTHING_SAID } from '../../src/state/conversations';
 import type { Attachment } from '../../src/components/Attachments';
 import type { TaskObservation } from '../../src/cost/estimate';
 import { gitIn, gitRepo, type Built } from '../helpers/fixtures';
@@ -152,12 +153,11 @@ describe('T23: a reference brought into one chat, then a fresh chat opened', () 
   }
 
   it('shows the fresh conversation nothing that was brought into the other one', () => {
-    const fresh = twoChats().byPath[PROJECT];
-    expect(fresh?.address).toBe('chat-b');
-    expect(fresh?.references).toEqual([]);
-    expect(fresh?.attachments).toEqual([]);
-    expect(fresh?.draft).toBe('');
-    expect(fresh?.plans).toBe('auto');
+    const fresh = conversationIn(twoChats().byPath[PROJECT], 'chat-b');
+    expect(fresh.references).toEqual([]);
+    expect(fresh.attachments).toEqual([]);
+    expect(fresh.draft).toBe('');
+    expect(fresh.plans).toBe('auto');
   });
 
   /* A reference is something a chat was given, and the project has no list of
@@ -166,18 +166,18 @@ describe('T23: a reference brought into one chat, then a fresh chat opened', () 
   it('keeps a reference with the chat it was brought into, and nowhere else', () => {
     const there = twoChats();
     const desk = there.byPath[PROJECT];
-    expect(desk?.references).toEqual([]);
-    expect(conversationIn(desk!, 'chat-a').references).toEqual([MOCK]);
+    // The chat in front is the one nobody has said anything else about, so it
+    // has none of its own — and the one behind it keeps its own.
+    expect(conversationIn(desk, 'chat-b').references).toEqual([]);
+    expect(conversationIn(desk, 'chat-a').references).toEqual([MOCK]);
 
     const fresh = showThread(there, PROJECT, 'chat-b', { turns: [] }).byPath[PROJECT];
-    expect(fresh?.references).toEqual([]);
-    expect(conversationIn(fresh!, 'chat-b').references).toEqual([]);
+    expect(conversationIn(fresh, 'chat-b').references).toEqual([]);
   });
 
   it('gives each chat back its own references, draft and box', () => {
     const there = twoChats();
-    const inB: Desk | undefined = there.byPath[PROJECT];
-    expect(inB?.references).toEqual([]);
+    expect(conversationIn(there.byPath[PROJECT], 'chat-b').references).toEqual([]);
 
     const backToA = showThread(
       changeThread(there, { project: PROJECT, address: 'chat-b' }, (one) => ({
@@ -372,9 +372,9 @@ describe('T53: usage from two runs in one conversation', () => {
     desks = showThread(desks, PROJECT, 'chat-b', { turns: [] });
     desks = changeDesk(desks, PROJECT, (desk) => ({
       ...desk,
-      parked: {
-        ...desk.parked,
-        'chat-a': { turns: [], doing: { task, startedAt: NOW }, counted: 0 },
+      conversations: {
+        ...desk.conversations,
+        'chat-a': { ...NOTHING_SAID, doing: { task, startedAt: NOW } },
       },
     }));
     const desk = desks.byPath[PROJECT];
@@ -396,9 +396,9 @@ describe('T53: usage from two runs in one conversation', () => {
     // again rather than the difference. Only the difference belongs to this job.
     const rearmed = changeDesk(afterFirst, PROJECT, (desk) => ({
       ...desk,
-      parked: {
-        ...desk.parked,
-        'chat-a': { turns: [], doing: { task, startedAt: NOW + 1_500 }, counted: desk.parked['chat-a']?.counted ?? 0 },
+      conversations: {
+        ...desk.conversations,
+        'chat-a': { ...conversationIn(desk, 'chat-a'), doing: { task, startedAt: NOW + 1_500 } },
       },
     }));
     const afterSecond = receive(
@@ -415,8 +415,7 @@ describe('T53: usage from two runs in one conversation', () => {
     expect(charged).toBe(800);
     // What the ledger has been charged so far belongs to the conversation that
     // spent it, which is where the next difference is measured from.
-    expect(afterSecond.byPath[PROJECT]?.parked['chat-a']?.counted).toBe(800);
-    expect(afterSecond.byPath[PROJECT]?.counted).toBe(0);
+    expect(conversationIn(afterSecond.byPath[PROJECT], 'chat-a').counted).toBe(800);
   });
 
   it('puts the money on the project and the words on the conversation that ran', () => {
@@ -430,8 +429,8 @@ describe('T53: usage from two runs in one conversation', () => {
     expect(desk?.address).toBe('chat-b');
     // The reply landed in the conversation it started in, and the one in front
     // was not handed another chat's words.
-    expect(desk?.turns).toEqual([]);
-    expect(desk?.parked['chat-a']?.turns).toHaveLength(1);
+    expect(conversationIn(desk, 'chat-b').turns).toEqual([]);
+    expect(conversationIn(desk, 'chat-a').turns).toHaveLength(1);
   });
 });
 
@@ -442,6 +441,10 @@ describe('T53: usage from two runs in one conversation', () => {
  *  types. */
 describe('the window answers to it', () => {
   const app = readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8');
+  const actions = readFileSync(
+    new URL('../../src/hooks/useConversationActions.ts', import.meta.url),
+    'utf8',
+  );
   const main = readFileSync(new URL('../../electron/main.ts', import.meta.url), 'utf8');
 
   /* Fork here presses one message rather than the conversation, so the place
@@ -461,7 +464,11 @@ describe('the window answers to it', () => {
     expect(main).toContain('A fork made mid-turn would copy a conversation that had not finished happening.');
   });
   it('takes a line back through the conversation the press was made in', () => {
-    expect(app).toContain('tookBackTheLine(current, mine, words)');
+    // The write itself belongs to the owner-bound actions now; what matters is
+    // that the window hands the line to the conversation the press named,
+    // through the one operation that puts it back in that chat's box.
+    expect(actions).toContain('tookBackTheLine(current, owner, words)');
+    expect(app).toContain('takeBackTheLine(mine, words)');
     expect(app).not.toContain('withoutTakenBack');
   });
 
@@ -475,7 +482,7 @@ describe('the window answers to it', () => {
   /* The first screen draws the composer with no folder open, so its mode chips
      have to land on the window's own state: read there, and written there. */
   it('gives the mode chips a home before any conversation exists', () => {
-    expect(app).toContain('const plans = desk?.plans ?? loosePlans;');
+    expect(app).toContain('const plans = desk === null ? loosePlans : chat.plans;');
     expect(app).toContain('setLoosePlans(');
   });
 });

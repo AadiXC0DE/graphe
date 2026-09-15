@@ -31,7 +31,8 @@ import { parseProposal } from '../../src/agent/plan';
 import { piecesOf } from '../../src/agent/pi/prompt';
 import { implementationPlanFromResearch, stepsFromReport } from '../../src/agent/research';
 import type { AgentEvent, Money } from '../../src/agent/types';
-import { changeDesk, noDesks, openDesk, receive } from '../../src/lib/projects';
+import { changeDesk, inFront, noDesks, openDesk, receive } from '../../src/lib/projects';
+import { NOTHING_SAID } from '../../src/state/conversations';
 import { GoalFile } from '../../src/projects/goals';
 import { parseDiff } from '../../src/diff/hunks';
 import { forgetScratch, optionsWithScratch, scratchUnder } from '../../src/agent/pi/childenv';
@@ -530,7 +531,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     desks = receive(desks, { project, conversation: null, event });
     return desks.byPath[project];
@@ -538,8 +541,8 @@ describe('S-10 a run that costs nothing', () => {
 
   it('clears the job the moment the run settles', () => {
     const now = desk({ type: 'settled', how: 'finished' });
-    expect(now?.doing).toBeNull();
-    expect(now?.filing).not.toBeNull();
+    expect(inFront(now).doing).toBeNull();
+    expect(inFront(now).filing).not.toBeNull();
   });
 
   it('files nothing when the split never comes', () => {
@@ -547,7 +550,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     for (const event of [
       { type: 'settled', how: 'finished' } as AgentEvent,
@@ -555,7 +560,7 @@ describe('S-10 a run that costs nothing', () => {
     ]) {
       desks = receive(desks, { project, conversation: null, event });
     }
-    expect(desks.byPath[project]?.doing).toBeNull();
+    expect(inFront(desks.byPath[project]).doing).toBeNull();
     expect(desks.byPath[project]?.jobs).toEqual([]);
   });
 
@@ -564,7 +569,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     const total: Money = { minor: 250, currency: 'INR' };
     for (const event of [
@@ -587,7 +594,7 @@ describe('S-10 a run that costs nothing', () => {
       desks = receive(desks, { project, conversation: null, event });
     }
     expect(desks.byPath[project]?.jobs).toHaveLength(1);
-    expect(desks.byPath[project]?.filing).toBeNull();
+    expect(inFront(desks.byPath[project]).filing).toBeNull();
   });
 
   it('leaves nothing spinning after a settle', async () => {
@@ -595,7 +602,7 @@ describe('S-10 a run that costs nothing', () => {
     const report = await app.run([{ says: 'Both.', calls: ticks(1, 2) }]);
     expect(report.busy).toBe(false);
     expect(report.waiting).toEqual([]);
-    expect(app.desks().byPath[app.project]?.doing).toBeNull();
+    expect(inFront(app.desks().byPath[app.project]).doing).toBeNull();
   });
 });
 

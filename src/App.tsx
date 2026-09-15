@@ -83,6 +83,8 @@ import { migrationActions } from "./work/migration";
 import { useResearch } from "./hooks/useResearch";
 import { useGoalChip } from "./hooks/useGoalChip";
 import { useBoard } from "./hooks/useBoard";
+import { useConversationActions } from "./hooks/useConversationActions";
+import { useInspector, type HeldPlan } from "./hooks/useInspector";
 import { useConnect } from "./hooks/useConnect";
 import { useRunLedger } from "./hooks/useRunLedger";
 import { usePreview } from "./hooks/usePreview";
@@ -144,8 +146,8 @@ import { usePrefersReducedMotion } from "./lib/motion";
 import { keeping } from "./projects/kept";
 import { behind } from "./lib/showme";
 import {
-  changeCurrent,
   changeDesk,
+  changeTheFront,
   changeThread,
   closeDesk,
   conversationIn,
@@ -153,19 +155,17 @@ import {
   threadsIn,
   currentDesk,
   helpersRunning,
-  intoTheBox,
+  inFront,
   moveThread,
   noDesks,
   nowDoing,
   openDesk,
-  putBackTheBox,
   receive,
   researchLog,
   showThread,
   spokenIn,
   tookBack,
-  tookBackTheLine,
-  tookTheBox,
+  type Conversation as Chat,
   type Desk,
   type Desks,
   type Owned,
@@ -181,6 +181,7 @@ import {
   type SentPicture,
   type Turn,
 } from "./lib/thread";
+import { NOTHING_SAID } from "./state/conversations";
 import { asMarkdown, wordsOf, COPY_WORDS } from "./lib/transcript";
 import { copyText } from "./lib/copying";
 import { markFor, showing, themeFrom, type Theme } from "./lib/theme";
@@ -406,8 +407,9 @@ const NO_FOLDER_YET =
  *  are rather than a second thread to read. */
 function lastSaidIn(desk: Desk | null): string | null {
   if (desk === null) return null;
-  for (let index = desk.turns.length - 1; index >= 0; index -= 1) {
-    const turn = desk.turns[index];
+  const turns = inFront(desk).turns;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
     if (turn?.kind !== 'said') continue;
     const words = turn.text.trim().replace(/\s+/g, ' ');
     if (words === '') continue;
@@ -488,6 +490,12 @@ function Conversation() {
    */
   const [desks, setDesks] = useState<Desks>(noDesks);
   const desk = currentDesk(desks);
+  /* The conversation on screen, whole. Everything this window draws belongs to
+     one conversation, and it is that one's record the screen reads — not a
+     handful of fields copied onto the project when it came forward, which is
+     how a chat used to lose its draft or its mode on the way to the front.
+     See src/lib/projects.ts and src/state/conversations.ts. */
+  const chat = inFront(desk);
   /* The folder in front, as a plain value. `openProject` is a field on the
      state and not a ref, but a hook list cannot tell those apart by name, so
      every list that wanted it read as a ref nobody should be listing. */
@@ -523,26 +531,23 @@ function Conversation() {
   /** Whether a running row is already on screen carrying the motion — a
    *  streaming reply, a step in progress, a tidy. The quiet mark only fills
    *  the silent gaps of a run, so the two never speak at once. */
-  const runningNow =
-    desk !== null &&
-    desk.turns.some(
+  const runningNow = chat.turns.some(
+    (turn) =>
+      (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+      (turn.kind === 'did' && turn.state === 'running') ||
+      (turn.kind === 'tidying' && turn.state === 'running'),
+  );
+  const frontBusy =
+    chat.turns.some(
       (turn) =>
         (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
         (turn.kind === 'did' && turn.state === 'running') ||
         (turn.kind === 'tidying' && turn.state === 'running'),
-    );
-  const frontBusy =
-    (desk !== null &&
-      desk.turns.some(
-        (turn) =>
-          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
-          (turn.kind === 'did' && turn.state === 'running') ||
-          (turn.kind === 'tidying' && turn.state === 'running'),
-      )) ||
+    ) ||
     (desk !== null && (sendsInTheAir[keyOf(desk.path, desk.address ?? '')] ?? 0) > 0) ||
     // A turn nobody typed has no shape to read until its first token. The shell
     // says when one is in flight, and that is what the composer answers to.
-    (desk !== null && desk.busy);
+    (desk !== null && chat.busy);
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -589,7 +594,7 @@ function Conversation() {
    * is a conversation to keep it in — the first screen's composer is drawn with
    * no folder open — it is the window's own, so its chips are not dead. */
   const [loosePlans, setLoosePlans] = useState<Plans>('auto');
-  const plans = desk?.plans ?? loosePlans;
+  const plans = desk === null ? loosePlans : chat.plans;
   /* Read inside callbacks that were built before the last change to it. */
   const plansNow = useRef(plans);
   plansNow.current = plans;
@@ -906,10 +911,6 @@ function Conversation() {
   /** Last project/conversation navigation request. Only its response may change
    *  what is in front; IPC replies can arrive out of order. */
   const navigation = useRef(0);
-  /** How many asks each panel owner has made, so a slow answer for one chat
-   *  cannot land under another. Keyed by project and conversation together. */
-  const asksMade = useRef(new Map<string, number>());
-
   /** The row of tabs as it is drawn, published so the keys can act on the row
    *  somebody is looking at. See src/hooks/useTabRow.ts. */
   const tabRow = useTabRow();
@@ -1162,7 +1163,7 @@ function Conversation() {
   const [foundAt, setFoundAt] = useState<number | null>(null);
   /** The turn a search landed on, by its own id, so the row can be marked and
    *  brought into view once it has been drawn. */
-  const foundId = foundAt === null ? null : (desk?.turns[foundAt]?.id ?? null);
+  const foundId = foundAt === null ? null : (chat.turns[foundAt]?.id ?? null);
   const shownConversation = `${openProject ?? ''}\u0000${desk?.address ?? ''}`;
   // Asking for more of one conversation must not draw all of the next.
   useEffect(() => {
@@ -1195,11 +1196,11 @@ function Conversation() {
      must not clear the busy another tab is still using. Counted, not a flag. */
   const goBusy = (): void => setBusyCount((count) => count + 1);
   const goQuiet = (): void => setBusyCount((count) => Math.max(0, count - 1));
-  /** How full the conversation on screen is, and whether it is being shortened
-   *  right now. Asked for rather than counted here: the number is the model's
-   *  own reckoning, and only the shell can see it. */
-  const [room, setRoom] = useState<RoomState | null>(null);
   const [tidying, setTidying] = useState(false);
+  /** How full the conversation on screen is. Asked for rather than counted
+   *  here: the number is the model's own reckoning, and only the shell can see
+   *  it. Held by the window because the shell also reports it unsolicited. */
+  const [room, setRoom] = useState<RoomState | null>(null);
   /** Whether the Guard is stopping to ask. Never remembered across launches:
    *  the shell holds it on the session, and a new session asks again. */
   /** How far it may go on its own. Four rungs rather than a switch; it lasts as
@@ -1214,7 +1215,7 @@ function Conversation() {
    *  open they live on the conversation that holds them, like everything else
    *  about it. */
   const [loose, setLoose] = useState<readonly Attachment[]>([]);
-  const attachments = desk?.attachments ?? loose;
+  const attachments = desk === null ? loose : chat.attachments;
 
   /** Attachments, read inside `deliver` the same way `desksNow` is read inside
    *  the listener: `deliver` is rebuilt whenever the desk in front changes,
@@ -1223,13 +1224,8 @@ function Conversation() {
   const attachmentsNow = useRef(attachments);
   attachmentsNow.current = attachments;
 
-  /** Whose box the window is looking at, worked out at the moment of asking
-   *  rather than at the moment of rendering. A write that lands after somebody
-   *  switched tabs still names the conversation it was meant for. */
-  const ownerNow = useCallback((): Owned | null => {
-    const here = currentDesk(desksNow.current);
-    return here === null ? null : { project: here.path, address: here.address };
-  }, []);
+  /** Everything a press on a conversation does, bound to the conversation it
+   *  was pressed in. See src/hooks/useConversationActions.ts. */
 
   /** The pictures in the box, for the message about to carry them. Object URLs
    *  rather than bytes: the File already holds those, so a conversation full of
@@ -1244,83 +1240,35 @@ function Conversation() {
     [],
   );
 
-  /**
-   * Take out of the box what has just been sent, and only that.
-   *
-   * The owner is the conversation the send started in, not whichever one is on
-   * screen when the shell answers, and `accepted` is what was in the box when
-   * it started: anything put in since belongs to somebody's next thought.
-   */
-  const emptyTheBox = useCallback((owner: Owned | null, accepted: readonly Attachment[]) => {
-    if (owner === null) {
-      setLoose([]);
-      return;
-    }
-    setDesks((current) => tookTheBox(current, owner, accepted));
-  }, []);
-
   /** A sentence in the box before there is a project to write it in. Once a
    *  folder is open the sentence is the conversation's. */
   const [looseDraft, setLooseDraft] = useState("");
-  const draft = desk?.draft ?? looseDraft;
+  const actions = useConversationActions({
+    desksNow,
+    setDesks,
+    front: desk === null ? null : { project: desk.path, address: desk.address },
+    setLooseDraft,
+    emptyLoose: () => {
+      setLoose([]);
+    },
+    fillLoose: setLoose,
+  });
+  const {
+    boxOwner,
+    writeDraft,
+    handIn,
+    keepDraftAt,
+    emptyTheBox,
+    fillBox,
+    putBack: putBackInBox,
+    takeBack: takeBackTheLine,
+  } = actions;
 
-  /** The conversation the box on screen belongs to, bound at this render rather
-   *  than resolved when a write lands: a keystroke or a file that arrives after
-   *  somebody switched tabs belongs to the chat it was made in. */
-  const boxOwner: Owned | null =
-    desk === null ? null : { project: desk.path, address: desk.address };
-
-  /**
-   * Put a sentence in the box of the conversation named, composed with whatever
-   * is already there.
-   *
-   * An example, a handoff note, a line taken back out of the queue and a send
-   * that came back refused all come through here. The conversation is named
-   * rather than assumed, so a write that lands after somebody moved on still
-   * goes where it was meant to.
-   */
-  const writeDraft = useCallback((owner: Owned | null, change: (was: string) => string) => {
-    if (owner === null) {
-      setLooseDraft((was) => change(was));
-      return;
-    }
-    setDesks((current) =>
-      changeThread(current, owner, (one) => {
-        const was = one.draft ?? "";
-        const next = change(was);
-        return next === was ? one : { ...one, draft: next };
-      }),
-    );
-  }, []);
-
-  /** The same, for the conversation on screen. */
-  const handIn = useCallback(
-    (change: (was: string) => string) => writeDraft(ownerNow(), change),
-    [ownerNow, writeDraft],
-  );
-
-  /** The box's own words on their way back to the conversation they belong to.
-   *  The conversation is bound at the render the box was drawn for, so the
-   *  report a switch produces goes to the chat being left. */
-  const keepDraftAt = useCallback(
-    (owner: Owned | null) => (text: string) => writeDraft(owner, () => text),
-    [writeDraft],
-  );
+  const draft = desk === null ? looseDraft : chat.draft;
 
   /** A native page must yield to renderer popovers; it cannot be stacked under
      them with CSS alone. */
   const [composerPopoverOpen, setComposerPopoverOpen] = useState(false);
-  /** Servers and watchers this conversation has kept up. Drawn from what the
-   *  shell last said rather than asked for on a clock. */
-  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
-  /** The build plan for the project in front, as the tracker draws it. Null
-   *  until a document-to-build has produced one. Kept with the folder it came
-   *  from, so a plan is never drawn under another project's conversation. */
-  const [buildPlan, setBuildPlan] = useState<{
-    path: string;
-    plan: import('./lib/ipc').BuildPlan;
-  } | null>(null);
-
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Read from the shell once, and again whenever it is changed here. */
   const [ceiling, setCeiling] = useState<SpendLimit | null>(null);
@@ -1423,10 +1371,7 @@ function Conversation() {
    *  a sentence with nowhere to go is a sentence nobody reads. */
   const say = useCallback((text: string) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
-        ...one,
-        turns: [...one.turns, said("graphe", text)],
-      })),
+      changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("graphe", text)] })),
     );
   }, []);
 
@@ -1493,10 +1438,7 @@ function Conversation() {
       return;
     }
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
-        ...one,
-        turns: withTrouble(one.turns, trouble),
-      })),
+      changeTheFront(current, (one) => ({ ...one, turns: withTrouble(one.turns, trouble) })),
     );
   }, [connectTroubled]);
 
@@ -1526,17 +1468,24 @@ function Conversation() {
     setDesks((current) =>
       changeDesk(current, where.project!, (one) => {
         const conversation = where.conversation;
-        if (conversation === undefined || conversation === one.address) {
-          return { ...one, turns: withTrouble(one.turns, trouble) };
+        // No conversation named is the one on screen, and a card that names one
+        // belongs to that chat whether or not it is the one in front.
+        if (conversation !== undefined && conversation !== (one.address ?? '')) {
+          const parked = one.conversations[conversation];
+          if (parked === undefined) return one;
+          return {
+            ...one,
+            conversations: {
+              ...one.conversations,
+              [conversation]: { ...parked, turns: withTrouble(parked.turns, trouble) },
+            },
+          };
         }
-        const parked = one.parked[conversation];
-        if (parked === undefined) return one;
+        const here = one.address ?? '';
+        const was = one.conversations[here] ?? NOTHING_SAID;
         return {
           ...one,
-          parked: {
-            ...one.parked,
-            [conversation]: { ...parked, turns: withTrouble(parked.turns, trouble) },
-          },
+          conversations: { ...one.conversations, [here]: { ...was, turns: withTrouble(was.turns, trouble) } },
         };
       }),
     );
@@ -1645,43 +1594,6 @@ function Conversation() {
     [troubleHere],
   );
 
-  /* ---------------------------------------------------------------- versions */
-
-  /** Ask for the timeline of the project in front, and put it on that desk.
-   *  Applied only if it is still the one in front by the time the answer comes
-   *  back — the shell answers about whatever is current, so a switch mid-flight
-   *  would otherwise write one project's history onto another's desk. */
-  const refreshVersions = useCallback(async (path: string) => {
-    const deskNow = desksNow.current.byPath[path];
-    const key = keyOf(path, deskNow?.address ?? '');
-    const mine = (asksMade.current.get(key) ?? 0) + 1;
-    asksMade.current.set(key, mine);
-    const answer = await bridge.versions();
-    // A folder holding several projects has no timeline of its own. Each
-    // project answers where it lives, and the panel shows whichever is chosen.
-    const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
-    const each = await Promise.all(
-      several.map(
-        async (one) =>
-          [one.name, await bridge.versions({ project: path, repo: one.name })] as const,
-      ),
-    );
-    if (desksNow.current.current !== path) return;
-    if (asksMade.current.get(key) !== mine) return;
-    const perRepo: Record<string, readonly SavedVersion[]> = {};
-    for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
-    if (!answer.ok && several.length === 0) return;
-    setDesks((current) =>
-      current.current === path
-        ? changeDesk(current, path, (one) => ({
-            ...one,
-            versions: answer.ok ? answer.value : one.versions,
-            ...(several.length === 0 ? {} : { repoVersions: perRepo }),
-          }))
-        : current,
-    );
-  }, []);
-
   /** How full the conversation on screen is. Asked for after anything that
    *  could change it, and never on a timer. */
   /** Anything that puts a conversation on screen puts the conversation on
@@ -1752,92 +1664,26 @@ function Conversation() {
     });
   }, []);
 
-  /** What is already up. The band is kept in step by events afterwards, but a
-   *  window that has just opened has heard none of them yet. The destination is
-   *  required: an old conversation settling must never clear the project that
-   *  is on screen now. */
-  const refreshRunning = useCallback((where?: Where) => {
-    const desk = currentDesk(desksNow.current);
-    const asked: Where = where ?? {
-      ...(desk === null ? {} : { project: desk.path }),
-      ...(desk?.address == null ? {} : { conversation: desk.address }),
-    };
-    void bridge.running(asked).then((answer) => {
-      if (!answer.ok) return;
-      const current = currentDesk(desksNow.current);
-      if (asked.project !== undefined && current?.path !== asked.project) return;
-      setRunning(answer.value);
-    });
-  }, []);
+  /** Servers and watchers this conversation has kept up. Drawn from what the
+   *  shell last said rather than asked for on a clock. */
+  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
+  /** The build plan for the project in front, as the tracker draws it. Null
+   *  until a document-to-build has produced one. Kept with the folder it came
+   *  from, so a plan is never drawn under another project's conversation. */
+  const [buildPlan, setBuildPlan] = useState<HeldPlan | null>(null);
 
-  const refreshRoom = useCallback((where?: Where) => {
-    const desk = currentDesk(desksNow.current);
-    const asked: Where = where ?? {
-      ...(desk === null ? {} : { project: desk.path }),
-      ...(desk?.address == null ? {} : { conversation: desk.address }),
-    };
-    void bridge.room(asked).then((answer) => {
-      if (!answer.ok) return;
-      const current = currentDesk(desksNow.current);
-      if (asked.project !== undefined && current?.path !== asked.project) return;
-      if (asked.conversation !== undefined && current?.address !== asked.conversation) return;
-      setRoom(answer.value);
-    });
-  }, []);
-
-  /* How much a conversation can hold is the model's own number, so the ring is
-     read again whenever somebody changes model. */
-  useEffect(() => {
-    refreshRoom();
-  }, [connection?.chosen, refreshRoom]);
-
-  /** Ask for the git state of the project in front, for the overview. Applied
-   *  only if it is still the one in front by the time the answer comes back —
-   *  the same guard `refreshVersions` stands on, for the same reason. */
-  const refreshOverview = useCallback(async (path: string, conversation?: string | null) => {
-    const here = desksNow.current.byPath[path];
-    const address = conversation === undefined ? here?.address : conversation;
-    const where: Where = {
-      project: path,
-      ...(address == null ? {} : { conversation: address }),
-    };
-    // What this answer will be about, and which ask it is. Two conversations in
-    // one project share the folder and the panel, so "the same project" is not
-    // enough to write an answer under: an older ask arriving late would put one
-    // chat's files, branch or processes on screen under another chat's name.
-    const key = keyOf(path, address ?? '');
-    const mine = (asksMade.current.get(key) ?? 0) + 1;
-    asksMade.current.set(key, mine);
-    const answer = await bridge.overview(where);
-    if (!answer.ok) return;
-    if (asksMade.current.get(key) !== mine) return;
-    if ((desksNow.current.byPath[path]?.address ?? null) !== (address ?? null)) return;
-    setDesks((current) =>
-      current.current === path
-        ? changeDesk(current, path, (one) => ({
-            ...one,
-            overview: answer.value,
-          }))
-        : current,
-    );
-    // Which projects a folder holds is only known once this has answered, so
-    // the first ask for their timelines has to be here rather than earlier —
-    // otherwise the panel says "nothing saved yet" about a project that has.
-    const held = answer.value.repos ?? [];
-    const already = desksNow.current.byPath[path]?.repoVersions ?? {};
-    if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path);
-  }, [refreshVersions]);
-
-  /** Read the build plan for the project in front, for the tracker above the
-   *  box. Same in-front guard as everything else that answers about a folder. */
-  const refreshBuildPlan = useCallback(async (path: string) => {
-    const answer = await bridge.buildPlan();
-    if (!answer.ok) return;
-    setBuildPlan((current) => {
-      if (desksNow.current.current !== path) return current;
-      return answer.value === null ? null : { path, plan: answer.value };
-    });
-  }, []);
+  /* The panels beside the conversation, and where their answers go. See
+     src/hooks/useInspector.ts — one query per panel, each named for the
+     conversation it is about so a slow answer cannot land under another. */
+  const inspector = useInspector({
+    desksNow,
+    setDesks,
+    setRunning,
+    setRoom,
+    setPlan: setBuildPlan,
+  });
+  const { refreshVersions, refreshOverview, refreshRunning, refreshRoom, refreshBuildPlan } =
+    inspector;
 
   /* ------------------------------------------ everything in this project */
 
@@ -1913,28 +1759,23 @@ function Conversation() {
       setRunning([]);
       setDesks((current) => {
         const next = openDesk(current, opened.value);
-        const desk = next.byPath[opened.value.path];
+        const was = next.byPath[opened.value.path];
         // Only the first time. A folder reopened in this sitting comes back
         // exactly as it was left; one with a conversation saved on disk gets
         // that conversation back, folded through the same reducer the live
         // stream runs. A folder where nothing was ever said stays empty, and
         // the first screen is the one that asks what you want to make.
-        if (desk === undefined) return next;
-        const named = changeDesk(next, opened.value.path, (one) => ({
-          ...one,
-          address: opened.value.address ?? one.address,
-          order:
-            opened.value.address == null || one.order.includes(opened.value.address)
-              ? one.order
-              : [...one.order, opened.value.address],
-        }));
-        if (desk.turns.length > 0) return named;
+        if (was === undefined) return next;
+        const address = opened.value.address ?? was.address;
+        const known = conversationIn(was, address);
         // One fold with one accumulator. Folding event by event copied the
         // whole array each time, so a ten-thousand-event transcript took
         // seconds to open with the window doing nothing else.
-        const revived = foldEvents(opened.value.history);
-        if (revived.length === 0) return named;
-        return changeDesk(named, opened.value.path, (one) => ({ ...one, turns: revived }));
+        const turns = known.turns.length > 0 ? known.turns : foldEvents(opened.value.history);
+        // The one way a conversation is shown. The shell has just read this one
+        // for us, so it arrives whole; a second hand-written field list here is
+        // how a field comes to be dropped by one of the two.
+        return showThread(next, opened.value.path, address, { turns });
       });
 
       void refreshVersions(opened.value.path);
@@ -2069,7 +1910,7 @@ function Conversation() {
       // screen away: whatever the desk still holds belongs to a transcript that
       // no longer exists, and the empty-thread guard read that as "already
       // looking at a new one" and left the window with nothing.
-      if (!force && path === null && (desk?.turns.length ?? 0) === 0) {
+      if (!force && path === null && chat.turns.length === 0) {
         // Already looking at an empty one. Still worth getting out of the way
         // of it, since that is what was pressed.
         toChat();
@@ -2101,7 +1942,7 @@ function Conversation() {
       }
       showOpened(opened.value);
     },
-    [inConversation, desk?.turns.length, showOpened, toChat, troubleAt, goToScreen],
+    [inConversation, chat.turns.length, showOpened, toChat, troubleAt, goToScreen],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -2869,7 +2710,7 @@ function Conversation() {
         return rest;
       });
       setDesks((current) =>
-        changeDesk(current, desk.path, (one) => ({
+        changeThread(current, { project: desk.path, address: desk.address }, (one) => ({
           ...one,
           turns: one.turns.map((t) => (t.kind === 'said' && (t as { streaming: boolean }).streaming ? { ...t, streaming: false } : t)),
         })),
@@ -3220,8 +3061,7 @@ function Conversation() {
       // conversation in front now — the one this message belongs to — read off
       // the desk here rather than from whenever this callback was last rebuilt
       // (see `attachmentsNow`).
-      const inTheBox =
-        desk === null ? attachmentsNow.current : conversationIn(desk, desk.address).attachments ?? [];
+      const inTheBox = desk === null ? attachmentsNow.current : chat.attachments;
       // A model that cannot read pictures never gets sent one, whichever door
       // the message came through. The composer stops this at the box; a note
       // drawn on the page goes straight to here, and used to carry the picture
@@ -3278,25 +3118,20 @@ function Conversation() {
 
       setDesks((current) => {
         const started = { task, startedAt: Date.now() };
-        return mine === null
-          ? changeCurrent(current, (one) => ({
-              ...one,
-              // Never over the top of a job already in flight. Queueing a second
-              // message used to replace the running one's task and start time.
-              doing: one.doing ?? started,
-              references: [...one.references, ...reference],
-            }))
-          : changeThread(current, mine, (one) => ({
-              ...one,
-              doing: one.doing ?? started,
-              references: [...(one.references ?? []), ...reference],
-            }));
+        const began = (one: Chat) => ({
+          ...one,
+          // Never over the top of a job already in flight. Queueing a second
+          // message used to replace the running one's task and start time.
+          doing: one.doing ?? started,
+          references: [...one.references, ...reference],
+        });
+        return mine === null ? changeTheFront(current, began) : changeThread(current, mine, began);
       });
       /* The sentence and its pictures come back to the box only when the shell
          has refused the message, so it is put back below rather than here. */
       const putBack = (): void => {
         if (mine === null) writeDraft(null, () => text);
-        else setDesks((current) => putBackTheBox(current, mine, text));
+        else putBackInBox(mine, text);
       };
       goBusy();
       if (owner !== null) holdSend(owner);
@@ -3345,7 +3180,7 @@ function Conversation() {
         if (owner !== null) letSendGo(owner);
       }
     },
-    [troubleAt, emptyTheBox, holdSend, letSendGo, connection, writeDraft],
+    [troubleAt, emptyTheBox, putBackInBox, holdSend, letSendGo, connection, writeDraft, chat.attachments],
   );
 
   /**
@@ -3367,10 +3202,7 @@ function Conversation() {
       setDesks((current) =>
         current.current === null
           ? current
-          : changeCurrent(current, (one) => ({
-              ...one,
-              turns: [...one.turns, said("you", text, sent)],
-            })),
+          : changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("you", text, sent)] })),
       );
 
       if (before === null) {
@@ -3398,10 +3230,7 @@ function Conversation() {
         // The sentence goes on the desk that has just been made, so it is not
         // lost with the screen it was typed on.
         setDesks((current) =>
-          changeCurrent(current, (one) => ({
-            ...one,
-            turns: [...one.turns, said("you", text, sent)],
-          })),
+          changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("you", text, sent)] })),
         );
       }
 
@@ -3459,10 +3288,7 @@ function Conversation() {
       const asking = effectiveHowFar === 'doing' ? null : priced.prompt;
       if (asking !== null) {
         setDesks((current) =>
-          changeCurrent(current, (one) => ({
-            ...one,
-            turns: [...one.turns, estimated(text, asking)],
-          })),
+          changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, estimated(text, asking)] })),
         );
         return;
       }
@@ -3547,10 +3373,7 @@ function Conversation() {
       // so the steer is laid down here just as `send` would.
       if (mode === 'steer') {
         setDesks((current) =>
-          changeDesk(current, desk.path, (one) => ({
-            ...one,
-            turns: [...one.turns, said('you', text)],
-          })),
+          changeThread(current, { project: desk.path, address: desk.address }, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
         );
         // An interrupt carries words only — there is nowhere in a steer to put a
         // picture. So the box is emptied here too: left full, whatever was in it
@@ -3574,10 +3397,7 @@ function Conversation() {
         // all — and with a picture attached, which fails slowly, that gap was
         // the whole of the wait.
         setDesks((current) =>
-          changeDesk(current, desk.path, (one) => ({
-            ...one,
-            turns: [...one.turns, said('you', text, picturesInTheBox())],
-          })),
+          changeThread(current, { project: desk.path, address: desk.address }, (one) => ({ ...one, turns: [...one.turns, said('you', text, picturesInTheBox())] })),
         );
         // The same two switches the box is showing. A message queued while
         // "research" or "plan first" is on used to go out as a plain one: the
@@ -3907,22 +3727,11 @@ function Conversation() {
         }
         setInConversation(opened.conversation);
         setOwnCopyHere(opened.ownCopy === true);
-        setDesks((current) =>
-          changeDesk(current, opened.path, (one) => {
-            const incoming = opened.address == null ? undefined : one.parked[opened.address];
-            const withoutIncoming = opened.address == null ? one.parked : Object.fromEntries(Object.entries(one.parked).filter(([a]) => a !== opened.address));
-            const parked = one.address === null || one.address === opened.address ? withoutIncoming : { ...withoutIncoming, [one.address]: { turns: one.turns, doing: one.doing, counted: one.counted } };
-            return {
-              ...one,
-              turns,
-              doing: incoming?.doing ?? null,
-              counted: incoming?.counted ?? 0,
-              address: opened.address ?? null,
-              parked,
-              order: opened.address == null || one.order.includes(opened.address) ? one.order : [...one.order, opened.address],
-            };
-          }),
-        );
+        // The one way a conversation comes forward, the same as every other:
+        // the record it already had, with the turns the shell read for it. Two
+        // hand-written field lists is how a field comes to be dropped by one of
+        // them, which is what this was.
+        setDesks((current) => showThread(current, opened.path, opened.address ?? null, { turns }));
         refreshRoom({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
         refreshRunning({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
         setHowFarHere(opened.howFar ?? 'asking');
@@ -3939,7 +3748,12 @@ function Conversation() {
         const { reviewPrompt } = await import("./components/ReviewsView");
         const base = reviewPrompt(item, repository, prHere);
         // Add the prompt to the new conversation's desk and send it through the PR-rooted session.
-        setDesks((current) => changeDesk(current, opened.path, (one) => ({ ...one, turns: [...one.turns, said("you", base)] })));
+        setDesks((current) =>
+          changeThread(current, { project: opened.path, address: opened.address ?? null }, (one) => ({
+            ...one,
+            turns: [...one.turns, said("you", base)],
+          })),
+        );
         const promptWhere = { project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) };
         void bridge.prompt(base, undefined, undefined, promptWhere).then((answer) => {
           if (!answer.ok) troubleAt(promptWhere, answer.trouble);
@@ -4039,11 +3853,11 @@ function Conversation() {
       // it, which put somebody back on the list of projects for pressing the
       // small x on a tab. Closing a tab is closing a tab: the project stays
       // open and a fresh conversation takes the place of the one put down.
-      if (desk.address === address && Object.keys(desk.parked).length === 0) {
+      if ((desk.address ?? '') === address && threadsIn(desk).length <= 1) {
         // Nothing said in it yet, so there is nothing to put down and nothing
         // a new one would be different from. The press does nothing, which is
         // better than a flicker that ends where it started.
-        if (desk.turns.length === 0) return;
+        if (conversationIn(desk, address).turns.length === 0) return;
         await swapConversation(null);
         setDesks((current) => parkThread(current, project, address));
         void bridge.closeConversation({ project, conversation: address });
@@ -4068,6 +3882,9 @@ function Conversation() {
   );
 
   tabRow.handles(goToTab, closeTab);
+
+
+
 
   /** Out of the line and back into the box, so a second thought can be changed
    *  rather than only cancelled. */
@@ -4107,11 +3924,10 @@ function Conversation() {
       // Into the box and out of the thread in one write, so the same sentence
       // is never on screen twice — once as though it had been said, once in the
       // box waiting to be. With no folder open there is no thread to clear.
-      if (mine === null) writeDraft(null, (was) => intoTheBox(was, words));
-      else setDesks((current) => tookBackTheLine(current, mine, words));
+      takeBackTheLine(mine, words);
       if (owner !== null) setQueued((was) => ({ ...was, [owner]: [] }));
     });
-  }, [troubleAt, writeDraft]);
+  }, [troubleAt, takeBackTheLine]);
 
   /**
    * The answer to "this is a bigger job".
@@ -4124,7 +3940,7 @@ function Conversation() {
   const answerEstimate = useCallback(
     (answered: EstimateTurn, go: boolean) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeTheFront(current, (one) => ({
           ...one,
           turns: one.turns.flatMap((turn): Turn[] => {
             if (turn.kind !== "estimate" || turn.id !== answered.id)
@@ -4168,11 +3984,13 @@ function Conversation() {
       const text = desk === null ? '' : lookAround.said(desk.path, desk.address);
       // The steps the agent proposed for this plan, read before the answer is
       // written — the build-plan store wants the real task list.
-      const planTurn =
-        desk === null ? null : desk.turns.find((turn): turn is Extract<typeof turn, { kind: "plan" }> => turn.kind === "plan" && turn.id === turnId);
-      const steps = planTurn === undefined || planTurn === null ? [] : planTurn.steps;
+      const planTurn = chat.turns.find(
+        (turn): turn is Extract<typeof turn, { kind: "plan" }> =>
+          turn.kind === "plan" && turn.id === turnId,
+      );
+      const steps = planTurn === undefined ? [] : planTurn.steps;
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeTheFront(current, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "plan" && turn.id === turnId
@@ -4191,7 +4009,7 @@ function Conversation() {
           holdWrites(false);
           setPlans('auto');
           setDesks((current) =>
-            changeCurrent(current, (one) => ({
+            changeTheFront(current, (one) => ({
               ...one,
               turns: [...one.turns, said('graphe', 'Out of Plan, going ahead with it.')],
             })),
@@ -4242,7 +4060,7 @@ function Conversation() {
         void deliver(revise, sizeUp(revise), { lookFirst: true });
       }
     },
-    [deliver, desk, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
+    [deliver, desk, chat.turns, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
   );
 
   /**
@@ -4271,7 +4089,7 @@ function Conversation() {
   const fixReview = useCallback(
     (turnId: string) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeTheFront(current, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "review" && turn.id === turnId
@@ -4295,7 +4113,7 @@ function Conversation() {
     if (desk === null) return;
     // "Until it's done" is itself the answer: somebody who picked it has
     // already said not to stop and ask.
-    const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
+    const waiting = chat.turns.find((one) => one.kind === 'plan' && one.answered === null);
     if (waiting === undefined || waiting.kind !== 'plan') return;
     // A plan that asked something must never answer itself. Asking two
     // questions and then answering them yourself is worse than never asking.
@@ -4304,7 +4122,7 @@ function Conversation() {
     // not one asking for approval — answering it sends "do these: nothing".
     if (waiting.steps.length === 0) return;
     answerPlan(waiting.id, true);
-  }, [desk, answerPlan, howFar]);
+  }, [desk, chat.turns, answerPlan, howFar]);
 
   /** The model answered in prose. The card says so; this is the press under it,
    *  which asks again in the same words the look-around uses rather than
@@ -4320,7 +4138,7 @@ function Conversation() {
   const respond = useCallback(
     (turnId: string, callId: string, decision: Decision) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeTheFront(current, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "asked" && turn.id === turnId
@@ -4348,7 +4166,7 @@ function Conversation() {
    */
   const answerAsked = useCallback((turnId: string, answers: Answers | null) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
+      changeTheFront(current, (one) => ({
         ...one,
         turns: one.turns.map((turn) =>
           turn.kind === "asked-first" && turn.id === turnId
@@ -4373,7 +4191,7 @@ function Conversation() {
 
   const dismiss = useCallback((turnId: string) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
+      changeTheFront(current, (one) => ({
         ...one,
         turns: one.turns.filter((turn) => turn.id !== turnId),
       })),
@@ -4450,7 +4268,7 @@ function Conversation() {
 
   const dismissPutBack = useCallback(() => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({ ...one, putBack: null })),
+      changeTheFront(current, (one) => ({ ...one, putBack: null })),
     );
   }, []);
 
@@ -4620,7 +4438,7 @@ function Conversation() {
       { id: 'history', name: 'Look through the history', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },
       { id: 'copy', name: COPY_WORDS.whole, where: 'Conversation',
-        run: () => { void copyText(asMarkdown(currentDesk(desksNow.current)?.turns ?? [])); },
+        run: () => { void copyText(asMarkdown(inFront(currentDesk(desksNow.current)).turns)); },
         ready: here, whyNot: needsProject },
       { id: 'reviews', name: 'Read the pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
@@ -4679,10 +4497,11 @@ function Conversation() {
   const workingHere = useMemo(() => {
     const desk = currentDesk(desks);
     if (desk === null) return [] as readonly string[];
-    const parked = Object.entries(desk.parked).flatMap(([path, one]) =>
-      one.busy === true ? [path] : [],
+    const behind = Object.entries(desk.conversations).flatMap(([path, one]) =>
+      one.busy ? [path] : [],
     );
-    return desk.busy && desk.address !== null ? [desk.address, ...parked] : parked;
+    const here = desk.address ?? '';
+    return behind.includes(here) ? [here, ...behind.filter((one) => one !== here)] : behind;
   }, [desks]);
 
   /* The checklist, while the reply is still going. The model ticks its own
@@ -4715,19 +4534,8 @@ function Conversation() {
       // first token, which is a screen saying the opposite of what is true.
       if (notice.resting) return;
       setDesks((current) =>
-        changeDesk(current, notice.project, (one) => {
+        changeThread(current, { project: notice.project, address: notice.address }, (one) => {
           const started = { task: sizeUp(notice.said), startedAt: Date.now() };
-          if (notice.address !== '' && notice.address !== one.address) {
-            const parked = one.parked[notice.address];
-            if (parked === undefined) return one;
-            return {
-              ...one,
-              parked: {
-                ...one.parked,
-                [notice.address]: { ...parked, doing: parked.doing ?? started, busy: true },
-              },
-            };
-          }
           return { ...one, doing: one.doing ?? started, busy: true };
         }),
       );
@@ -5006,20 +4814,20 @@ function Conversation() {
    *  "none" puts somebody in front of a blank conversation for a moment and
    *  then takes it away. */
   const undecided = desk === null && (recent === null || openingOnLaunch);
-  const empty = desk === null || desk.turns.length === 0;
+  const empty = chat.turns.length === 0;
   // Which regions have earned their place (notes/strategy/UI-DESIGN.md):
   // the shelf the moment there is a folder in front; the overview the moment
   // there is anything at all to tell about the work — a git state, a search, a
   // reference, or a second version. Both appear once and then stay.
   const shelved = desk !== null;
-  const research = researchLog(desk?.turns ?? []);
+  const research = researchLog(chat.turns);
   const helpers = desk === null ? [] : helpersRunning(desk);
   // On the rail, each helper wears the one question it is answering: a run
   // working four angles at once should read as four angles, not as a spinner.
   // The board behind it keeps the whole of what each was asked.
   const angles = asLinesOfEnquiry(helpers);
   const intoIt = lookingInto(helpers);
-  const doingNow = nowDoing(desk?.turns ?? []);
+  const doingNow = nowDoing(chat.turns);
 
   // What it is looking into takes the band while any of it is still out: that
   // is the thing worth reading, and the step underneath it will come back.
@@ -5029,8 +4837,8 @@ function Conversation() {
      switched in the sidebar, where the whole project list stays in one stable
      place. `threadsIn` preserves opening order, so selecting a tab never
      shuffles the row beneath the pointer. */
-  const threadTabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address, here }) => {
-      const turns = here ? desk.turns : (desk.parked[address]?.turns ?? []);
+  const threadTabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address }) => {
+      const turns = conversationIn(desk, address).turns;
       // `busy` belongs to the window, not a conversation. Applying it to
       // `here` made the spinner jump to whichever tab was clicked while another
       // conversation was doing the work. A live turn is its own evidence.
@@ -5054,6 +4862,7 @@ function Conversation() {
     });
 
   const tabs: readonly Tab[] = threadTabs;
+
 
   /* Where a tab sits is the person's to decide: the row is spatial memory, and
      a row that cannot be arranged is one nobody can learn. Conversations only,
@@ -5085,7 +4894,7 @@ function Conversation() {
     ((desk.overview?.repos?.length ?? 0) > 0 ||
       desk.overview?.git !== null ||
       research.length > 0 ||
-      desk.references.length > 0 ||
+      chat.references.length > 0 ||
       desk.versions.length >= 2);
   if (desk !== null && hasOverview) overviewSeen.current.add(desk.path);
   // The panel steps aside while a file has the column: there is not room for
@@ -5267,7 +5076,7 @@ function Conversation() {
           openPath={openProject}
           onOpen={(project) => void open(project.path)}
           onBrowse={() => void browse()}
-          pinned={desk?.references ?? []}
+          pinned={chat.references}
           shared={sharedContext}
           onShare={shareWithProject}
           onStopSharing={stopSharing}
@@ -5613,7 +5422,7 @@ function Conversation() {
           <Commands
             open
             onClose={() => setCommandsOpen(false)}
-            turns={desk.turns}
+            turns={chat.turns}
             servers={running}
             terminal={{
               workspace: desk.path,
@@ -5691,7 +5500,7 @@ function Conversation() {
             onForget={(project) => void forget(project)}
             onBrowse={() => void browse()}
           />
-        ) : undecided ? null : desk === null || desk.turns.length === 0 ? (
+        ) : undecided ? null : desk === null || chat.turns.length === 0 ? (
           <Welcome
             onUse={(said) => handIn(() => said)}
             project={desk?.name ?? null}
@@ -5735,7 +5544,7 @@ function Conversation() {
             {finding === null ? null : (
               <Suspense fallback={null}>
                 <FindInThread
-                  turns={desk.turns}
+                  turns={chat.turns}
                   term={finding}
                   at={foundAt}
                   onTerm={(next) => {
@@ -5759,7 +5568,7 @@ function Conversation() {
               /* Nobody reopens a sitting to read the top of it. A conversation
                  of ten thousand turns draws its last few hundred, and the rest
                  is one press away. */
-              const paged = lastTurns(desk.turns, drawing);
+              const paged = lastTurns(chat.turns, drawing);
               // A step that took a picture stays on its own line: a picture
               // folded into a collapsed run is a picture nobody sees. So does
               // the advisor — nobody asked for a second model, so the line is
@@ -6045,14 +5854,7 @@ function Conversation() {
                   : (files[desk.path]?.files ?? []).map((one) => ({ path: one.path, folder: false }))
               }
               workflows={workflows}
-              onAttachmentsChange={(next) => {
-                if (boxOwner === null) setLoose(next);
-                else {
-                  setDesks((current) =>
-                    changeThread(current, boxOwner, (one) => ({ ...one, attachments: next })),
-                  );
-                }
-              }}
+              onAttachmentsChange={fillBox}
             />
           </div>
         )}
@@ -6074,7 +5876,7 @@ function Conversation() {
             repos: desk.overview?.repos ?? [],
             repoVersions: desk.repoVersions,
             research,
-            references: desk.references,
+            references: chat.references,
             versions: desk.versions,
             kept: preferences.kept[desk.path] ?? [],
             putBack: desk.putBack,

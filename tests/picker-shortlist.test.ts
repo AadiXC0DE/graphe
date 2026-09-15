@@ -110,7 +110,7 @@ describe('the first screen is not guessed at', () => {
 
   it('draws neither first screen until it knows which', () => {
     const source = app();
-    expect(source).toContain('undecided ? null : desk === null || desk.turns.length === 0 ?');
+    expect(source).toContain('undecided ? null : desk === null || chat.turns.length === 0 ?');
     // And no composer under a screen that is not there yet.
     expect(source).toContain('picking || undecided ? null : (');
   });

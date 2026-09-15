@@ -30,7 +30,7 @@ import { longConversation } from '../src/cost/phrasing';
 import { sizeUp } from '../src/cost/sizing';
 import { CURRENCY_BEFORE_ANY_SPEND, quote, smallerFirst } from '../src/lib/estimating';
 import { describeCall } from '../src/lib/describe';
-import { changeCurrent, currentDesk, noDesks, openDesk, receive } from '../src/lib/projects';
+import { changeCurrent, currentDesk, inFront, noDesks, openDesk, receive } from '../src/lib/projects';
 import { behind, realWords, showMeCopy } from '../src/lib/showme';
 import { applyEvent, said, type Turn } from '../src/lib/thread';
 import { defaultPreferences, PreferenceFile } from '../src/projects/preferences';
@@ -495,7 +495,10 @@ describe('F7 — filing what each job actually cost', () => {
     const desks = openDesk(noDesks, { path, name: 'paper-street' });
     return changeCurrent(desks, (one) => ({
       ...one,
-      doing: { task: { kind: 'contact-form', size }, startedAt: 1000 },
+      conversations: {
+        ...one.conversations,
+        '': { ...inFront(one), doing: { task: { kind: 'contact-form', size }, startedAt: 1000 } },
+      },
     }));
   }
 
@@ -523,7 +526,7 @@ describe('F7 — filing what each job actually cost', () => {
     expect(desk?.jobs[0]?.kind).toBe('contact-form');
     expect(desk?.jobs[0]?.cost).toEqual(money(140, 'USD'));
     expect(desk?.jobs[0]?.durationMs).toBe(60_000);
-    expect(desk?.doing).toBeNull();
+    expect(inFront(desk).doing).toBeNull();
   });
 
   /** The ledger reports the whole sitting each time, so a second job charged the
@@ -533,7 +536,10 @@ describe('F7 — filing what each job actually cost', () => {
     let desks = receive(aDeskDoingSomething(), { project: path, event: settledAt(140) }, 2000);
     desks = changeCurrent(desks, (one) => ({
       ...one,
-      doing: { task: { kind: 'blog', size: 'feature' }, startedAt: 3000 },
+      conversations: {
+        ...one.conversations,
+        '': { ...inFront(one), doing: { task: { kind: 'blog', size: 'feature' }, startedAt: 3000 } },
+      },
     }));
     desks = receive(desks, { project: path, event: settledAt(365) }, 4000);
 
@@ -547,7 +553,7 @@ describe('F7 — filing what each job actually cost', () => {
 
     const free = receive(aDeskDoingSomething(), { project: path, event: settledAt(0) }, 2000);
     expect(currentDesk(free)?.jobs).toEqual([]);
-    expect(currentDesk(free)?.doing).toBeNull();
+    expect(inFront(currentDesk(free)).doing).toBeNull();
   });
 
   it('keeps one project’s measurements out of another’s', () => {

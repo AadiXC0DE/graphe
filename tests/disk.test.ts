@@ -86,6 +86,7 @@ describe('the rule under all of it', () => {
     kind: 'copy',
     at: 0,
     holdsWork: true,
+    inUse: null,
     ...over,
   });
 

@@ -39,7 +39,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { extname, join, normalize } from 'node:path';
+import { basename, dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
@@ -978,6 +978,86 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await stop();
     }
   });
+
+  it('keeps a copy a conversation is working in when the sweep is asked again', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // A reply that cannot have finished by itself: the run holds the copy's
+    // folder for its whole length, which is the lease this is about.
+    model.replies([{ says: Array.from({ length: 40 }, (_, at) => `piece ${String(at)} `) }]);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+      // A copy of its own, made the way the button makes one.
+      const made = await page.evaluate(async (where: { project: string }) => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.worktreeNew({}, where);
+      }, { project });
+      expect(made.ok).toBe(true);
+      expect(made.ok ? made.value.ownCopy : false).toBe(true);
+
+      const copy = copyFolders(profile)[0] ?? '';
+      expect(existsSync(join(copy, '.git'))).toBe(true);
+      // Past every window the app keeps, so only a live writer can save it.
+      agedPastEveryWindow(copy, 40);
+
+      // The conversation that came with the copy, named after the branch it is
+      // on until somebody says something in it — which is what the copy's own
+      // card shows a person.
+      expect(basename(copy)).toBe('conversation-1');
+
+      // And a second copy of the same project that nobody is in, in the same
+      // folder: what a sweep is actually for, and the other direction of the
+      // same decision.
+      const stray = copyOfAProject(join(dirname(copy), 'a stray one'), false);
+      agedPastEveryWindow(stray, 40);
+
+      // The sweep, asked again with that conversation open in the other copy.
+      // This is the same call the launch makes, with the same live writers
+      // behind it.
+      const asked = await page.evaluate(async () => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.storage();
+      });
+      expect(asked.ok).toBe(true);
+      // The copy a conversation is open in is left alone, and the sentence
+      // names who is in it, in the app's own words for that state.
+      expect(existsSync(copy), 'the copy a conversation is open in').toBe(true);
+      const because = asked.ok ? asked.value.because : '';
+      expect(because).toContain('Another conversation is writing in this folder');
+      expect(because).toContain('conversation-1');
+      // The stray one has nobody in it and nothing unlanded, so it is offered.
+      expect(asked.ok ? asked.value.couldClear : 0).toBe(1);
+
+      // And the press clears the stray one and leaves the live one, which is
+      // the whole of invariant 15: a workspace is not cleaned up while it has
+      // a live writer.
+      const cleared = await page.evaluate(async () => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.clearFinishedWork();
+      });
+      expect(cleared.ok ? cleared.value.removed : -1).toBe(1);
+      expect(existsSync(stray), 'a copy nobody is in').toBe(false);
+      expect(existsSync(copy), 'the copy a conversation is open in, after Clear').toBe(true);
+      expect(existsSync(join(copy, '.git'))).toBe(true);
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  }, 300_000);
 
   it('comes back from a renderer reload with the run still going, and says none of it twice', async () => {
     const profile = freshProfile();

@@ -1,8 +1,9 @@
 # Phase 4 handoff: conversations that are durable, resumable, and independent of tabs
 
-Findings: W06, S01, S02, S04, S09, S10, S13, S14 done; S11 and S12 open, 4.2
-missing three states, 4.2's second view not built. Numbers here were taken on this
-tree on 2026-09-15.
+Findings: W04 done (reopening a conversation whose folder has gone — see below),
+W06, S01, S02, S04, S09, S10, S13, S14 done; S11 and S12 open, 4.2 missing three
+states. W07's lifecycle half is dispositioned in the phase 3 handoff (closing is
+a view). Numbers here were taken on this tree on 2026-09-15.
 
 ## Done
 
@@ -191,7 +192,7 @@ all passing: `tests/draft-kept.test.ts` 15,
 | Item | Finding | What is missing |
 | --- | --- | --- |
 | Three of the eleven session states | 4.2 | `waiting-input`, `compacting` and `archived` are in `SESSION_STATES` and in the transition table, and nothing drives them: the adapter does not report a waiting turn or a compaction as a state, and archiving a conversation sets a flag on its record rather than a runtime state |
-| Second view attaches to one runtime | 4.2 | The registry supports many views per conversation and `WorkspaceLocks` enforces one writer, but no second pane exists in the UI, so T21 and T22 have nothing to test |
+| Second view attaches to one runtime | 4.2 | **The UI half is done; this row's runtime half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), and one runtime behind two views is structural: `Sessions` is keyed by conversation (`src/domain/conversations.ts:221`) and a pane holds an address rather than a session, so opening the same chat twice asks for the same one. What is missing is a view record in the registry — `electron/services/workspace-registry.ts` still has no `views` at all, so a view id lives only in window state and is not durable across a restart |
 | A draft in a chat nobody has sent in | 4.5 / S01 | The unnamed conversation still has no identity of its own, so two things leak: `draftKey` (`src/components/Composer.tsx:161`) writes a null address as `''` and `App.tsx` hands the box `conversation: desk.address` only when it is not null, so two never-sent chats in one project share one key; and the name such a chat is known by is a process-local `new-N` (`addressOf`, `electron/main.ts:1993`), so a draft kept under it can resurface in a later launch's new chat. That last one is the identity 4.1 says a conversation must not have |
 | Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` (`electron/main.ts:3643`) writes both the current address and the durable one, which covers the first-write case, but rebuild, fork and eviction transitions are not all covered |
 | Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |

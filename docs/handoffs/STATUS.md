@@ -59,15 +59,17 @@ it.
 
 Everything else: phase 1, phase 3 except the recovery UI, external-change
 detection and the rescue-root hashing, phase 4 except the rows above, phase 5
-except S05 and the normalised store, phase 6's E01/E03/E04/E05/E06/E07/E09/E10 and
+except the rest of 5.1 (the conversations are one record each and the
+conversation-action and inspector hooks landed; S05 is settled — resolved by
+removal, see `phase-5-ownership.md`), phase 6's E01/E03/E04/E05/E06/E07/E09/E10 and
 its fixtures, phase 7 except A03, 7.5's designer-specific instructions and A02's
 remainder, phase 8's retirements in full plus its tabs, phase 9's P02 to P06, the
 9.5 coverage, the packaged smoke and the CI artifact, phase 10's catalogue,
 real-window suite and rollback refusal. W09's rescue roots are hashed from the
 stable project id with the legacy roots still read, the add-on install runs as the
 app's own cancellable child, 9.6's clean-machine check passes on arm64 and
-x64-under-Rosetta, and the accessibility tree is checked by the matrix. Phase 5.1's normalised store and its two
-domain hooks landed, 8.3's second pane exists with the split press where the tabs
+x64-under-Rosetta, and the accessibility tree is checked by the matrix. Phase 5.1's
+conversation store and its two hooks landed, 8.3's second pane exists with the split press where the tabs
 are, the recovery surface opens a chat whose folder is gone read-only and offers
 relink, and U03's names are one set. The main-chunk gate is met **392.4 KB** against
 450 KB (CI blocking again) and the six 9.5 findings are fixed at the cause. See

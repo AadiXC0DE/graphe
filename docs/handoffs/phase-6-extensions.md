@@ -68,12 +68,14 @@ app answers that now: `electron-builder.js` unpacks `node_modules/node-pty/**`
 out of the archive and runs `scripts/adhoc-sign.mjs` as its `afterPack` hook,
 which sets 0o755 on every `prebuilds/<arch>/spawn-helper` before the bundle is
 signed, and `scripts/verify-package.mjs` faults when the helper in a built app is
-missing or not executable. What is missing is the run: `npm run verify:package`
-against `release/mac-arm64/Graphe.app` (Pi 0.85.1, the version installed here)
-passes with "node-pty is in the bundle with an executable helper", but nothing in
-the suite opens a terminal inside a packaged app, and the x64 bundle in
-`release/mac` predates node-pty (Pi 0.84.3), so it ships without it and reports
-the terminal unavailable. That is the one step left in E02.
+missing or not executable. `npm run verify:package` passes on **both** bundles:
+x64 (`release/mac`) and arm64 (`release/mac-arm64`) each report
+`@earendil-works/pi-coding-agent 0.85.1`, Pi's 83-package tree, node-pty 1.1.0
+with an executable `spawn-helper` (verified by hand as well:
+`prebuilds/darwin-x64/spawn-helper` and `prebuilds/darwin-arm64/spawn-helper` are
+both 0755) and a verifying ad-hoc signature. That is the one step left in E02:
+nothing in the suite opens a terminal inside a packaged app, and
+`npm run test:packaged` says so itself.
 
 ## E04, a factory that never yields is killed in a process of its own
 

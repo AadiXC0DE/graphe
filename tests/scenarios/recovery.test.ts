@@ -279,12 +279,14 @@ describe('T58: what the storage screen may clear', () => {
       // save it.
       at: NOW - (KEEP_DAYS.checkout + 1) * DAY,
       holdsWork: await holdsWork(runner(), checkout.value.folder),
+      inUse: null,
     };
     const finished: Sweepable = {
       path: join(repo.root, '.graphe', 'worktrees', 'finished-long-ago'),
       kind: 'checkout',
       at: NOW - (KEEP_DAYS.checkout + 1) * DAY,
       holdsWork: false,
+      inUse: null,
     };
     await mkdir(finished.path, { recursive: true });
 
@@ -304,7 +306,7 @@ describe('T58: what the storage screen may clear', () => {
     await mkdir(stale, { recursive: true });
     await writeFile(join(stale, 'output.txt'), 'x'.repeat(2_048));
     const picked: Sweepable[] = [
-      { path: stale, kind: 'copy', at: NOW - (KEEP_DAYS.copy + 1) * DAY, holdsWork: false },
+      { path: stale, kind: 'copy', at: NOW - (KEEP_DAYS.copy + 1) * DAY, holdsWork: false, inUse: null },
     ];
 
     const removed = await sweep(picked);
@@ -337,6 +339,7 @@ describe('T58: what the storage screen may clear', () => {
         kind: 'checkout',
         at: NOW - (KEEP_DAYS.checkout + 1) * DAY,
         holdsWork: holds,
+        inUse: null,
       },
     ]);
     expect(existsSync(checkout.value.folder)).toBe(false);

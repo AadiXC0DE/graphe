@@ -1,7 +1,8 @@
 # Phase 7 handoff: one orchestration model, and tools that tell the truth
 
 Findings: A01 done, A02 done, E06/E07/E08 done, E12 done (see phase 6), A03
-done except the second pane, S05 open.
+done except the second pane. S05 is settled in the phase 5 handoff (resolved by
+removal: the `Held` singleton slots are gone with phase 8's retirement).
 
 ## Done
 
@@ -128,11 +129,11 @@ after Stop not being picked up), `tests/continuation.test.ts` (71).
 | Finding | Status |
 | --- | --- |
 | ~~A02, prompt truncation~~ | **DONE after the first draft.** `src/agent/pi/prompt.ts` assembles named sections in fixed precedence (runtime, repository, skills, extensions, plan, optional memory) with caps that carry a pointer to the file rather than a silent cut; optional memory is what gives way, and the drop is stated in the prompt; a required instruction survives any budget (tested); the estimate is labelled an estimate. Project instruction files now come from Pi's own context paths, so Graphe's duplicate `<agents_md>` block is gone (`src/lib/agentsMd.ts` deleted). Advisor settings are held by one conversation at a time instead of being rewritten on every turn. 11 new tests in `tests/advisor-scope.test.ts` |
-| A03, competing continuations | Done except the second pane. The last competing loop was the canvas flow's settle-driven continuation, and it went with phase 8's row 5; `electron/continuation-owner.ts` is the one send path per conversation, with `tests/continuation-owner.test.ts` holding one send per settle and the ordering when a person's message, an add-on's ask and a child's completion arrive together. What remains is the second pane (8.3), which is what would make T21/T22 reachable |
+| A03, competing continuations | **Done**, second pane included. The last competing loop was the canvas flow's settle-driven continuation, and it went with phase 8's row 5; `electron/continuation-owner.ts` is the one send path per conversation, with `tests/continuation-owner.test.ts` holding one send per settle and the ordering when a person's message, an add-on's ask and a child's completion arrive together. The second pane (8.3) is built: `src/domain/views.ts` holds a view id per pane and the focused pane is what the composer, the keyboard and the inspector address, with the split press at the end of the tab strip (`src/components/Tabs.tsx`, `src/components/Panes.tsx`) and one runtime behind both views (`Sessions` is keyed by conversation, `src/domain/conversations.ts:221`). `tests/panes.test.ts` (23), `tests/panes-render.test.ts` and `tests/tab-strip-split.test.ts` (4) hold it. What is *not* held is T21/T22 through a real window: the pane model and its wiring are asserted, not two live panes with one bill |
 | ~~E06, lifecycle hooks~~ | **DONE after the first draft.** Whole or not at all, with `tools-only` only where the add-on declares it — see above |
 | ~~E07, admission point~~ | **DONE after the first draft.** One typed request against the facts the asking seam can see, and the limit on turns an add-on starts reported rather than covered — see above |
 | ~~E12, advisor scope~~ | **Done, serialized and labelled.** See the phase 6 handoff: Pi 0.85.1 has no per-session seam for an extension's settings, so the plan's fallback applies — the integration is serialized by `AdvisorFile` (`src/agent/advisor.ts`, driven by `tests/advisor-scope.test.ts`, 15), a second chat asking for a different advisor never reaches the file, and the limitation is drawn on the advisor add-on's row |
-| S05, held-work slots | Open |
+| ~~S05, held-work slots~~ | **Settled in the phase 5 handoff: resolved by removal.** `HeldWork`, `HeldPictures` and `held.waiting/checking/pictures` went with phase 8's retirement (commit `89375fa`); `Held` carries no project singleton today, so there is nothing here to scope. What remains is the unattributed-review-row migration rule, held by `tests/legacy-held-work.test.ts` |
 | 7.5 removing designer-specific prompt instructions | Not a defect on this tree. The prompt assembly (`src/agent/pi/prompt.ts`, `standing.ts`) names no designer workflow and hides no Git term; `CLAUDE.md` (untracked) was read and states the new product contract without naming a removed control, so it was deliberately left alone rather than rewritten for churn |
 
 Exit criteria: the tool-truthfulness criterion passes (no fake LSP capability is
@@ -146,5 +147,7 @@ own. A required instruction surviving any budget and the optional notes giving w
 first are held by `tests/prompt-budget.test.ts`; long repository instructions keeping
 their semantics with a pointer rather than a silent cut are held by
 `tests/standing-block.test.ts`. What is not held: a test for the no-false-checklist
-rule beyond `tests/continuation.test.ts`'s decision cases, and the second pane
-(8.3) that would make two-view behaviour reachable.
+rule beyond `tests/continuation.test.ts`'s decision cases, and T21/T22 through a
+real window — the second pane is built and its model and wiring are tested
+(`tests/panes.test.ts`), but no Electron-level run shows two live panes sharing
+one runtime and one bill.

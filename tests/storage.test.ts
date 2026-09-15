@@ -28,8 +28,15 @@ import { searchPath } from '../src/share/run';
 const NOW = Date.UTC(2026, 8, 1);
 const DAY = 24 * 60 * 60 * 1000;
 
-function old(kind: Sweepable['kind'], days: number, holdsWork = false): Sweepable {
-  return { path: `/tmp/graphe-test/${kind}-${String(days)}`, kind, at: NOW - days * DAY, holdsWork };
+/** Somewhere on the disk that could go, nobody in it unless said. */
+function old(kind: Sweepable['kind'], days: number, holdsWork = false, inUse: string | null = null): Sweepable {
+  return {
+    path: `/tmp/graphe-test/${kind}-${String(days)}`,
+    kind,
+    at: NOW - days * DAY,
+    holdsWork,
+    inUse,
+  };
 }
 
 const scratch: string[] = [];
@@ -152,7 +159,7 @@ describe('measuring and clearing', () => {
 
   it('removes what it was given and reports what came back', async () => {
     const root = await folderWith([{ path: 'copies/piece/big.bin', bytes: 4_096 }]);
-    const going: Sweepable = { path: join(root, 'copies', 'piece'), kind: 'copy', at: 0, holdsWork: false };
+    const going: Sweepable = { path: join(root, 'copies', 'piece'), kind: 'copy', at: 0, holdsWork: false, inUse: null };
     const { removed, freed } = await sweep([going]);
     expect(removed).toBe(1);
     expect(freed).toBe(4_096);
@@ -161,7 +168,7 @@ describe('measuring and clearing', () => {
 
   it('refuses anything holding work even when it is handed one', async () => {
     const root = await folderWith([{ path: 'copies/piece/big.bin', bytes: 10 }]);
-    const held: Sweepable = { path: join(root, 'copies', 'piece'), kind: 'copy', at: 0, holdsWork: true };
+    const held: Sweepable = { path: join(root, 'copies', 'piece'), kind: 'copy', at: 0, holdsWork: true, inUse: null };
     expect(await sweep([held])).toEqual({ removed: 0, freed: 0 });
     expect((await measureFolders(root)).find((one) => one.name === 'Board copies')?.files).toBe(1);
   });

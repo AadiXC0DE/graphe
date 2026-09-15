@@ -45,8 +45,8 @@ async function scratch(): Promise<string> {
 const NOW = 1_800_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;
 
-function aged(kind: Sweepable['kind'], days: number, holdsWork = false): Sweepable {
-  return { path: `/data/${kind}`, kind, at: NOW - days * DAY, holdsWork };
+function aged(kind: Sweepable['kind'], days: number, holdsWork = false, inUse: string | null = null): Sweepable {
+  return { path: `/data/${kind}`, kind, at: NOW - days * DAY, holdsWork, inUse };
 }
 
 /* ========================================================================== */
@@ -103,9 +103,9 @@ describe('clearing what was picked', () => {
     await writeFile(join(also, 'main.log'), 'y'.repeat(50));
 
     const picked: Sweepable[] = [
-      { path: gone, kind: 'copy', at: 0, holdsWork: false },
-      { path: also, kind: 'copy', at: 0, holdsWork: false },
-      { path: join(userData, 'never-there'), kind: 'copy', at: 0, holdsWork: false },
+      { path: gone, kind: 'copy', at: 0, holdsWork: false, inUse: null },
+      { path: also, kind: 'copy', at: 0, holdsWork: false, inUse: null },
+      { path: join(userData, 'never-there'), kind: 'copy', at: 0, holdsWork: false, inUse: null },
     ];
     const result = await sweep(picked);
 

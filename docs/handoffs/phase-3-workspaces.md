@@ -1,7 +1,8 @@
 # Phase 3 handoff: explicit workspaces, and navigation that moves nothing
 
-Findings: W01, W02, W03, W05, W07, W08, W09, W10, A04. W04 is in the phase 4
-handoff (reopening a missing checkout).
+Findings: W01, W02, W03, W05, W07, W08, W09, W10, A04. W04 is dispositioned in
+the phase 4 handoff, which owns the open path for a conversation whose recorded
+folder has gone.
 Deliverable: any number of conversations can use a known workspace; isolation is
 requested; opening, closing and selecting never move files.
 
@@ -147,12 +148,12 @@ replaced, and never a move, rename or delete of a legacy folder.
   in-use snapshots. 18 tests in `tests/pr-checkout.test.ts`.
 - Caller updated: the recorded branch is the helper's (`graphe/pr-<n>-<sha12>`)
   rather than the old `graphe/pr-<n>`.
-- **Closing a conversation puts nothing away.** `CHANNEL.closeConversation`
-  (`electron/main.ts:8907`) is a view operation: a run in flight is left exactly
+- **W07, closing a conversation puts nothing away.** `CHANNEL.closeConversation`
+  (`electron/main.ts:9236`) is a view operation: a run in flight is left exactly
   where it is (the guard comes first, `inFlight(states.stateOf(named(found.path)))`),
   and a quiet conversation is only put down, with the copy, its branch and
   everything uncommitted left on disk. Throwing a conversation away is its own
-  press and also keeps them: `CHANNEL.deleteConversation` (`:8932`) stops the
+  press and also keeps them: `CHANNEL.deleteConversation` (`:9261`) stops the
   live session, forgets the view of the row and moves the transcript to the
   trash, with a comment on the spot saying why a forced removal is not used —
   it would take the uncommitted work with it. `tests/close-keeps-worktree.test.ts`
@@ -160,9 +161,12 @@ replaced, and never a move, rename or delete of a legacy folder.
   survives being given back, a forced removal destroys it (which is why deleting
   must not use one), closing is not a teardown, deleting leaves the copy, branch
   and work alone, and the shell never force-removes a worktree.
+  `tests/close-is-a-view.test.ts` (12) holds the handler's own shape and the
+  shared `inFlight` predicate; the phase 4 handoff carries that half.
 - Putting a copy away remains an explicit press, and it checks first: `worktreeLand`
-  and the give-back handler both run `putAwayCheckoutAt` (`:4001`) and then refuse
-  with `HOLDS_WRITING` while the folder is still there (`:9752`, `:9809`).
+  (`:9879`) and both give-back handlers (`checkoutFront` `:10067`, `worktreeDrop`
+  `:10016`) run `putAwayCheckoutAt` (`:4188`) and then refuse with `HOLDS_WRITING`
+  while the folder is still there (`:10088`, `:10145`).
 
 ## 3.7 Checkpoints, secrets and setup
 

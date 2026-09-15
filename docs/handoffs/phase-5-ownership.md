@@ -2,7 +2,8 @@
 
 Findings: S02, S03, S04, S06, S07 and S08's conversation rule done; W10 done;
 U04 done; the 5.4 inventory written and its "zero unqualified callers" criterion
-met. S05 open; the normalised store partly.
+met. S05 settled here — resolved by removal, below. The normalised store is the
+conversation half only; see the row below.
 
 ## What changed
 
@@ -84,13 +85,38 @@ still unaddressed is the research settle in `src/App.tsx`, which is in the phase
 
 | Item | Finding | Note |
 | --- | --- | --- |
-| Desk/Parked normalisation | The renderer still holds the `Desk`/`Parked` shape rather than the maps of projects, workspaces, conversations, runs and views the plan sketches. `showThread` is the one navigation reducer (`src/lib/projects.ts`), `App.swapConversation` ends in a single `showOpened(opened)` that applies a shell answer in one place, and the two bespoke field lists are gone - a field can no longer be added to one path only - but the hooks extraction (conversation actions, workspace selectors, inspector queries, process/preview ownership) was not built |
-| Held singleton slots (S05) | Resolved by removal: `held.waiting/checking/pictures` and the held-back row went with phase 8's retirement, so there is no project singleton left to key by a run. What remains is the migration rule, which is done: a stored review row that names no conversation is kept and marked unattributed rather than dropped (`electron/services/review-record.ts`), and the Review screen draws no decision for it (`src/components/ReviewQueue.tsx`), so nothing offers to take files there is no copy of. `tests/legacy-held-work.test.ts` holds both paths |
+| Desk/Parked normalisation | **Half done, and more than this row used to say.** The conversations are normalised: `Parked` is gone, a conversation is one complete record in a map (`Conversations`, `src/state/conversations.ts:49-105` — turns, doing, filing, counted, busy, attachments, references, draft, plans), and bringing one forward moves a pointer rather than copying a field list (`showThread`, `src/lib/projects.ts:379`). Two of the four hooks the plan names landed in the same commit (`07d9779`): conversation actions (`src/hooks/useConversationActions.ts`) and inspector queries (`src/hooks/useInspector.ts`). What is not done: workspaces, runs and views are not maps in the renderer (`Desk` is still `{path, conversations, address, order, spent, overview, versions, repoVersions, putBack, jobs, …}`), there is no workspace-selector hook, and the extension UI and settings state are still inline in `src/App.tsx` |
 | The pane's address across a project switch | The page is one native view for the whole window. A switch closes the page that belonged to the previous project rather than showing it, and the pane's own address is window state, so it is not cleared when the project changes: the new project's page is pointed at the same address. Nothing here draws another project's page, but the address itself is not owned by the conversation |
+
+### S05, settled: resolved by removal
+
+The plan's finding is that held change, checking and pictures were project
+singleton slots (`electron/main.ts:Held`). They are gone, not scoped: the
+retirement commit that took the held-back workflow out (`89375fa`, "Phase 8's
+retirements") deleted `HeldWork`, `HeldPictures` and the `waiting`/`checking`/
+`pictures` fields from `Held`, along with `src/projects/heldback.ts`,
+`src/lib/heldwrites.ts` and `src/share/review.ts`. `Held` today
+(`electron/main.ts:1773-1831`) carries no such slot, so there is no project
+singleton left to key by a run — which is why this is a removal and not a
+task. (The `waiting` that remains in `electron/main.ts` is the folder-lease
+line, `WaitingSend[]`, owned per conversation; `WorkspaceLocks.waiting` is the
+per-folder FIFO queue. Neither is the S05 slot.)
+
+What the removal left behind is the migration rule, and it is done: a stored
+review row that names no conversation is kept and marked unattributed rather
+than dropped (`electron/services/review-record.ts:72`), and the Review screen
+draws no decision for it (`src/components/ReviewQueue.tsx:252`, `:367`), so
+nothing offers to take files there is no copy of.
+`tests/legacy-held-work.test.ts` (6 tests) holds both paths — the row survives
+the round trip to disk marked unattributed, and it offers nothing that would
+carry its files over.
 
 Exit criteria: met for the parts this phase names as blocking - the audit
 inventory includes every channel, zero unqualified mutation callers remain, a
 delayed answer cannot populate another chat's panel, the waiting band claims only
 its own conversation's work, and an event for an unknown owner never reaches the
-tab in front. Not met: the normalised store and hooks above, and S05's
-one-per-project slots.
+tab in front. Partly met on 5.1: the conversations are one complete record each
+and the conversation-action and inspector hooks exist, but the renderer still has
+no workspace map and no workspace-selector hook, and extension and settings state
+are inline in `App.tsx`. S05 needs no criterion here: it was removed rather than
+scoped, so there is no one-per-project slot left to assert against.

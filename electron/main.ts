@@ -274,6 +274,7 @@ import {
 import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
 import { WorkspaceLocks } from './services/workspace-locks';
+import { writingIn, type Live, type LiveWriter } from './services/workspace-live';
 import { moveToTrash, TRASH_RULE, emptyTrash, listTrash, restoreFromTrash } from './services/trash';
 import { copyOf, keep, type Incoming } from './services/attachment-store';
 import { Terminals } from './services/terminal';
@@ -4112,9 +4113,51 @@ function openedFrom(open: { path: string; name: string; held: Held }, started: S
 
 /* ------------------------------------------------ checkouts left behind -- */
 
+/**
+ * Who is working in a folder right now, as the sweep asks it.
+ *
+ * Two facts, and they cover different moments. A conversation open in a
+ * checkout of its own is somebody about to write there, and that is the folder
+ * the copy is spread out in — the front conversation works in the project
+ * folder itself, which is never under the sweep's root. A lease is a run
+ * writing this minute, which is the one that matters when somebody presses
+ * Clear mid-turn: a run takes its folder for its whole length, every tool and
+ * the pause for an answer included.
+ *
+ * A run the app died in the middle of is not one of these, and deliberately so:
+ * by the time a launch sweeps, that run is over — its note was read and
+ * answered on the way up — so nothing is in flight and no folder is anybody's.
+ * A turn nobody is waiting for is not restarted, and its folder is an ordinary
+ * stray on the same clock as every other.
+ *
+ * The name is what a person recognises, in the order they would recognise it:
+ * what the conversation is called, then the branch it is on without our prefix.
+ * The shelf falls back to the conversation's own id, which is opaque, so that is
+ * never used — a folder left behind under an id is one nobody can account for.
+ *
+ * Read at each question rather than once, because the window opens the last
+ * project while this launch is still sweeping: a list taken before that would
+ * call a folder somebody has just started working in an abandoned one.
+ */
+async function liveWriters(): Promise<Live> {
+  const open: LiveWriter[] = [];
+  for (const one of workspaces.open) {
+    for (const [address, checkout] of one.held.checkouts) {
+      const named = one.held.sessions.find(address)?.name ?? '';
+      const said = named === address ? '' : named.trim();
+      open.push({
+        folder: checkout.folder,
+        who: said === '' ? checkout.branch.replace(/^graphe\//, '') : said,
+      });
+    }
+  }
+  return writingIn({ leases: workspaceLocks, open });
+}
+
 /** Every checkout left spread out on disk when the app last went away. What a
  *  conversation owns is its branch, and the index keeps that, so one somebody
- *  returns to is spread out again. A folder holding work is left alone. */
+ *  returns to is spread out again. A folder holding work, and one somebody is
+ *  writing in this minute, are both left alone. */
 async function sweepStrayCheckouts(): Promise<number> {
   const projects = await rememberedProjects().catch(() => []);
   let given = 0;
@@ -4136,7 +4179,12 @@ async function sweepStrayCheckouts(): Promise<number> {
     const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
     if (folders.length === 0) continue;
     const projectId = await projectIdFor(project.path);
+    const live = await liveWriters();
     const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
+      // Never a folder somebody is writing in, whatever its age: a run holds
+      // its folder from the first tool to the last, and what it has written is
+      // in no save and no version.
+      inUse: (folder) => live.who(folder) !== null,
       rescue: (folder, files) => keepAside(project.path, projectId, basename(folder))(folder, files),
       /* A copy whose branch already landed and that nothing has touched in a
          fortnight is what a gigabyte of `node_modules` is sitting in. Never
@@ -6356,6 +6404,7 @@ function watchForANewerOne(): void {
  */
 async function whatIsLyingAround(): Promise<readonly Sweepable[]> {
   const userData = app.getPath('userData');
+  const live = await liveWriters();
   const all: Sweepable[] = [];
   const walk = async (folder: string, kind: Sweepable['kind']): Promise<void> => {
     const names = await readdir(folder, { withFileTypes: true }).catch(() => []);
@@ -6363,7 +6412,15 @@ async function whatIsLyingAround(): Promise<readonly Sweepable[]> {
       const path = join(folder, one.name);
       const when = await stat(path).catch(() => null);
       if (when === null) continue;
-      all.push({ path, kind, at: when.mtimeMs, holdsWork: await holdsWorkIn(path, kind) });
+      all.push({
+        path,
+        kind,
+        at: when.mtimeMs,
+        holdsWork: await holdsWorkIn(path, kind),
+        // A folder with a run writing in it is not finished with, whatever its
+        // age: what it is making is in no save and no version.
+        inUse: live.who(path),
+      });
     }
   };
   // Worktrees are two deep — one folder per project, one per conversation.

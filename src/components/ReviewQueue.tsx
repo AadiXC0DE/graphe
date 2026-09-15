@@ -244,7 +244,14 @@ export default function ReviewQueue({
 
           {/* One decision, then one press named by it. Seven verbs in a row,
               two of them meaning nearly the same thing, is a row nobody reads
-              twice. */}
+              twice.
+
+              Except for a row with no conversation behind it: there is no copy
+              to carry its files over from, so it is said plainly and nothing
+              here offers to take them. */}
+          {entry.unattributed === true ? (
+            <p className="reviewq__older">{reviewWords.olderWhy}</p>
+          ) : (
           <div className="reviewq__does">
             <div className="reviewq__verdicts" role="radiogroup" aria-label={SAYS.decide}>
               {([
@@ -316,6 +323,7 @@ export default function ReviewQueue({
               </button>
             ) : null}
           </div>
+          )}
 
           {chose === 'drop it' ? <p className="reviewq__note">{reviewWords.dropWhy}</p> : null}
 
@@ -353,6 +361,14 @@ export default function ReviewQueue({
             </div>
           ) : null}
 
+          {/* The file-by-file ticks are the same accept, one file at a time, so
+              a row with no copy behind it has none of them either — its files
+              are named, and nothing can be taken. */}
+          {entry.unattributed === true ? (
+            <p className="reviewq__prefix">
+              {SAYS.files} · {reviewWords.files(entry.files.length)}
+            </p>
+          ) : (
           <div className="reviewq__files">
             <p className="reviewq__prefix">
               {SAYS.files} · {reviewWords.files(entry.files.length)}
@@ -388,6 +404,7 @@ export default function ReviewQueue({
               })}
             </ul>
           </div>
+          )}
 
           <div className="reviewq__diff">
             {diff === null ? (

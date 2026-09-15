@@ -181,11 +181,10 @@ describe('what a project config shows', () => {
     expect(whereOf(read.reach.start)).not.toContain('sk-live');
   });
 
-  /* A file that names one server twice lists it twice and keeps only the first,
-     so the second entry is a line nobody can ever call and the model is told
-     there are two. Recorded rather than fixed here: the reader and the writing
-     form disagree, and making them agree is a change to src/agent/pi/mcp.ts. */
-  it.fails('does not offer the same server twice under one name', async () => {
+  /* A file that names one server twice keeps the first and says so in the
+     skipped list, so the model is told about one server and the reader and the
+     writing form agree on what a name means. */
+  it('does not offer the same server twice under one name', async () => {
     const root = await project();
     const { file } = await markingServer();
     await put(root, [

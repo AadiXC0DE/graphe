@@ -128,11 +128,10 @@ describe('a read that comes back empty', () => {
   });
 
   /* Reading is whole-file: what could not be unsealed is simply not in memory,
-     and the next write serialises memory. So one account this login cannot open
-     is erased from disk by the next unrelated `keep` — the read failed and the
-     account went with it. Recorded rather than fixed: a change here is a change
-     to src/projects/secrets.ts, outside this ticket. */
-  it.fails('does not erase an account this login cannot unseal', async () => {
+     and the next write serialises memory. So an account this login cannot open
+     is kept as it was found and put back by the write, rather than erased from
+     disk by the next unrelated `keep`. */
+  it('does not erase an account this login cannot unseal', async () => {
     const folder = await scratch();
     const file = join(folder, 'signins.json');
     const first = await SecretFile.open(file, keychain('one'));

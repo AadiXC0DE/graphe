@@ -18,6 +18,8 @@
     "test:migration": "vitest run tests/scenarios/migration.test.ts",
     "test:extensions": "vitest run tests/extension-trust.test.ts tests/extension-ui.test.ts tests/extension-request.test.ts tests/extension-probe.test.ts tests/extension-probe-child.test.ts tests/tool-conflicts.test.ts tests/package-activation.test.ts tests/packages.test.ts",
     "test:perf": "node scripts/perf-report.mjs --check",
+    "test:measure": "node scripts/measure-runtime.mjs",
+    "test:visual": "node scripts/visual-matrix.mjs",
     "test:watch": "vitest",
     "shot": "node scripts/screenshot.mjs",
     "dev:daemon": "node scripts/dev-daemon.mjs",

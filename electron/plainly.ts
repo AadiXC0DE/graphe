@@ -19,8 +19,13 @@
  * reads like something a person wrote; otherwise it is replaced, and the raw
  * text goes to `details`, which lives behind "Show technical details" and is the
  * one place jargon is allowed.
+ *
+ * `details` holds a provider's own words, and a provider that refuses a key has
+ * a habit of quoting the key back: the same masking the log gets is applied
+ * here, so the card never carries a credential into the window.
  */
 
+import { mask } from './log';
 import type { Trouble } from '../src/lib/ipc';
 
 type Known = {
@@ -120,7 +125,7 @@ export function readsLikeAPerson(text: string): boolean {
 export function plainMessage(raw: string): string {
   const known = KNOWN.find((entry) => entry.when.test(raw));
   if (known !== undefined) return known.because;
-  return readsLikeAPerson(raw) ? raw.trim() : NOTHING_TO_SAY;
+  return readsLikeAPerson(raw) ? mask(raw).trim() : NOTHING_TO_SAY;
 }
 
 /**
@@ -142,7 +147,7 @@ export function knownTrouble(raw: string, details?: string): Trouble | null {
     actionLabel: 'Got it',
     ...(known.marker === undefined ? {} : { marker: known.marker }),
   };
-  return details === undefined || details.trim() === '' ? trouble : { ...trouble, details };
+  return details === undefined || details.trim() === '' ? trouble : { ...trouble, details: mask(details) };
 }
 
 /** The whole card, raw text tucked out of sight. */
@@ -150,10 +155,10 @@ export function plainTrouble(raw: string, details?: string): Trouble {
   const known = KNOWN.find((entry) => entry.when.test(raw));
   const trouble: Trouble = {
     what: known?.what ?? GENERIC_WHAT,
-    because: known?.because ?? (readsLikeAPerson(raw) ? raw.trim() : NOTHING_TO_SAY),
+    because: known?.because ?? (readsLikeAPerson(raw) ? mask(raw).trim() : NOTHING_TO_SAY),
     actionLabel: 'Got it',
     ...(known?.marker === undefined ? {} : { marker: known.marker }),
   };
-  const beneath = details ?? raw;
+  const beneath = mask(details ?? raw);
   return beneath.trim() === '' ? trouble : { ...trouble, details: beneath };
 }

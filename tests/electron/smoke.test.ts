@@ -23,6 +23,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   createReadStream,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -30,6 +31,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
@@ -225,6 +227,60 @@ const stopping: (() => Promise<void>)[] = [];
 afterAll(async () => {
   for (const stop of stopping.splice(0)) await stop().catch(() => undefined);
 });
+
+/** The project's folder in front, by pressing its row: the press is the open. */
+async function openTheFolder(window: Page): Promise<void> {
+  await window.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+  await window.locator('.pickerrow__open').first().click();
+  await window.locator('.welcome__title').first().waitFor({ timeout: 60_000 });
+}
+
+function runGit(cwd: string, args: readonly string[]): void {
+  execFileSync('git', [...args], { cwd, stdio: 'pipe' });
+}
+
+/** A folder of its own with one commit in it, and something uncommitted when
+ *  asked, so a sweep has a decision to make about it. */
+function copyOfAProject(folder: string, uncommitted: boolean): string {
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'README.md'), '# a copy\n');
+  runGit(folder, ['-c', 'init.defaultBranch=main', 'init', '-q']);
+  runGit(folder, ['add', '-A']);
+  runGit(folder, ['-c', 'user.email=smoke@example.invalid', '-c', 'user.name=smoke', 'commit', '-qm', 'first']);
+  if (uncommitted) writeFileSync(join(folder, 'README.md'), '# a copy\nwork nobody has landed\n');
+  return folder;
+}
+
+/** Last written long enough ago that every window the app keeps has passed.
+ *  Set after the folder is filled, because writing into it is what moves it. */
+function agedPastEveryWindow(folder: string, days = 40): void {
+  const when = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  utimesSync(folder, when, when);
+}
+
+/** The sweep at launch, waited for. It says so in the log only when something
+ *  went, and that line is what makes the assertions after it ordered rather
+ *  than a race with a sweep that is still deciding. */
+async function launchSweepRan(profile: string): Promise<void> {
+  const log = join(profile, 'logs', 'graphe.log');
+  await vi.waitFor(() => expect(readFileSync(log, 'utf8')).toContain('swept'), {
+    timeout: 30_000,
+    interval: 100,
+  });
+}
+
+/** The folders the app keeps a conversation's own copy in, under the profile. */
+function copyFolders(profile: string): readonly string[] {
+  const root = join(profile, 'worktrees');
+  const out: string[] = [];
+  for (const project of readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    for (const one of readdirSync(join(root, project.name), { withFileTypes: true })) {
+      if (one.isDirectory()) out.push(join(root, project.name, one.name));
+    }
+  }
+  return out;
+}
 
 suite('the app in a real window, on a profile nothing else uses', () => {
   it('boots, draws the first screen, and writes what it knows into the profile', async () => {
@@ -488,6 +544,428 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await stop();
     }
   });
+
+  it('sweeps what is finished with at launch, and leaves work that is not', async () => {
+    const profile = freshProfile();
+    // The shape the app keeps: one folder per project, one per conversation.
+    const dirty = copyOfAProject(join(profile, 'worktrees', 'a project', 'a conversation'), true);
+    const clean = copyOfAProject(join(profile, 'worktrees', 'a project', 'a finished one'), false);
+    const aside = join(profile, 'kept-aside', 'something-set-aside');
+    mkdirSync(aside, { recursive: true });
+    writeFileSync(join(aside, 'notes.md'), 'work nobody has brought in yet\n');
+    for (const folder of [dirty, clean, aside]) agedPastEveryWindow(folder);
+
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url);
+    const stop = dispose(app, profile);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await launchSweepRan(profile);
+
+      // The one thing the sweep is for, and the two it must never touch.
+      expect(existsSync(clean), 'a clean old checkout is what a sweep is for').toBe(false);
+      expect(existsSync(dirty), 'a checkout holding uncommitted work').toBe(true);
+      expect(readFileSync(join(dirty, 'README.md'), 'utf8')).toContain('work nobody has landed');
+      expect(existsSync(aside), 'work set aside by hand, whatever its age').toBe(true);
+
+      // Quitting runs the write-down and everything after it. The last line of
+      // the log is the proof it reached the end rather than throwing part way
+      // and leaving helpers running with nobody left to stop them.
+      await app.close();
+      const after = readFileSync(join(profile, 'logs', 'graphe.log'), 'utf8');
+      expect(after).toContain('quit');
+      expect(errorsIn(after)).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await stop();
+    }
+  });
+
+  it('refuses a transcript that is not under its own sessions folder', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url);
+    const stop = dispose(app, profile, project);
+
+    try {
+      await openTheFolder(page);
+
+      const sessions = join(profile, 'sessions');
+      mkdirSync(sessions, { recursive: true });
+      // A sibling of the sessions folder, and the same file reached by walking
+      // out of it. Both are somebody else's file, and a delete that took either
+      // would be the app throwing away more than it wrote.
+      const sibling = join(profile, 'not-a-conversation.jsonl');
+      const climbed = join(profile, 'climbed-out.jsonl');
+      const mine = join(sessions, 'mine.jsonl');
+      writeFileSync(sibling, 'not ours\n');
+      writeFileSync(climbed, 'not ours either\n');
+      writeFileSync(mine, 'a conversation of ours\n');
+
+      const answer = await page.evaluate(
+        async (where: { project: string; paths: Readonly<Record<string, string>> }) => {
+          const api = window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          const { paths } = where;
+          const out = {
+            outside: await api.deleteConversation(paths['sibling'] ?? '', where),
+            climbing: await api.deleteConversation(paths['climbed'] ?? '', where),
+            inside: await api.deleteConversation(paths['mine'] ?? '', where),
+          };
+          return out;
+        },
+        {
+          project,
+          paths: { sibling, climbed: join(sessions, '..', 'climbed-out.jsonl'), mine },
+        },
+      );
+
+      expect(answer.outside.ok).toBe(false);
+      expect(answer.outside.ok ? '' : answer.outside.trouble.what).toBe(
+        'That is not one of your conversations.',
+      );
+      expect(answer.climbing.ok).toBe(false);
+      expect(existsSync(sibling)).toBe(true);
+      expect(existsSync(climbed)).toBe(true);
+
+      // A file that really is under the sessions folder goes — the refusal is
+      // aimed at where a path points, not at a button that says no.
+      expect(answer.inside.ok).toBe(true);
+      expect(existsSync(mine)).toBe(false);
+      const kept = readdirSync(join(profile, 'trash-conversations'));
+      expect(kept).toHaveLength(1);
+      const keptName = kept[0] ?? '';
+
+      // A name from the trash screen can only ever name one kept file. The
+      // names that climb out are skipped, and what is there stays there.
+      const trash = await page.evaluate(async (names: readonly string[]) => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return {
+          restored: await api.trashRestore(names[0] ?? ''),
+          emptied: await api.trashEmpty(names),
+        };
+      }, [`../${keptName}`, `..${'/'}${keptName}`, 'nope.jsonl']);
+
+      expect(trash.restored.ok).toBe(false);
+      expect(trash.emptied.ok).toBe(true);
+      expect(trash.emptied.ok ? trash.emptied.value : ['?']).toEqual([]);
+      expect(readdirSync(join(profile, 'trash-conversations'))).toEqual([keptName]);
+
+      // And the same name, asked for as itself, puts the conversation back.
+      const back = await page.evaluate(async (name: string) => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.trashRestore(name);
+      }, keptName);
+      expect(back.ok).toBe(true);
+      expect(existsSync(mine)).toBe(true);
+    } finally {
+      await stop();
+    }
+  });
+
+  it('keeps a storage folder that still holds work, and says which one it kept', async () => {
+    const profile = freshProfile();
+    // A copy of a finished piece with something uncommitted still in it, from a
+    // month ago: past every window the app keeps, and work it must not touch.
+    const held = copyOfAProject(join(profile, 'copies', 'a-piece-with-work'), true);
+    // Something for the launch sweep itself to remove, so its log line says it
+    // has run before anything below is asserted.
+    const launchFodder = copyOfAProject(join(profile, 'copies', 'finished-long-ago'), false);
+    for (const folder of [held, launchFodder]) agedPastEveryWindow(folder, 30);
+
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url);
+    const stop = dispose(app, profile);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await launchSweepRan(profile);
+      expect(existsSync(held)).toBe(true);
+      expect(existsSync(launchFodder)).toBe(false);
+
+      // Something finished and old, made after the launch so the press below is
+      // the only thing that could have removed it.
+      const finished = copyOfAProject(join(profile, 'copies', 'finished-since'), false);
+      agedPastEveryWindow(finished, 30);
+
+      const before = await page.evaluate(async () => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.storage();
+      });
+      expect(before.ok).toBe(true);
+      const reason = before.ok ? before.value.because : '';
+      // The sentence a person reads says which folder stayed and why.
+      expect(reason).toContain('1 folder still holding work');
+      expect(before.ok ? before.value.couldClear : 0).toBe(1);
+
+      const cleared = await page.evaluate(async () => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.clearFinishedWork();
+      });
+      expect(cleared.ok ? cleared.value.removed : -1).toBe(1);
+      expect(existsSync(finished)).toBe(false);
+      expect(existsSync(held), 'the copy still holding work').toBe(true);
+      expect(readFileSync(join(held, 'README.md'), 'utf8')).toContain('work nobody has landed');
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await stop();
+    }
+  });
+
+  it('ends the run when Stop is pressed, and gives the button back to Send', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // A reply long enough that it cannot have finished by itself: forty pieces,
+    // half a second apart.
+    model.replies([{ says: Array.from({ length: 40 }, (_, at) => `piece ${String(at)} `) }]);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+      await page.locator('.composer__input').fill('say a lot of things');
+      await page.locator('.composer__send').first().click();
+
+      // Send and Stop are one button in two states, and it is Stop while the
+      // run is going with an empty box.
+      const button = page.locator('.composer__send').first();
+      await vi.waitFor(async () => expect(await button.getAttribute('aria-label')).toBe('Stop'), {
+        timeout: 60_000,
+      });
+      const arriving = page.locator('.message--graphe .message__body').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).not.toBe(''), {
+        timeout: 60_000,
+        interval: 25,
+      });
+
+      await button.click();
+
+      // Back to Send. The optimistic half of the press is the window's own, so
+      // what follows is the run really having ended: the reply was cut off at
+      // the far end of the wire, with thirty-odd pieces still to come.
+      await vi.waitFor(async () => expect(await button.getAttribute('aria-label')).toBe('Send'), {
+        timeout: 10_000,
+      });
+      await vi.waitFor(() => expect(model.cutOff()).toBe(true), { timeout: 10_000 });
+      expect(await page.locator('.message__caret').count()).toBe(0);
+      // And what had already arrived is kept, rather than the turn being
+      // thrown away with the run.
+      expect((await arriving.innerText()).trim()).not.toBe('');
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
+
+  it('answers a typed /word by what it names, and sends nothing it does not', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    // A way of working this project added: the file is the command.
+    mkdirSync(join(project, '.pi', 'prompts'), { recursive: true });
+    writeFileSync(
+      join(project, '.pi', 'prompts', 'review.md'),
+      '---\ndescription: Look over everything here\n---\nReview the whole repo carefully.\n',
+    );
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    model.replies([{ says: ['Read it.'] }]);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+      const askedBefore = model.asked.length;
+
+      // A word nobody answers to is not a sentence. Nothing is sent, and the
+      // person is told which word it was.
+      await page.locator('.composer__input').fill('/no-such-workflow-anywhere');
+      await page.locator('.composer__send').first().click();
+      await page.locator('.errorcard').first().waitFor({ timeout: 60_000 });
+      expect(await page.locator('.errorcard__what').first().innerText()).toBe(
+        'I could not find a workflow with that name.',
+      );
+      expect(await page.locator('.errorcard__because').first().innerText()).toContain(
+        '/no-such-workflow-anywhere',
+      );
+      expect(model.asked).toHaveLength(askedBefore);
+      // What they typed comes back to the box rather than being swallowed by
+      // the refusal.
+      expect(await page.locator('.composer__input').inputValue()).toBe('/no-such-workflow-anywhere');
+
+      // The word a project does answer to goes as that workflow's own prompt,
+      // not as the word somebody typed.
+      await page.locator('.composer__input').fill('/review');
+      await page.locator('.composer__send').first().click();
+      await vi.waitFor(
+        () => expect(JSON.stringify(model.asked)).toContain('Review the whole repo carefully.'),
+        { timeout: 60_000 },
+      );
+      // The thread keeps the person's own words: the workflow's prompt is what
+      // the model is sent, not what somebody is shown having typed.
+      await vi.waitFor(
+        async () =>
+          expect(await page.locator('.message--you .message__body').last().innerText()).toBe('/review'),
+        { timeout: 60_000 },
+      );
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
+
+  it('runs an add-on’s /command rather than sending it as prose', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    // A real add-on, of the kind the app installs: outside the project, so it
+    // is the person's own and nothing here has to trust a folder for it.
+    const installed = join(profile, 'agent', 'extensions', 'slash');
+    cpSync(join(here, 'tests', 'fixtures', 'extensions', 'slash'), installed, { recursive: true });
+    // The manifest every installed add-on carries. Pi finds an add-on's code
+    // through index.ts, index.js or a path named here, and through nothing
+    // else: without it the folder is discovered and never loaded.
+    writeFileSync(
+      join(installed, 'package.json'),
+      `${JSON.stringify(
+        { name: 'slash', version: '1.0.0', type: 'module', pi: { extensions: ['index.mjs'] } },
+        null,
+        2,
+      )}\n`,
+    );
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+      const askedBefore = model.asked.length;
+
+      await page.locator('.composer__input').fill('/tally');
+      await page.locator('.composer__send').first().click();
+
+      // The command ran in Pi's own command context: its handler's notice is in
+      // the thread, and the model was never asked to read the word as prose.
+      await vi.waitFor(
+        async () => {
+          expect(await page.locator('.message--graphe .message__body').last().innerText()).toContain(
+            'tallying everything',
+          );
+        },
+        { timeout: 60_000 },
+      );
+      expect(await page.locator('.errorcard').count()).toBe(0);
+      expect(model.asked).toHaveLength(askedBefore);
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
+
+  it('refuses to land a copy over a dirty destination, and to put away one holding work', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url);
+    const stop = dispose(app, profile, project);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+
+      // A copy of its own for this conversation, made the way the button makes
+      // one: it exists on the disk, on a branch of its own.
+      const made = await page.evaluate(async (where: { project: string }) => {
+        const api = window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.worktreeNew({}, where);
+      }, { project });
+      expect(made.ok).toBe(true);
+      const address = made.ok ? (made.value.address ?? '') : '';
+      expect(made.ok ? made.value.ownCopy : false).toBe(true);
+
+      const folders = copyFolders(profile);
+      expect(folders).toHaveLength(1);
+      const copy = folders[0] ?? '';
+      expect(existsSync(join(copy, '.git'))).toBe(true);
+
+      // Something written in the copy that its branch does not carry: giving
+      // the folder back now would lose it.
+      writeFileSync(join(copy, 'notes-from-the-copy.md'), 'work in the copy\n');
+      const putAway = await page.evaluate(
+        async (where: { project: string; address: string }) => {
+          const api = window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          return api.checkoutPutAway(where.address, { project: where.project });
+        },
+        { project, address },
+      );
+      expect(putAway.ok).toBe(false);
+      expect(putAway.ok ? '' : putAway.trouble.what).toBe('This copy is keeping its folder.');
+      expect(existsSync(join(copy, 'notes-from-the-copy.md'))).toBe(true);
+
+      // And a destination with unsaved work of its own: the merge is refused,
+      // and nothing moves in either folder.
+      writeFileSync(join(project, 'README.md'), '# a folder to work in\n\nmine, unsaved\n');
+      const landed = await page.evaluate(
+        async (where: { project: string; conversation: string }) => {
+          const api = window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          return api.worktreeLand(where);
+        },
+        { project, conversation: address },
+      );
+      expect(landed.ok).toBe(false);
+      const because = landed.ok ? '' : landed.trouble.because;
+      expect(because).toContain('README.md');
+      expect(because).toContain('Nothing has been merged');
+
+      expect(readFileSync(join(project, 'README.md'), 'utf8')).toContain('mine, unsaved');
+      expect(existsSync(join(project, 'notes-from-the-copy.md'))).toBe(false);
+      expect(
+        execFileSync('git', ['status', '--porcelain'], { cwd: project, encoding: 'utf8' }).trim(),
+      ).toBe('M README.md');
+      expect(existsSync(join(copy, 'notes-from-the-copy.md'))).toBe(true);
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await stop();
+    }
+  });
 });
 
 /* What this layer does not reach, said here rather than left to silence:
@@ -498,6 +976,9 @@ suite('the app in a real window, on a profile nothing else uses', () => {
  *   - the native preview page and a live page load; the window is what is
  *     driven here.
  *   - layout, focus and zoom at the minimum window size: somebody at a screen.
- *   - a second project, a worktree and a resumed transcript; one project with
- *     two conversations is what this sets up.
+ *   - a second project and a resumed transcript; one project with two
+ *     conversations, and one project with a copy of its own, is what this sets
+ *     up.
+ *   - a background program the agent started, which is what the strip above
+ *     the composer draws a Stop on: nothing here makes one.
  */

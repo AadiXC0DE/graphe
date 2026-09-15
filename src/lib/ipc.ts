@@ -65,6 +65,22 @@ export type {
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
 
+/** Everything the open project holds, and the revision it was read at. */
+export type FilesRead = {
+  files: readonly FileEntry[];
+  /** The folder, and every name and size in the listing. A read whose revision
+   *  no longer matches is of a folder that has since changed, so what is on
+   *  screen is not what is there. */
+  revision: string;
+};
+
+/** One file's bytes, and the revision they were read at.
+ *
+ * `changed` is true when the reader held an earlier revision and the file no
+ * longer matches it: the text here is the file as it is now, not the text they
+ * were reading. */
+export type TextRead = { path: string; text: string; revision: string; changed: boolean };
+
 /**
  * Something that went wrong, already written for a person.
  *
@@ -1414,6 +1430,13 @@ export type ReviewOpened = {
   entries: readonly ReviewEntry[];
   /** Unified diff of everything the entry changed, against where it started. */
   diff: string;
+  /** What the diff was read from: the copy's revision and its working tree
+   *  together, which is the same reading a decision is checked against. Null
+   *  when the work behind the entry could not be read at all. */
+  revision: string | null;
+  /** True when this is a second look and the work has moved since the first:
+   *  the diff here is the change as it is now, not the one already read. */
+  changed: boolean;
 };
 
 /** What a decision came to. `clashes` names the files both sides changed, which
@@ -1780,12 +1803,21 @@ export type GrapheApi = {
   /** Everything the open project holds, with each file's size and whether this
    *  version touched it. Empty — never a failure — when nothing is open. The
    *  walk is bounded, so a folder of somebody else's machinery costs a moment
-   *  rather than the window. */
-  projectFiles(where?: Where): Promise<Result<readonly FileEntry[]>>;
+   *  rather than the window.
+   *
+   *  The answer carries the revision it was read at, so a window holding a
+   *  listing can tell whether the folder has moved since and read it again
+   *  rather than drawing what is no longer there. */
+  projectFiles(where?: Where): Promise<Result<FilesRead>>;
   /** One file of the open project, as text. A location outside the project, a
    *  file too big to read, or one that is not text comes back as a sentence
-   *  rather than as bytes. */
-  fileText(path: string, where?: Where): Promise<Result<string>>;
+   *  rather than as bytes.
+   *
+   *  `expect` is the revision the caller last read this file at. When it is
+   *  given and no longer matches, the answer carries the file as it is now and
+   *  says so, rather than handing over the newer bytes as though they were the
+   *  ones being read. */
+  fileText(path: string, where?: Where, expect?: string): Promise<Result<TextRead>>;
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;

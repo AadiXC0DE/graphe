@@ -70,13 +70,12 @@ jobs:
       - run: npm run app:build
 
       # What a launch has to download, off the renderer build above. The main
-      # chunk is the dominant cost — over the 450 KB the app promises, and most
-      # of what a launch reads — so the numbers are recorded rather than blocked
-      # on: the check's own exit status is kept, and the table goes into the
-      # artifact and the job summary. The budget itself is held by the failing
-      # expectation in tests/operations/build-budget.test.ts.
+      # chunk is the dominant cost — most of what a launch reads — and it is
+      # inside the 450 KB the app promises (446.3 KB when this became blocking).
+      # The step fails the job when the number goes over: the fix is a dynamic
+      # import, not a raised limit. The table goes into the artifact and the
+      # job summary either way.
       - name: Measure the launch budget
-        continue-on-error: true
         run: |
           set +e
           node scripts/perf-report.mjs --check --json=launch-budget.json > perf-report.txt 2>&1

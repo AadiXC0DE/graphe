@@ -369,16 +369,40 @@ export class McpRegistry {
     return session.tools.map((tool) => tool.name);
   }
 
-  /** Call one tool on one server. The server starts on first use. */
-  async call(serverName: string, toolName: string, arguments_: Record<string, unknown>): Promise<string> {
+  /** Call one tool on one server. The server starts on first use.
+   *
+   *  `signal` is the caller's — Pi hands one beside every tool call — and it
+   *  goes to the SDK, whose own cancellation path runs on it. Without it a call
+   *  somebody had given up on stayed here until the patience ran out. */
+  async call(
+    serverName: string,
+    toolName: string,
+    arguments_: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const config = (await this.fresh()).servers.find((server) => server.name === serverName);
     if (config === undefined) {
       return `There is no connected tool named "${serverName}". ${await this.list()}`;
     }
+    // Starting a server is part of the call and the SDK does not cancel it, so
+    // it is raced against the signal too: a caller that has given up should not
+    // wait for a child to come up.
+    const givenUp = new Promise<never>((_resolve, reject) => {
+      if (signal === undefined) return;
+      const said = new Error('Operation aborted');
+      if (signal.aborted) reject(said);
+      else signal.addEventListener('abort', () => reject(said), { once: true });
+    });
+    // The loser of the race is not a failure: an abort after the connect has
+    // already won must not surface as an unhandled rejection.
+    givenUp.catch(() => undefined);
     let session: Session;
     try {
-      session = await this.connect(config);
+      session = await Promise.race([this.connect(config), givenUp]);
     } catch (cause) {
+      // A caller that gave up has not learned anything about the server, and a
+      // turn somebody stopped should not read as the server failing.
+      if (signal?.aborted === true) throw new Error('Operation aborted');
       // Starting or reaching a server is as much a part of the call as the call
       // is. Thrown from here it left the tool with no sentence at all.
       const inside = livesInsideAnotherApp(serverName);
@@ -392,7 +416,7 @@ export class McpRegistry {
     }
     try {
       const result = await Promise.race([
-        session.client.callTool({ name: toolName, arguments: arguments_ }),
+        session.client.callTool({ name: toolName, arguments: arguments_ }, undefined, { signal }),
         new Promise<never>((_resolve, reject) => {
           const patience = callPatienceMs();
           const bell = setTimeout(
@@ -425,6 +449,10 @@ export class McpRegistry {
         ? `${text.slice(0, MAX_RESULT_CHARACTERS)}\n\n(The answer was longer than I read in one go.)`
         : text;
     } catch (cause) {
+      // A caller that gave up has not learned anything about the server, and a
+      // turn somebody stopped should not read as the server failing. The same
+      // sentence Pi's own tools use when their signal goes.
+      if (signal?.aborted === true) throw new Error('Operation aborted');
       throw new Error(
         `The ${toolName} tool on ${serverName} did not answer: ${cause instanceof Error ? cause.message : 'it failed.'}`,
       );
@@ -484,6 +512,7 @@ export function mcpTool(registry: McpRegistry): ToolDefinition {
     execute: async (
       _callId,
       params: { list?: boolean; server?: string; tool?: string; args?: Record<string, unknown> },
+      signal?: AbortSignal,
     ): Promise<ReturnType<typeof toolResultText>> => {
       if (params.list === true || (params.server === undefined && params.tool === undefined)) {
         return toolResultText(await registry.list());
@@ -491,7 +520,7 @@ export function mcpTool(registry: McpRegistry): ToolDefinition {
       if (params.server === undefined || params.tool === undefined) {
         return toolResultText('To call a plugged-in tool, name the server and the tool. Use mcp with {"list": true} to see what is there.');
       }
-      const text = await registry.call(params.server, params.tool, params.args ?? {});
+      const text = await registry.call(params.server, params.tool, params.args ?? {}, signal);
       return toolResultText(text);
     },
   };
@@ -538,6 +567,7 @@ export async function readMcpConfig(projectRoot: string): Promise<McpConfig> {
   }
 
   const servers: McpServerConfig[] = [];
+  const taken = new Set<string>();
   const skipped: string[] = [];
   for (const [at, entry] of parsed.servers.entries()) {
     const which = `the ${ordinal(at + 1)} one`;
@@ -550,6 +580,15 @@ export async function readMcpConfig(projectRoot: string): Promise<McpConfig> {
       skipped.push(`${which} has no name.`);
       continue;
     }
+    // Trimmed, because a name with a space around it is the same name to
+    // everything else that reads this file. A repeated name is one server the
+    // model would be told about twice, and one entry it could never call.
+    const name = record.name.trim();
+    if (taken.has(name)) {
+      skipped.push(`${which} is already connected as “${name}”, so the first one is the one that runs.`);
+      continue;
+    }
+    taken.add(name);
     const address = typeof record.address === 'string' ? record.address.trim() : '';
     const command = typeof record.command === 'string' ? record.command.trim() : '';
     if (command === '' && address === '') {

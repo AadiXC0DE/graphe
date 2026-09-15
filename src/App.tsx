@@ -2,31 +2,18 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import { useStickToBottom } from "use-stick-to-bottom";
 import ActivityLine from "./components/ActivityLine";
 import { Shown } from "./components/Shown";
-import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
-import BuildProgress from "./components/BuildProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Composer from "./components/Composer";
-import ConfirmChange from "./components/ConfirmChange";
 import CostMeter from "./components/CostMeter";
-import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
-import HelperRail from "./components/HelperRail";
-import InLine from "./components/InLine";
 import Message from "./components/Message";
 import Overview from "./components/Overview";
-import PlanCard from "./components/PlanCard";
-import ReviewCard from "./components/ReviewCard";
 import WorkingMark from "./components/WorkingMark";
-import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
-import Running from "./components/Running";
-import Commands from "./components/Commands";
-import { asksAbout } from "./preview/point";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
 import type { Answers } from "./agent/asking";
 import { PLAN_WORDS, decidedMessage, type PlanDecision } from "./agent/plan";
-import { reviewAsMarkdown } from "./agent/pi/review";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { liveFrames } from "./preview/live";
 import { whenHidden } from "./lib/onscreen";
@@ -41,7 +28,6 @@ import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
 import { drainStarted } from "./lib/queue";
 import { AT_FIRST, foldEvents, lastTurns } from "./lib/hydrate";
-import FindInThread from "./components/FindInThread";
 import { threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
 import type { ReviewVerdict, RunningPiece, WaitingSend } from "./agent/types";
@@ -58,15 +44,11 @@ import type {
 import {
   asOpenTo,
   asShelfAtLaunch,
-  settingsCommands,
   type OpenTo,
   type ShelfAtLaunch,
 } from "./work/settingspages";
 import type { Telling } from "./work/notify";
 import type { SettingsLink } from "./components/Settings";
-import { CHANGE_WORDS } from "./components/DiffView";
-import { parseDiff, undoOf } from "./diff/hunks";
-import { REACHABLE, alreadyReached, asServer } from "./agent/pi/reach";
 import Sidebar from "./components/Sidebar";
 import Tabs, { type Tab } from "./components/Tabs";
 import Steps from "./components/Steps";
@@ -93,7 +75,6 @@ import {
   stepsFromReport,
   lookingInto,
 } from "./agent/research";
-import { asBuildRequest } from "./work/buildbrief";
 import { goalElapsed, withElapsed } from "./work/goal";
 import { keyOf, ownerOf } from "./work/owner";
 import { continuationWords } from "./work/continuing";
@@ -156,12 +137,10 @@ import {
   type PromptOptions,
 } from "./lib/ipc";
 import { modelKey } from "./lib/ipc";
-import { conflictWords } from "./diff/conflict";
 import { reviewWords, waiting as waitingToReview, type FileVerdict, type Verdict as QueueVerdict } from "./work/reviewqueue";
 import { usePrefersReducedMotion } from "./lib/motion";
 import { keeping } from "./projects/kept";
 import { behind } from "./lib/showme";
-import { ownCopyWhere } from "./lib/owncopy";
 import {
   changeCurrent,
   changeDesk,
@@ -202,7 +181,7 @@ import {
 } from "./lib/thread";
 import { asMarkdown, wordsOf, COPY_WORDS } from "./lib/transcript";
 import { copyText } from "./lib/copying";
-import { markFor, themeFrom, type Theme } from "./lib/theme";
+import { markFor, showing, themeFrom, type Theme } from "./lib/theme";
 import { gitIsMissing, keptAppWide, stillShowing } from "./lib/app-wide";
 import { keepShared, keptShared, onlyInThisChat, sharingWithProject } from "./lib/shared-context";
 import AppWide from "./components/AppWide";
@@ -230,6 +209,34 @@ const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
 const Usage = lazy(() => import("./components/Usage"));
+/* Panels that open over the conversation rather than in it, and one that only
+   appears over a build. None is drawn until a press or a running build asks. */
+const Commands = lazy(() => import("./components/Commands"));
+const ReviewsView = lazy(() => import("./components/ReviewsView"));
+const ProjectMenu = lazy(() => import("./components/ProjectMenu"));
+const BuildProgress = lazy(() => import("./components/BuildProgress"));
+const FindInThread = lazy(() => import("./components/FindInThread"));
+/* The three cards a conversation only sometimes carries — a question before any
+   file is touched, a plan to agree to, a review to answer. Each is fetched the
+   first time a turn of that kind is actually drawn. */
+const AskFirst = lazy(() => import("./components/AskFirst"));
+const PlanCard = lazy(() => import("./components/PlanCard"));
+const ReviewCard = lazy(() => import("./components/ReviewCard"));
+/* Bands and cards that exist only once there is something to say: a question
+   waiting on an answer, a run in flight, helpers at work. Nothing draws until
+   one of them does. */
+const ConfirmChange = lazy(() => import("./components/ConfirmChange"));
+const HelperRail = lazy(() => import("./components/HelperRail"));
+const InLine = lazy(() => import("./components/InLine"));
+const Running = lazy(() => import("./components/Running"));
+
+/** What "explain this" and "fix this" say about a change. A static import would
+ *  put the whole diff panel in the bundle every launch pays for, and it is only
+ *  up while somebody is reading a change. */
+async function wordsAboutChanges() {
+  const { CHANGE_WORDS } = await import("./components/DiffView");
+  return CHANGE_WORDS;
+}
 
 /* The screens a press reaches most often. Fetched once the first paint is over
    so the press finds the code already there. */
@@ -409,12 +416,17 @@ function lastSaidIn(desk: Desk | null): string | null {
  *
  * The first thing the person said, which is what they would call it themselves.
  * A conversation nobody has spoken in yet has no name to take, and saying so is
- * better than borrowing the folder's. */
+ * better than borrowing the folder's.
+ *
+ * Long enough that two asks which begin alike are still two names: at 40
+ * characters a pair differing past that point read, tooltipped and announced
+ * identically. The tab itself ellipsises to whatever width it has; this is only
+ * the point past which a name stops being a name. */
 function titleOf(turns: readonly Turn[]): string {
   const first = turns.find((turn) => turn.kind === 'said' && turn.from === 'you');
   if (first === undefined || first.kind !== 'said') return 'New conversation';
   const words = first.text.trim().replace(/\s+/g, ' ');
-  return words.length > 40 ? `${words.slice(0, 39)}…` : words;
+  return words.length > 120 ? `${words.slice(0, 119)}…` : words;
 }
 
 /** Recent-project storage is ordered by last use, which is useful for a picker
@@ -940,17 +952,31 @@ function Conversation() {
   /* The appearance, as a stylesheet. Written last in the head and matched at
      the same weight as the theme's own block, because `:root[data-theme]` beats
      a bare `:root` and a token that loses a specificity tie is a control that
-     does nothing. */
+     does nothing.
+
+     It lands after the stylesheet, so its own `prefers-color-scheme` block
+     never gets to decide: following the computer means writing the palette the
+     computer asks for, and writing it again when the computer changes. */
   useEffect(() => {
-    const showingNow = markFor(theme);
-    const on = showingNow === null || showingNow === 'light' ? 'light' : 'dark';
-    let sheet = document.getElementById('appearance');
-    if (sheet === null) {
-      sheet = document.createElement('style');
-      sheet.id = 'appearance';
-      document.head.append(sheet);
-    }
-    sheet.textContent = cssFor(preferences.appearance, on);
+    const darkNow = (): boolean =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const write = (): void => {
+      let sheet = document.getElementById('appearance');
+      if (sheet === null) {
+        sheet = document.createElement('style');
+        sheet.id = 'appearance';
+        document.head.append(sheet);
+      }
+      sheet.textContent = cssFor(preferences.appearance, showing(theme, darkNow()));
+    };
+    write();
+    if (theme !== 'system' || typeof window === 'undefined') return;
+    if (typeof window.matchMedia !== 'function') return;
+    const computer = window.matchMedia('(prefers-color-scheme: dark)');
+    computer.addEventListener('change', write);
+    return () => computer.removeEventListener('change', write);
   }, [preferences.appearance, theme]);
 
   /* And whatever somebody wrote themselves, after it. Read once on the way in
@@ -1333,7 +1359,11 @@ function Conversation() {
       // box either: somebody writing on the page is not writing in the box, and
       // finding a paragraph about an element in there is how this felt broken.
       if ((pointed.said ?? '').trim() === '') return;
-      handNow.current(asksAbout(pointed));
+      // How a note is worded belongs to the page it was written on, which is a
+      // chunk nobody needs until one comes back.
+      void import("./preview/point").then(({ asksAbout }) => {
+        handNow.current(asksAbout(pointed));
+      });
     });
   }, []);
 
@@ -2208,6 +2238,7 @@ function Conversation() {
    */
   const bringWorkBack = useCallback(
     async (path: string) => {
+      const { ownCopyWhere } = await import("./lib/owncopy");
       const answer = await bridge.worktreeLand(ownCopyWhere(path));
       if (!answer.ok) {
         troubleHere(answer.trouble);
@@ -2225,6 +2256,7 @@ function Conversation() {
 
   const throwWorkAway = useCallback(
     async (path: string) => {
+      const { ownCopyWhere } = await import("./lib/owncopy");
       const answer = await bridge.worktreeDrop(ownCopyWhere(path));
       if (!answer.ok) {
         troubleHere(answer.trouble);
@@ -2241,6 +2273,7 @@ function Conversation() {
   const letFigmaIn = useCallback(async (): Promise<string | null> => {
     const already = (connected?.tools ?? []).some((one) => one.name === 'figma');
     if (!already) {
+      const { REACHABLE, asServer } = await import("./agent/pi/reach");
       const figma = REACHABLE.find((one) => one.id === 'figma');
       if (figma !== undefined) {
         const here = currentDesk(desksNow.current);
@@ -3753,7 +3786,11 @@ function Conversation() {
             troubleHere(answer.trouble);
             return;
           }
-          say(conflictWords.wrote(path));
+          // The words a settled clash is reported in belong to the screen that
+          // shows one, which is not what a launch waits for.
+          void import("./diff/conflict").then(({ conflictWords }) => {
+            say(conflictWords.wrote(path));
+          });
           setClashes((was) => {
             const left = was.paths.filter((one) => one !== path);
             setClashPath(left[0] ?? null);
@@ -3771,10 +3808,12 @@ function Conversation() {
   const askAboutClash = useCallback(
     (path: string, places: number) => {
       const desk = currentDesk(desksNow.current);
-      void bridge.steer(conflictWords.reconcile(path, places), {
-        ...(desk === null ? {} : { project: desk.path }),
-        ...(clashes.address === '' ? {} : { conversation: clashes.address }),
-      });
+      void import("./diff/conflict").then(({ conflictWords }) =>
+        bridge.steer(conflictWords.reconcile(path, places), {
+          ...(desk === null ? {} : { project: desk.path }),
+          ...(clashes.address === '' ? {} : { conversation: clashes.address }),
+        }),
+      );
       setClashPath(null);
       setClashText(null);
       setClashes((was) => ({ ...was, paths: was.paths.filter((one) => one !== path) }));
@@ -3832,6 +3871,7 @@ function Conversation() {
             // Create a fresh conversation in the parent and rely on extra instruction
             await swapConversation(null);
             if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project) return;
+            const { reviewPrompt } = await import("./components/ReviewsView");
             const base = reviewPrompt(item, repository, repo?.here ?? null);
             const extra = `\n\nThe PR's code has been checked out at ${prFolder}. Read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
             void send(`${base}${extra}`);
@@ -3883,6 +3923,7 @@ function Conversation() {
           item.headSha === null || item.headSha.trim() === ''
             ? null
             : { branch: item.headRef, sha: item.headSha };
+        const { reviewPrompt } = await import("./components/ReviewsView");
         const base = reviewPrompt(item, repository, prHere);
         // Add the prompt to the new conversation's desk and send it through the PR-rooted session.
         setDesks((current) => changeDesk(current, opened.path, (one) => ({ ...one, turns: [...one.turns, said("you", base)] })));
@@ -4205,6 +4246,7 @@ function Conversation() {
     async (verdict: ReviewVerdict): Promise<boolean> => {
       if (verdict.pull === undefined) return false;
       const path = openProject;
+      const { reviewAsMarkdown } = await import("./agent/pi/review");
       const sent = await bridge.repoComment(verdict.pull, reviewAsMarkdown(verdict), {
         project: path ?? undefined,
       });
@@ -4585,13 +4627,7 @@ function Conversation() {
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',
         run: () => halt(), ready: busy, whyNot: 'Nothing is running.' },
     ];
-    /* Every preference by name, so "dark" or "cookies" is one press from here
-       and nobody has to know which page it is on. */
-    const settings = settingsCommands((row) => {
-      setSettingsAt(row.id);
-      startScreen(() => setSettingsOpen(true));
-    });
-    return [...made, ...settings].map((one) => ({
+    return made.map((one) => ({
       ...one,
       run: () => {
         setPaletteOpen(false);
@@ -5128,30 +5164,32 @@ function Conversation() {
 
             {switching && recent !== null ? (
               <div className="topbar__switcher" role="menu">
-                <ProjectMenu
-                  projects={recent}
-                  openPath={openProject}
-                  onOpen={(project) => void open(project.path)}
-                  onForget={(project) => void forget(project)}
-                  onBrowse={() => void browse()}
-                  editor={editor}
-                  onOpenInEditor={openInEditor}
-                  onRevealFolder={revealFolder}
-                  showMe={preferences.showMe}
-                  onShowMe={changeShowMe}
-                  showFiles={preferences.showFiles}
-                  onShowFiles={changeShowFiles}
-                  onPreview={() => {
-                    if (!severalProjects) {
-                      void seeIt();
-                      return;
-                    }
-                    if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
-                    else movePane('split');
-                  }}
-                  onAccount={openConnect}
-                  onAddMore={openAddMore}
-                />
+                <Suspense fallback={null}>
+                  <ProjectMenu
+                    projects={recent}
+                    openPath={openProject}
+                    onOpen={(project) => void open(project.path)}
+                    onForget={(project) => void forget(project)}
+                    onBrowse={() => void browse()}
+                    editor={editor}
+                    onOpenInEditor={openInEditor}
+                    onRevealFolder={revealFolder}
+                    showMe={preferences.showMe}
+                    onShowMe={changeShowMe}
+                    showFiles={preferences.showFiles}
+                    onShowFiles={changeShowFiles}
+                    onPreview={() => {
+                      if (!severalProjects) {
+                        void seeIt();
+                        return;
+                      }
+                      if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
+                      else movePane('split');
+                    }}
+                    onAccount={openConnect}
+                    onAddMore={openAddMore}
+                  />
+                </Suspense>
               </div>
             ) : null}
           </div>
@@ -5306,13 +5344,17 @@ function Conversation() {
           onClose={() => setChangesOpen(false)}
           onExplain={(file, line) => {
             setChangesOpen(false);
-            const asked = CHANGE_WORDS.explain(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            void wordsAboutChanges().then((words) => {
+              const asked = words.explain(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            });
           }}
           onFix={(file, line) => {
             setChangesOpen(false);
-            const asked = CHANGE_WORDS.fix(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            void wordsAboutChanges().then((words) => {
+              const asked = words.fix(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            });
           }}
           onWider={async (file, context) => {
             const repo = actingRepoNow.current;
@@ -5325,26 +5367,28 @@ function Conversation() {
           }}
           onKeep={(kept) => {
             const whole = changeText ?? '';
-            const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
-            // What was NOT kept is what to undo. Built from the whole change so
-            // the line numbers on the way out are the ones on the way in — and
-            // left where they are, because this is applied in reverse against a
-            // file that still holds every piece.
-            const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
             setChangesOpen(false);
-            if (dropping.trim() === '') return;
-            // The folder the change was read out of, so undoing part of it
-            // cannot land in whichever project happens to be in front.
-            const repo = actingRepoNow.current;
-            void bridge
-              .changesDrop(dropping, {
-                ...(openProject === null ? {} : { project: openProject }),
-                ...(repo === null ? {} : { repo }),
-              })
-              .then((answer) => {
-                if (!answer.ok) troubleHere(answer.trouble);
-                else if (openProject !== null) void refreshOverview(openProject);
-              });
+            void import("./diff/hunks").then(({ parseDiff, undoOf }) => {
+              const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
+              // What was NOT kept is what to undo. Built from the whole change so
+              // the line numbers on the way out are the ones on the way in — and
+              // left where they are, because this is applied in reverse against a
+              // file that still holds every piece.
+              const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
+              if (dropping.trim() === '') return;
+              // The folder the change was read out of, so undoing part of it
+              // cannot land in whichever project happens to be in front.
+              const repo = actingRepoNow.current;
+              void bridge
+                .changesDrop(dropping, {
+                  ...(openProject === null ? {} : { project: openProject }),
+                  ...(repo === null ? {} : { repo }),
+                })
+                .then((answer) => {
+                  if (!answer.ok) troubleHere(answer.trouble);
+                  else if (openProject !== null) void refreshOverview(openProject);
+                });
+            });
           }}
         />
       </Suspense>
@@ -5354,6 +5398,10 @@ function Conversation() {
           open={paletteOpen}
           commands={everyCommand}
           onClose={() => setPaletteOpen(false)}
+          onOpenSetting={(id) => {
+            setSettingsAt(id);
+            startScreen(() => setSettingsOpen(true));
+          }}
         />
       </Suspense>
 
@@ -5536,7 +5584,7 @@ function Conversation() {
           </div>
           <Suspense fallback={null}>
             <Files
-              files={files[desk.path] ?? []}
+              files={files[desk.path]?.files ?? []}
               selected={reading?.path ?? null}
               onSelect={readFile}
             />
@@ -5545,48 +5593,50 @@ function Conversation() {
       ) : null}
 
       {commandsHere && desk !== null ? (
-        <Commands
-          open
-          onClose={() => setCommandsOpen(false)}
-          turns={desk.turns}
-          servers={running}
-          terminal={{
-            workspace: desk.path,
-            open: terminalOpen,
-            onOpen: setTerminalOpen,
-          }}
-          onSaid={(id) =>
-            bridge
-              .runningSaid(id, {
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => (answer.ok ? answer.value : ''))
-          }
-          page={pane === 'off' ? null : pageAt}
-          onPageSaid={() =>
-            bridge
-              .pageSaid({
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => (answer.ok ? answer.value : []))
-          }
-          onOpenAddress={(address) => {
-            setPageAt(address);
-            movePane('split');
-          }}
-          onStop={(id) => {
-            void bridge
-              .stopRunning(id, {
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => {
-                if (answer.ok) setRunning(answer.value);
-              });
-          }}
-        />
+        <Suspense fallback={ARRIVING}>
+          <Commands
+            open
+            onClose={() => setCommandsOpen(false)}
+            turns={desk.turns}
+            servers={running}
+            terminal={{
+              workspace: desk.path,
+              open: terminalOpen,
+              onOpen: setTerminalOpen,
+            }}
+            onSaid={(id) =>
+              bridge
+                .runningSaid(id, {
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => (answer.ok ? answer.value : ''))
+            }
+            page={pane === 'off' ? null : pageAt}
+            onPageSaid={() =>
+              bridge
+                .pageSaid({
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => (answer.ok ? answer.value : []))
+            }
+            onOpenAddress={(address) => {
+              setPageAt(address);
+              movePane('split');
+            }}
+            onStop={(id) => {
+              void bridge
+                .stopRunning(id, {
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => {
+                  if (answer.ok) setRunning(answer.value);
+                });
+            }}
+          />
+        </Suspense>
       ) : null}
 
       <div className="app__column" ref={contentRef}>
@@ -5648,7 +5698,9 @@ function Conversation() {
                     return;
                   }
                   if (desk !== null) void refreshBuildPlan(desk.path);
-                  void send(asBuildRequest(source.text, source.instruction));
+                  void import("./work/buildbrief").then(({ asBuildRequest }) => {
+                    void send(asBuildRequest(source.text, source.instruction));
+                  });
                 })
                 .catch(() => {
                   if (desk !== null) void refreshBuildPlan(desk.path);
@@ -5665,24 +5717,26 @@ function Conversation() {
             </header>
 
             {finding === null ? null : (
-              <FindInThread
-                turns={desk.turns}
-                term={finding}
-                at={foundAt}
-                onTerm={(next) => {
-                  setFinding(next);
-                  setFoundAt(null);
-                }}
-                onAt={(turn, showFrom) => {
-                  setFoundAt(turn);
-                  // Bringing a result into view has to draw it first.
-                  setDrawing((was) => Math.max(was, showFrom));
-                }}
-                onClose={() => {
-                  setFinding(null);
-                  setFoundAt(null);
-                }}
-              />
+              <Suspense fallback={null}>
+                <FindInThread
+                  turns={desk.turns}
+                  term={finding}
+                  at={foundAt}
+                  onTerm={(next) => {
+                    setFinding(next);
+                    setFoundAt(null);
+                  }}
+                  onAt={(turn, showFrom) => {
+                    setFoundAt(turn);
+                    // Bringing a result into view has to draw it first.
+                    setDrawing((was) => Math.max(was, showFrom));
+                  }}
+                  onClose={() => {
+                    setFinding(null);
+                    setFoundAt(null);
+                  }}
+                />
+              </Suspense>
             )}
 
             {(() => {
@@ -5841,40 +5895,50 @@ function Conversation() {
                 steps have, and nothing about the build is lost if the window
                 closes — the plan is written down and reopened. */}
             {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
-              <BuildProgress
-                plan={buildPlan.plan}
-                running={frontBusy}
-                project={buildPlan.path}
-                carryingOn={
-                  carryingOn[keyOf(buildPlan.path, buildPlan.plan.address)] ?? null
-                }
-                onStopCarryingOn={() => {
-                  void bridge.continuationStop({
-                    project: buildPlan.path,
-                    ...(buildPlan.plan.address === ''
-                      ? {}
-                      : { conversation: buildPlan.plan.address }),
-                  });
-                }}
-              />
+              <Suspense fallback={null}>
+                <BuildProgress
+                  plan={buildPlan.plan}
+                  running={frontBusy}
+                  project={buildPlan.path}
+                  carryingOn={
+                    carryingOn[keyOf(buildPlan.path, buildPlan.plan.address)] ?? null
+                  }
+                  onStopCarryingOn={() => {
+                    void bridge.continuationStop({
+                      project: buildPlan.path,
+                      ...(buildPlan.plan.address === ''
+                        ? {}
+                        : { conversation: buildPlan.plan.address }),
+                    });
+                  }}
+                />
+              </Suspense>
             ) : null}
 
             {/* Both bands sit above the composer rather than in the panel on
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
-            <HelperRail
-              helpers={angles}
-              onOpen={(at) => {
-                goToScreen("helpers");
-                startScreen(() => setHelpersAt({ at }));
-              }}
-            />
-            <InLine
-              waiting={waitingHere}
-              queued={queuedForWorkspace}
-              onTake={takeBack}
-              onNewWorktree={() => setWorktreeOpen(true)}
-            />
+            {angles.length === 0 ? null : (
+              <Suspense fallback={null}>
+                <HelperRail
+                  helpers={angles}
+                  onOpen={(at) => {
+                    goToScreen("helpers");
+                    startScreen(() => setHelpersAt({ at }));
+                  }}
+                />
+              </Suspense>
+            )}
+            {waitingHere.length === 0 && queuedForWorkspace.length === 0 ? null : (
+              <Suspense fallback={null}>
+                <InLine
+                  waiting={waitingHere}
+                  queued={queuedForWorkspace}
+                  onTake={takeBack}
+                  onNewWorktree={() => setWorktreeOpen(true)}
+                />
+              </Suspense>
+            )}
 
             {/* Finished work that has not touched the folder yet. One quiet row
                 where the hand already is, because a review nobody can see is a
@@ -5899,6 +5963,8 @@ function Conversation() {
 
             {/* Servers and watchers outlive the sentence that started them, so
                 they sit above the composer rather than inside the conversation. */}
+            {running.length === 0 ? null : (
+              <Suspense fallback={null}>
             <Running
               pieces={running}
               onOpen={(address) => {
@@ -5915,6 +5981,8 @@ function Conversation() {
                 });
               }}
             />
+              </Suspense>
+            )}
 
             <Composer
               onSend={hand}
@@ -5955,7 +6023,11 @@ function Conversation() {
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
-              tree={desk === null ? [] : (files[desk.path] ?? []).map((one) => ({ path: one.path, folder: false }))}
+              tree={
+                desk === null
+                  ? []
+                  : (files[desk.path]?.files ?? []).map((one) => ({ path: one.path, folder: false }))
+              }
               workflows={workflows}
               onAttachmentsChange={(next) => {
                 if (boxOwner === null) setLoose(next);
@@ -6110,32 +6182,34 @@ function Conversation() {
           so the row of tabs stays above it and switching back is one press on
           something you can see. */}
       {reviewsOpen && desk !== null ? (
-        <ReviewsView
-          repo={repo}
-          busy={reviewsBusy}
-          onRefresh={refreshRepo}
-          onClose={() => setReviewsOpen(false)}
-          onReview={startReview}
-          onWork={startIssue}
-          prDiff={(number) => bridge.prDiff(number, reviewsWhere())}
-          prChecks={(number) => bridge.prChecks(number, reviewsWhere())}
-          prCheckout={(number) => bridge.prCheckout(number, reviewsWhere())}
-          prComments={(number) => bridge.prComments(number, reviewsWhere())}
-          prComment={(number, body, path, line) =>
-            bridge.prComment(number, body, path, line, reviewsWhere())
-          }
-          repos={desk.overview?.repos ?? []}
-          which={
-            (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
-            (desk.overview?.repos ?? [])[0]?.name ??
-            null
-          }
-          onWhich={(name) => {
-            setReviewsRepo(name);
-            reviewsRepoNow.current = name;
-            refreshRepo();
-          }}
-        />
+        <Suspense fallback={reviewsOpen ? ARRIVING : null}>
+          <ReviewsView
+            repo={repo}
+            busy={reviewsBusy}
+            onRefresh={refreshRepo}
+            onClose={() => setReviewsOpen(false)}
+            onReview={startReview}
+            onWork={startIssue}
+            prDiff={(number) => bridge.prDiff(number, reviewsWhere())}
+            prChecks={(number) => bridge.prChecks(number, reviewsWhere())}
+            prCheckout={(number) => bridge.prCheckout(number, reviewsWhere())}
+            prComments={(number) => bridge.prComments(number, reviewsWhere())}
+            prComment={(number, body, path, line) =>
+              bridge.prComment(number, body, path, line, reviewsWhere())
+            }
+            repos={desk.overview?.repos ?? []}
+            which={
+              (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
+              (desk.overview?.repos ?? [])[0]?.name ??
+              null
+            }
+            onWhich={(name) => {
+              setReviewsRepo(name);
+              reviewsRepoNow.current = name;
+              refreshRepo();
+            }}
+          />
+        </Suspense>
       ) : null}
 
       {reviewQueueOpen && desk !== null ? (
@@ -6154,13 +6228,17 @@ function Conversation() {
             onClose={() => setReviewQueueOpen(false)}
             onExplain={(file, line) => {
               setReviewQueueOpen(false);
-              const asked = CHANGE_WORDS.explain(file, line);
-              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              void wordsAboutChanges().then((words) => {
+                const asked = words.explain(file, line);
+                void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              });
             }}
             onFix={(file, line) => {
               setReviewQueueOpen(false);
-              const asked = CHANGE_WORDS.fix(file, line);
-              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              void wordsAboutChanges().then((words) => {
+                const asked = words.fix(file, line);
+                void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              });
             }}
           />
         </Suspense>
@@ -6244,14 +6322,14 @@ function Conversation() {
 
       {worktreeOpen ? (
         <Suspense fallback={null}>
-        <NewWorktree
-          project={desksNow.current.current}
-          onClose={() => setWorktreeOpen(false)}
-          onMade={(address) => {
-            setWorktreeOpen(false);
-            if (address !== null) void swapConversation(address);
-          }}
-        />
+          <NewWorktree
+            project={desksNow.current.current}
+            onClose={() => setWorktreeOpen(false)}
+            onMade={(address) => {
+              setWorktreeOpen(false);
+              if (address !== null) void swapConversation(address);
+            }}
+          />
         </Suspense>
       ) : null}
 
@@ -6271,22 +6349,24 @@ function Conversation() {
              this project already has marked as connected. Without these the
              whole shelf never drew, so the one-press way to give the agent a
              browser was invisible. */
-          reaches={alreadyReached((connected?.tools ?? []).map((one) => one.name))}
+          reaches={(connected?.tools ?? []).map((one) => one.name)}
           onConnect={(id) => {
-            const wanted = REACHABLE.find((one) => one.id === id);
-            if (wanted === undefined) return;
             setPackBusy(id);
             const now = connected?.tools ?? [];
-            void bridge
-              .connectedSave(
-                [...now.filter((one) => one.name !== id), asServer(wanted)],
-                openProject === null ? {} : { project: openProject },
-              )
-              .then((answer) => {
-                if (answer.ok) setConnected(answer.value);
-                else troubleHere(answer.trouble);
-              })
-              .finally(() => setPackBusy(null));
+            void import("./agent/pi/reach").then(({ REACHABLE, asServer }) => {
+              const wanted = REACHABLE.find((one) => one.id === id);
+              if (wanted === undefined) return;
+              return bridge
+                .connectedSave(
+                  [...now.filter((one) => one.name !== id), asServer(wanted)],
+                  openProject === null ? {} : { project: openProject },
+                )
+                .then((answer) => {
+                  if (answer.ok) setConnected(answer.value);
+                  else troubleHere(answer.trouble);
+                })
+                .finally(() => setPackBusy(null));
+            });
           }}
           onDisconnect={(id) => {
             setPackBusy(id);
@@ -6491,16 +6571,18 @@ const Turnstile = memo(function Turnstile({
       // of the record — a live pair of buttons for a decision already taken is
       // how people learn to click without reading.
       return turn.answered === null ? (
-        <ConfirmChange
-          question={turn.question}
-          detail={turn.detail}
-          consequence={turn.consequence}
-          technical={showMe ? turn.real : undefined}
-          confirmLabel="Yes, go ahead"
-          cancelLabel="No, leave it"
-          onConfirm={() => onRespond(turn.id, turn.callId, "yes")}
-          onCancel={() => onRespond(turn.id, turn.callId, "no")}
-        />
+        <Suspense fallback={null}>
+          <ConfirmChange
+            question={turn.question}
+            detail={turn.detail}
+            consequence={turn.consequence}
+            technical={showMe ? turn.real : undefined}
+            confirmLabel="Yes, go ahead"
+            cancelLabel="No, leave it"
+            onConfirm={() => onRespond(turn.id, turn.callId, "yes")}
+            onCancel={() => onRespond(turn.id, turn.callId, "no")}
+          />
+        </Suspense>
       ) : (
         <ActivityLine
           state={turn.answered === "yes" ? "done" : "failed"}
@@ -6519,37 +6601,43 @@ const Turnstile = memo(function Turnstile({
     // hears the answer.
     case "asked-first":
       return (
-        <AskFirst
-          questions={turn.questions}
-          answers={turn.answers}
-          answered={turn.answered}
-          onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
-        />
+        <Suspense fallback={null}>
+          <AskFirst
+            questions={turn.questions}
+            answers={turn.answers}
+            answered={turn.answered}
+            onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
+          />
+        </Suspense>
       );
 
     case "plan":
       return (
-        <PlanCard
-          steps={turn.steps}
-          caveats={turn.caveats}
-          answered={turn.answered}
-          questions={turn.questions}
-          onGo={(kept, dropped, decision) =>
-            onAnswerPlan(turn.id, true, { kept, dropped, decision })
-          }
-          onChange={() => onAnswerPlan(turn.id, false)}
-          onAskAgain={() => onAskForAPlanAgain(turn.id)}
-        />
+        <Suspense fallback={null}>
+          <PlanCard
+            steps={turn.steps}
+            caveats={turn.caveats}
+            answered={turn.answered}
+            questions={turn.questions}
+            onGo={(kept, dropped, decision) =>
+              onAnswerPlan(turn.id, true, { kept, dropped, decision })
+            }
+            onChange={() => onAnswerPlan(turn.id, false)}
+            onAskAgain={() => onAskForAPlanAgain(turn.id)}
+          />
+        </Suspense>
       );
 
     case "review":
       return (
-        <ReviewCard
-          verdict={turn.verdict}
-          asked={turn.asked}
-          onFix={() => onFixReview(turn.id)}
-          onPost={() => onPostReview(turn.verdict)}
-        />
+        <Suspense fallback={null}>
+          <ReviewCard
+            verdict={turn.verdict}
+            asked={turn.asked}
+            onFix={() => onFixReview(turn.id)}
+            onPost={() => onPostReview(turn.verdict)}
+          />
+        </Suspense>
       );
 
     case "estimate":
@@ -6557,15 +6645,17 @@ const Turnstile = memo(function Turnstile({
       // spends less carries the visual weight. Every word of it is written by
       // src/cost/phrasing.ts and none of it by this file.
       return turn.answered === null ? (
-        <ConfirmChange
-          question={turn.prompt.title}
-          detail={turn.prompt.body}
-          consequence={turn.prompt.note}
-          confirmLabel={turn.prompt.confirm}
-          cancelLabel={turn.prompt.alternative}
-          onConfirm={() => onAnswerEstimate(turn, true)}
-          onCancel={() => onAnswerEstimate(turn, false)}
-        />
+        <Suspense fallback={null}>
+          <ConfirmChange
+            question={turn.prompt.title}
+            detail={turn.prompt.body}
+            consequence={turn.prompt.note}
+            confirmLabel={turn.prompt.confirm}
+            cancelLabel={turn.prompt.alternative}
+            onConfirm={() => onAnswerEstimate(turn, true)}
+            onCancel={() => onAnswerEstimate(turn, false)}
+          />
+        </Suspense>
       ) : (
         // Answered, it stops being a control and becomes part of the record —
         // the same shape the Guard's own questions take once they have been

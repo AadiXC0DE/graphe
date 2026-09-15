@@ -82,16 +82,19 @@ describe('a secret on its way into the bundle', () => {
     expect(said).toContain('The server closed the door.');
   });
 
-  /* The bound is a count of lines (LOG_LINES), asked for and not enforced; a
-     line's own length is whatever the sink wrote, and the sink's cap is the
-     size of the file (electron/log.ts:33, 2 MiB). A single enormous line is
-     therefore pasted whole. Recorded rather than fixed: electron/ is outside
-     this ticket. */
-  it.fails('bounds what one log line can carry', async () => {
+  /* The bound is a count of lines (LOG_LINES); a line's own length is whatever
+     the sink wrote, and the sink's cap is the size of the file (electron/log.ts,
+     2 MiB). One enormous line is cut at the export's own per-line bound, and the
+     cut says so rather than passing the line off as whole. */
+  it('bounds what one log line can carry', async () => {
     const enormous = `a line that got away: ${'x'.repeat(200_000)}`;
     const said = saysDiagnostics(await gather(asked({ recent: () => [enormous] })));
 
     expect(said.length).toBeLessThan(50_000);
+    // The beginning is still there, and the bundle says a line was cut rather
+    // than passing it off as whole.
+    expect(said).toContain('a line that got away:');
+    expect(said).toContain('(cut at');
   });
 
   it('asks for no more than the log it is willing to carry', async () => {

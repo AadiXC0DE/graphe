@@ -28,7 +28,7 @@ import {
   type ConnectOutcome,
   type ConnectStep,
   type Decision,
-  type FileEntry,
+  type FilesRead,
   type Fetched,
   type FoundAccount,
   type GrapheApi,
@@ -45,6 +45,7 @@ import {
   type TerminalExit,
   type TerminalKind,
   type TerminalSession,
+  type TextRead,
   type ExtensionRequest,
   type ExtensionAnswer,
   type Page,
@@ -361,15 +362,22 @@ const api: GrapheApi = {
     return ipcRenderer.invoke(CHANNEL.setShowFiles, on) as Promise<Result<Preferences>>;
   },
 
-  projectFiles(where?: Where): Promise<Result<readonly FileEntry[]>> {
-    return ipcRenderer.invoke(CHANNEL.projectFiles, named(where)) as Promise<Result<readonly FileEntry[]>>;
+  projectFiles(where?: Where): Promise<Result<FilesRead>> {
+    return ipcRenderer.invoke(CHANNEL.projectFiles, named(where)) as Promise<Result<FilesRead>>;
   },
 
-  fileText(path: string, where?: Where): Promise<Result<string>> {
+  fileText(path: string, where?: Where, expect?: string): Promise<Result<TextRead>> {
     if (typeof path !== 'string' || path.trim() === '') {
-      return Promise.resolve(refuse<string>('I could not tell which file you meant.'));
+      return Promise.resolve(refuse<TextRead>('I could not tell which file you meant.'));
     }
-    return ipcRenderer.invoke(CHANNEL.fileText, path, named(where)) as Promise<Result<string>>;
+    // The revision travels in front of the where: `whereIn` reads the last
+    // argument, so nothing may follow it that is not the target.
+    return ipcRenderer.invoke(
+      CHANNEL.fileText,
+      path,
+      typeof expect === 'string' ? expect : null,
+      named(where),
+    ) as Promise<Result<TextRead>>;
   },
 
   hatches(): Promise<Result<Hatches>> {

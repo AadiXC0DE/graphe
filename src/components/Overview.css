@@ -13,11 +13,15 @@
   right: 0;
   bottom: 0;
   z-index: 2;
-  width: var(--rail-width);
+  /* The panel's width and the room the composition keeps for it are one number:
+     .app--overviewed sets both, and it is what gives way first when the window
+     cannot hold a rail and a readable conversation. */
+  width: var(--overview-take);
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-left: 1px solid var(--border);
+  /* A rail given no room paints no edge either — see the file panel in App.css. */
+  border-left: min(1px, var(--overview-take)) solid var(--border);
   overflow-y: auto;
   /* Fixed to the glass, so no bar: it would run the full height of the window
      beside the work rather than in it, and the reveal shoved every line in the
@@ -362,17 +366,9 @@
    needs to stay there is in CostMeter.css, under .cost-meter--panel. */
 .overview { padding-bottom: 0; }
 
-@media (max-width: 1100px) {
-  .overview {
-    width: var(--rail-width-tight);
-  }
-}
-
-@media (max-width: 720px) {
-  .overview {
-    width: 240px;
-  }
-}
+/* The panel's width is the room the composition kept for it: the two narrow
+   steps this used to carry are on --rail-width itself (App.css), so the panel
+   and the padding around the conversation cannot disagree. */
 
 @media (prefers-reduced-motion: reduce) {
   .overview { animation: none; }

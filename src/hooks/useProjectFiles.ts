@@ -22,14 +22,22 @@ import type { FileEntry, Where } from '../lib/ipc';
  *  sentence saying why it cannot be shown at all. */
 export type Reading = { path: string; text: string | null; trouble: string | null };
 
+/** A listing, and what the folder looked like when it was read.
+ *
+ * The revision is the point of keeping them together: a panel drawn from memory
+ * cannot tell on its own whether the folder has moved since, and the open file
+ * is the one thing on screen that would then be showing bytes nobody can still
+ * find on disk. */
+export type Listing = { files: readonly FileEntry[]; revision: string };
+
 /** How often the file tree is walked while a run is going. Short enough that a
  *  new folder appears while somebody is still looking for it, long enough that
  *  a step writing forty files does not walk the project forty times. */
 const FILES_APART = 1_200;
 
 export type ProjectFiles = {
-  files: Readonly<Record<string, readonly FileEntry[]>>;
-  setFiles: Dispatch<SetStateAction<Readonly<Record<string, readonly FileEntry[]>>>>;
+  files: Readonly<Record<string, Listing>>;
+  setFiles: Dispatch<SetStateAction<Readonly<Record<string, Listing>>>>;
   reading: Reading | null;
   setReading: Dispatch<SetStateAction<Reading | null>>;
   refresh(path: string): Promise<void>;
@@ -50,7 +58,7 @@ export function useProjectFiles(options: {
 }): ProjectFiles {
   const { desksNow, project, showFiles } = options;
 
-  const [files, setFiles] = useState<Readonly<Record<string, readonly FileEntry[]>>>({});
+  const [files, setFiles] = useState<Readonly<Record<string, Listing>>>({});
   const [reading, setReading] = useState<Reading | null>(null);
 
   const wantsFiles = useRef(showFiles);
@@ -62,6 +70,17 @@ export function useProjectFiles(options: {
   /** Whether the window is somewhere it can be seen. A tree nobody can look at
    *  is a walk nobody is owed; it is taken again on the way back. */
   const shows = useRef(true);
+
+  /** The revision each project's listing was read at, and the file open out of
+   *  it with the revision that file was read at. Held apart from the state
+   *  above so a re-read can be decided without rendering, and so a listing is
+   *  never compared against a file from another project. */
+  const readRevision = useRef<Record<string, string>>({});
+  const openFile = useRef<{ project: string; path: string; revision: string } | null>(null);
+
+  /** Reading a file again from a callback defined before it. The ref is what
+   *  keeps the two out of each other's dependency lists. */
+  const readFileNow = useRef<(path: string) => void>(() => undefined);
 
   const refresh = useCallback(
     async (path: string) => {
@@ -79,7 +98,17 @@ export function useProjectFiles(options: {
       // ago would draw its files under this chat's name.
       if (!answer.ok || desksNow.current.current !== path) return;
       if ((desksNow.current.byPath[path]?.address ?? null) !== address) return;
+      const before = readRevision.current[path];
+      readRevision.current = { ...readRevision.current, [path]: answer.value.revision };
       setFiles((current) => ({ ...current, [path]: answer.value }));
+      /* The folder moved since this panel last looked, so a file on screen was
+         read out of a tree that is not there any more. It is read again rather
+         than left showing bytes nobody can still find on disk — which is the
+         whole reason the listing carries a revision. */
+      const open = openFile.current;
+      if (open !== null && open.project === path && before !== answer.value.revision) {
+        readFileNow.current(open.path);
+      }
     },
     [desksNow],
   );
@@ -102,11 +131,20 @@ export function useProjectFiles(options: {
 
   const readFile = useCallback((path: string) => {
     const token = (openAt.current += 1);
-    const desk = desksNow.current.byPath[desksNow.current.current ?? ''];
+    const inFront = desksNow.current.current;
+    const desk = desksNow.current.byPath[inFront ?? ''];
     const where: Where = {
-      ...(desksNow.current.current === null ? {} : { project: desksNow.current.current }),
+      ...(inFront === null ? {} : { project: inFront }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
     };
+    /* What this file was last read at, so the answer can say whether it is
+       still the file that was on screen. The shell reads the bytes either way —
+       what the revision buys is knowing that they are not the ones somebody was
+       already looking at. */
+    const project = inFront ?? '';
+    const open = openFile.current;
+    const expect =
+      open !== null && open.project === project && open.path === path ? open.revision : undefined;
     /* Nothing on screen changes until the file is here. Emptying the panel
        first and filling it a few milliseconds later is a flicker in the panel
        and, because the panel has a height, one in the conversation beside it;
@@ -115,16 +153,18 @@ export function useProjectFiles(options: {
     const saySo = setTimeout(() => {
       if (openAt.current === token) setReading({ path, text: null, trouble: null });
     }, 150);
-    void bridge.fileText(path, where).then((answer) => {
+    void bridge.fileText(path, where, expect).then((answer) => {
       clearTimeout(saySo);
       if (openAt.current !== token) return;
-      setReading(
-        answer.ok
-          ? { path, text: answer.value, trouble: null }
-          : { path, text: null, trouble: answer.trouble.because },
-      );
+      if (!answer.ok) {
+        setReading({ path, text: null, trouble: answer.trouble.because });
+        return;
+      }
+      openFile.current = { project, path, revision: answer.value.revision };
+      setReading({ path, text: answer.value.text, trouble: null });
     });
   }, [desksNow]);
+  readFileNow.current = readFile;
 
   const wanted = useCallback((on: boolean) => {
     wantsFiles.current = on;

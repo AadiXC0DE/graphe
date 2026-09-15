@@ -4,7 +4,7 @@ import type { AddonSetup, CarriedExtension, ExtensionHere, Stopping } from '../l
 import { COPY, useCopying } from '../lib/copying';
 import Switch from './Switch';
 import {
-  REACHABLE,
+  alreadyReached,
   readReach,
   reachesMatching,
   type Reach,
@@ -100,9 +100,11 @@ type Props = {
   /** How many processes add-ons have running right now. Information, not a
    *  control: nothing here kills anything. */
   addonProcesses?: number | null;
-  /** The other half of the shelf: the places somebody's work already lives.
-   *  Ours by default, ticked and extended by whatever has been added. */
-  reaches?: readonly Reach[];
+  /** The other half of the shelf: the places somebody's work already lives,
+   *  as the ids of whichever ones this project has. Names rather than the shelf
+   *  itself, so what we offer is this screen's own and a launch does not carry
+   *  the whole list. */
+  reaches?: readonly string[];
   /** Which of those is being turned on or off this moment. */
   connecting?: string | null;
   /** Given one of ours by name. Without it that half of the shelf stays down,
@@ -159,7 +161,7 @@ export default function AddMore({
   onRemove,
   capabilities = {},
   addonProcesses = null,
-  reaches = REACHABLE,
+  reaches = [],
   connecting = null,
   onConnect,
   onDisconnect,
@@ -213,9 +215,12 @@ export default function AddMore({
     return () => clearTimeout(timer);
   }, [open, term, onSearch]);
 
+  // Ours, with whichever of them this project already has ticked.
+  const places = useMemo(() => alreadyReached(reaches), [reaches]);
+
   // One ordering for both kinds, then split into the bands they are drawn in.
   const [found, vouched, rest] = useMemo(() => {
-    const shelf = everything(packs, reachesMatching(reaches, term));
+    const shelf = everything(packs, reachesMatching(places, term));
     const ours: Pack[] = [];
     const theirs: Pack[] = [];
     const outward: Reach[] = [];
@@ -225,7 +230,7 @@ export default function AddMore({
       else theirs.push(one.addition);
     }
     return [outward, ours, theirs] as const;
-  }, [packs, reaches, term]);
+  }, [packs, places, term]);
 
   if (!open) return null;
 
@@ -383,7 +388,7 @@ export default function AddMore({
                 ))
               )}
               {onConnectByHand === undefined ? null : (
-                <ByHand known={reaches} onAdd={onConnectByHand} />
+                <ByHand known={places} onAdd={onConnectByHand} />
               )}
             </section>
           ) : null}

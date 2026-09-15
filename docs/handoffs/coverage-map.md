@@ -611,7 +611,7 @@ each, in the findings below.
 | 47 | `graphe:running` | conversation | main.ts:8011 | `sessionAt()` → `.running` | **module-only** | `tests/adapter.test.ts`; channel itself untested |
 | 48 | `graphe:running-said` | conversation | main.ts:8017 | `sessionAt()` → `.runningSaid()` | **module-only** | `tests/adapter.test.ts`; channel itself untested |
 | 49 | `graphe:page-said` | none | main.ts:8027 | `saidFrom()` + `src/work/commands-ran.ts` | **none** | `tests/commands-ran.test.ts` `it('is in all five places')` |
-| 50 | `graphe:stop-running` | conversation | main.ts:8033 | `sessionAt()` + `Running` `src/agent/running.ts` | **module-only** | `tests/fleet.test.ts` drives `Running`; channel itself untested |
+| 50 | `graphe:stop-running` | conversation | main.ts:8033 | `sessionAt()` + `Running` `src/agent/running.ts` | **module-only** | `tests/fleet.test.ts` drives `Running`; the channel itself and the strip's press (`src/App.tsx:5910`) have no test: a row is drawn only for a program the agent started and left running, which no scripted window makes, so the press cannot be driven there |
 | 51 | `graphe:tidy-now` | conversation | main.ts:7987 | `workingAt()` `:1975` → session tidy | **module-only** | `tests/adapter.test.ts`; channel itself untested |
 | 52 | `graphe:skills` | none | main.ts:9336 | `availableSkills()` `src/agent/pi/skills.ts:133` | **none** | no test imports `src/agent/pi/skills.ts` |
 | 53 | `graphe:skill-text` | none | main.ts:10811 | `skillNamed()` `src/agent/pi/skills.ts:159` | **none** | as row 52: no test imports `src/agent/pi/skills.ts` |

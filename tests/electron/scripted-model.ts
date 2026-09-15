@@ -31,6 +31,9 @@ export type ScriptedModel = {
   /** Everything the app sent, oldest first, for a test that needs to know what
    *  the model was actually told. */
   asked: readonly unknown[];
+  /** True once the app closed a reply before the script had finished writing
+   *  it — which is what stopping a run does to the far end of the wire. */
+  cutOff(): boolean;
   stop(): Promise<void>;
 };
 
@@ -71,6 +74,7 @@ export async function scriptedModel(): Promise<ScriptedModel> {
   const steps: Step[] = [];
   const asked: unknown[] = [];
   let turns = 0;
+  let cut = false;
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -92,6 +96,11 @@ export async function scriptedModel(): Promise<ScriptedModel> {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
         connection: 'keep-alive',
+      });
+      // The app went away before this reply was finished: a run that was
+      // stopped ends at this end of the wire too.
+      response.on('close', () => {
+        if (!response.writableEnded) cut = true;
       });
       const send = (event: unknown): void => {
         response.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -142,6 +151,7 @@ export async function scriptedModel(): Promise<ScriptedModel> {
       steps.splice(0, steps.length, ...next);
     },
     asked,
+    cutOff: () => cut,
     stop: () => {
       const closed = Promise.withResolvers<void>();
       server.close(() => closed.resolve());

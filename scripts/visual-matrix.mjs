@@ -1,0 +1,2303 @@
+// The visual and accessibility matrix from the stabilisation plan, run by a
+// machine where a machine can run it.
+//
+//   node scripts/visual-matrix.mjs                  the packaged app in release/
+//   node scripts/visual-matrix.mjs --built          the working tree's dist/
+//   node scripts/visual-matrix.mjs --only=zoom      one row, by substring
+//
+// The plan asks for four window sizes, four zooms, three themes, long titles,
+// twenty open conversations, keyboard-only navigation, reduced motion, the
+// overlays, the file tree and the terminal, with a screenshot and a recorded
+// result for each. This drives the real Electron app on a profile it throws
+// away, as `scripts/packaged-smoke.mjs` does, and measures the window from
+// inside it: every box that carries the work has to be inside the window, the
+// composer has to be hittable, the tab in front has to be inside the strip, and
+// nothing that should not scroll sideways may.
+//
+// What a machine cannot do is named at the end of the run rather than guessed
+// at: a screen reader, a monitor being unplugged, the OS reduced-motion switch
+// itself, the native file dialog, and whether a contrast ratio that passes the
+// arithmetic actually reads well.
+//
+// Nothing here is a substitute for a person at a screen. It is the half of the
+// matrix that can be re-run on any commit.
+
+import { execFileSync } from 'node:child_process';
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { _electron as electron } from 'playwright';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+
+/** How many conversations the plan asks to have open at once. */
+const CONVERSATIONS = 20;
+
+const args = process.argv.slice(2);
+const has = (name) => args.includes(`--${name}`);
+const valueOf = (name) => args.find((one) => one.startsWith(`--${name}=`))?.slice(name.length + 3) ?? null;
+
+const built = has('built');
+const keep = has('keep');
+const only = valueOf('only');
+/** The plan asks for twenty. A smaller row is for checking the harness itself
+ *  without waiting for twenty turns. */
+const conversations = Number(valueOf('conversations') ?? CONVERSATIONS);
+
+/** A profile, a project and a run of screenshots, all thrown away afterwards
+ *  unless --keep is passed. */
+const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+const home = mkdtempSync(join(tmpdir(), 'graphe-visual-'));
+const profile = join(home, 'profile');
+const scratch = join(root, 'results', stamp);
+const shots = join(scratch, 'visual-matrix');
+
+/** The plan's three sizes as the window is sized — the same numbers
+ *  `createWindow` uses, so 1100×780 is what the app opens at by itself. The
+ *  fourth row is whatever this machine's display actually is, measured rather
+ *  than assumed. */
+const SIZES = [
+  { id: '620x520', w: 620, h: 520, what: 'the smallest window the app allows' },
+  { id: '800x600', w: 800, h: 600, what: 'a small laptop window' },
+  { id: '1100x780', w: 1100, h: 780, what: 'the size the app opens at' },
+];
+
+const ZOOMS = [
+  { id: 'zoom-100', factor: 1, what: 'the default' },
+  { id: 'zoom-125', factor: 1.25, what: 'the first step the plan asks for' },
+  { id: 'zoom-150', factor: 1.5, what: 'the second' },
+  { id: 'zoom-200', factor: 2, what: 'twice the size' },
+];
+
+const THEMES = [
+  { id: 'theme-light', choice: 'Light', mark: 'light', what: 'light' },
+  { id: 'theme-dark', choice: 'Dark', mark: 'dark', what: 'dark' },
+  { id: 'theme-system', choice: 'System', mark: null, what: 'following the computer' },
+];
+
+/** Every box that carries the work. Each one has to be inside the window at
+ *  every size and zoom: a control half off the edge is a control somebody
+ *  cannot press. */
+const MUST_FIT = [
+  'main.app',
+  '.topbar',
+  '.shelf',
+  '.tabs',
+  '.tabs__strip',
+  '.composer',
+  '.composer__input',
+  '.composer__send',
+  '.filespanel',
+  '.files__tree',
+];
+
+/** Containers that must not scroll sideways. `.tabs__strip` is deliberately
+ *  absent: a row of twenty tabs is meant to scroll. */
+const NO_SIDEWAYS = ['main.app', '.topbar', '.composer', '.filespanel', '.files__tree', '.settings', '.palette'];
+
+/** The text a person reads, and what it is read against. */
+const CONTRAST = [
+  { sel: '.welcome__title', what: 'the greeting over a project' },
+  { sel: '.tabs__title', what: 'a conversation title' },
+  { sel: '.composer__input', what: 'what you type' },
+  { sel: '.shelf__rowname', what: 'a row in the sidebar' },
+  { sel: '.files__row', what: 'a file in the tree' },
+  { sel: '.thinking__label', what: 'which model answers' },
+];
+
+/* -------------------------------------------------------------------------- */
+/* Saying what happened                                                        */
+/* -------------------------------------------------------------------------- */
+
+let current = null;
+let failed = 0;
+const results = [];
+
+function ok(says) {
+  if (current !== null) current.checks.push({ ok: true, says });
+  console.log(`  ✓ ${says}`);
+}
+function bad(says) {
+  if (current !== null) current.checks.push({ ok: false, says });
+  failed += 1;
+  console.log(`  ✗ ${says}`);
+}
+function note(says) {
+  if (current !== null) current.notes.push(says);
+  console.log(`  note: ${says}`);
+}
+function verdict(says, is) {
+  if (is) ok(says);
+  else bad(says);
+}
+
+async function row(id, what, run) {
+  if (only !== null && !id.includes(only)) return;
+  current = { id, what, checks: [], notes: [], shot: null, threw: null };
+  results.push(current);
+  console.log(`\n▸ ${id} — ${what}`);
+  try {
+    await run();
+  } catch (cause) {
+    current.threw = String(cause?.message ?? cause).split('\n').slice(0, 3).join(' | ');
+    bad(`the row did not finish: ${current.threw}`);
+  }
+  if (current.shot !== null) console.log(`  shot: ${current.shot.slice(root.length)}`);
+  current = null;
+}
+
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** Poll on the clock; everything the app does, it does while this waits. */
+async function until(ready, within = 20_000, step = 100) {
+  const stop = Date.now() + within;
+  for (;;) {
+    try {
+      if (await ready()) return true;
+    } catch {
+      // A selector that is not there yet is the ordinary case here.
+    }
+    if (Date.now() > stop) return false;
+    await pause(step);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* What the window is, measured from inside it                                 */
+/* -------------------------------------------------------------------------- */
+
+const viewport = (window_) =>
+  window_.evaluate(() => ({
+    w: window.innerWidth,
+    h: window.innerHeight,
+    dpr: window.devicePixelRatio,
+    rootTheme: document.documentElement.getAttribute('data-theme'),
+    scrolls:
+      document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ||
+      document.body.scrollWidth > document.body.clientWidth + 1,
+  }));
+
+const boxes = (window_, selectors) =>
+  window_.evaluate((list) => {
+    const out = [];
+    for (const sel of list) {
+      const el = document.querySelector(sel);
+      if (el === null) {
+        out.push({ sel, missing: true });
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      out.push({
+        sel,
+        x: Math.round(r.x * 10) / 10,
+        y: Math.round(r.y * 10) / 10,
+        w: Math.round(r.width * 10) / 10,
+        h: Math.round(r.height * 10) / 10,
+        right: Math.round(r.right * 10) / 10,
+        bottom: Math.round(r.bottom * 10) / 10,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        overflowX: s.overflowX,
+      });
+    }
+    return out;
+  }, selectors);
+
+/** Whether the middle of an element is the thing a click would land on. A
+ *  control under an overlay, or under a native view, is not reachable however
+ *  good its rectangle looks. */
+const hits = (window_, selector) =>
+  window_.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (el === null) return { sel, missing: true };
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return { sel, hidden: true };
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    if (at === null) return { sel, nothing: true };
+    const holder = el.contains(at) || at.contains(el);
+    return {
+      sel,
+      hit: holder,
+      landed: `${at.tagName.toLowerCase()}${at.className === '' ? '' : `.${String(at.className).split(' ').join('.')}`}`,
+    };
+  }, selector);
+
+const inside = (box, view) =>
+  box.x >= -0.5 && box.y >= -0.5 && box.right <= view.w + 0.5 && box.bottom <= view.h + 0.5;
+
+/** Everything the window is drawn with that only an icon speaks for. A control
+ *  with no name is a control a screen reader announces as "button". */
+const nameless = (window_) =>
+  window_.evaluate(() => {
+    const nameOf = (el) => {
+      const labelled = el.getAttribute('aria-labelledby');
+      if (labelled !== null && labelled !== '') {
+        const text = labelled
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent ?? '')
+          .join(' ')
+          .trim();
+        if (text !== '') return text;
+      }
+      const direct = el.getAttribute('aria-label');
+      if (direct !== null && direct.trim() !== '') return direct.trim();
+      const title = el.getAttribute('title');
+      if (title !== null && title.trim() !== '') return title.trim();
+      const own = (el.textContent ?? '').trim();
+      if (own !== '') return own;
+      const alt = el.querySelector('img[alt]')?.getAttribute('alt');
+      if (alt !== undefined && alt !== null && alt.trim() !== '') return alt.trim();
+      return (el.getAttribute('placeholder') ?? el.getAttribute('value') ?? '').trim();
+    };
+    const describe = (el) => {
+      const cls = typeof el.className === 'string' ? el.className.split(' ').filter((one) => one !== '')[0] : '';
+      return `${el.tagName.toLowerCase()}${cls === undefined || cls === '' ? '' : `.${cls}`}`;
+    };
+    const namelessOnes = [];
+    for (const el of document.querySelectorAll('button, a[href], [role="tab"], [role="option"], [role="button"]')) {
+      if (nameOf(el) === '') namelessOnes.push(describe(el));
+    }
+    const unlabelled = [];
+    for (const el of document.querySelectorAll('input, select, textarea')) {
+      if (el.getAttribute('type') === 'hidden') continue;
+      // An input taken out of the tree entirely is not a control anybody is
+      // asked to read; one that is merely off screen is.
+      if (getComputedStyle(el).display === 'none' || el.getAttribute('aria-hidden') === 'true') continue;
+      const labelled =
+        nameOf(el) !== '' ||
+        (el.id !== '' && document.querySelector(`label[for="${CSS.escape(el.id)}"]`) !== null) ||
+        el.closest('label') !== null;
+      if (!labelled) unlabelled.push(describe(el));
+    }
+    return { nameless: namelessOnes, unlabelled };
+  });
+
+/** The colour a piece of text is, and the colour it sits on, as the browser
+ *  resolved them. Translucent ancestors are composited rather than skipped,
+ *  because a half-transparent white over black is not white. */
+const colours = (window_, selectors) =>
+  window_.evaluate((list) => {
+    const parsed = (one) => {
+      const match = /rgba?\(([^)]+)\)/.exec(one);
+      if (match === null) return null;
+      const parts = match[1].split(',').map((piece) => Number.parseFloat(piece));
+      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+    };
+    const over = (front, back) => ({
+      r: front.r * front.a + back.r * (1 - front.a),
+      g: front.g * front.a + back.g * (1 - front.a),
+      b: front.b * front.a + back.b * (1 - front.a),
+      a: 1,
+    });
+    const out = [];
+    for (const sel of list) {
+      const el = document.querySelector(sel);
+      if (el === null) {
+        out.push({ sel, missing: true });
+        continue;
+      }
+      const s = getComputedStyle(el);
+      let ground = { r: 255, g: 255, b: 255, a: 1 };
+      const layers = [];
+      for (let node = el; node !== null; node = node.parentElement) {
+        const colour = parsed(getComputedStyle(node).backgroundColor);
+        if (colour !== null && colour.a > 0) layers.push(colour);
+      }
+      for (let at = layers.length - 1; at >= 0; at -= 1) ground = over(layers[at], ground);
+      const ink = parsed(s.color);
+      const size = Number.parseFloat(s.fontSize);
+      const weight = Number.parseInt(s.fontWeight, 10);
+      out.push({
+        sel,
+        ink: s.color,
+        ground: `rgb(${String(Math.round(ground.r))}, ${String(Math.round(ground.g))}, ${String(Math.round(ground.b))})`,
+        ratio: ink === null ? null : ratioOf(over(ink, ground), ground),
+        large: size >= 24 || (size >= 18.66 && weight >= 700),
+      });
+    }
+    function ratioOf(one, other) {
+      const lum = (colour) => {
+        const channel = (value) => {
+          const v = value / 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * channel(colour.r) + 0.7152 * channel(colour.g) + 0.0722 * channel(colour.b);
+      };
+      const a = lum(one);
+      const b = lum(other);
+      const high = Math.max(a, b);
+      const low = Math.min(a, b);
+      return Math.round(((high + 0.05) / (low + 0.05)) * 100) / 100;
+    }
+    return out;
+  }, selectors);
+
+/** The state of every element before anything is focused, so a container that
+ *  changes when focus lands inside it can be told from one that always looks
+ *  that way. A composer whose border lights up while somebody types is an
+ *  indicator; a composer that always has a shadow is decoration. */
+const ringSnapshot = (window_) =>
+  window_.evaluate(() => {
+    const rest = {};
+    let at = 0;
+    for (const el of document.querySelectorAll('main.app, main.app *')) {
+      const key = String(at);
+      at += 1;
+      el.setAttribute('data-vm-ring', key);
+      const s = getComputedStyle(el);
+      rest[key] = `${s.outlineStyle} ${s.outlineWidth} ${s.outlineColor}|${s.boxShadow}|${s.borderColor}|${s.backgroundColor}`;
+    }
+    window.__vmRing = rest;
+    return at;
+  });
+
+/** Whether the thing the keyboard is on is visibly the thing the keyboard is
+ *  on: its own outline, a shadow, or a container that changed under it. */
+const ringAt = (window_) =>
+  window_.evaluate(() => {
+    const el = document.activeElement;
+    if (el === null || el === document.body) return { none: true };
+    const describe = (one) => {
+      const cls = typeof one.className === 'string' ? one.className.split(' ').filter((each) => each !== '') : [];
+      return `${one.tagName.toLowerCase()}${cls.length === 0 ? '' : `.${cls.join('.')}`}`;
+    };
+    const styleOf = (one) => {
+      const s = getComputedStyle(one);
+      return `${s.outlineStyle} ${s.outlineWidth} ${s.outlineColor}|${s.boxShadow}|${s.borderColor}|${s.backgroundColor}`;
+    };
+    const s = getComputedStyle(el);
+    const own =
+      (s.outlineStyle !== 'none' && s.outlineStyle !== '' && Number.parseFloat(s.outlineWidth) > 0) ||
+      (s.boxShadow !== 'none' && s.boxShadow !== '');
+    const r = el.getBoundingClientRect();
+    const at = {
+      what: describe(el),
+      name: (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent ?? '').trim().slice(0, 48),
+      outline: `${s.outlineStyle} ${s.outlineWidth}`,
+      shadow: s.boxShadow === 'none' ? 'no shadow' : 'a shadow',
+      focusVisible: el.matches(':focus-visible'),
+      inViewport: r.x >= -0.5 && r.y >= -0.5 && r.right <= window.innerWidth + 0.5 && r.bottom <= window.innerHeight + 0.5,
+      ring: own,
+      where: own ? 'itself' : null,
+    };
+    if (own) return at;
+    // A container that answers for the control inside it.
+    for (let node = el.parentElement; node !== null; node = node.parentElement) {
+      if (node.getAttribute('data-vm-ring') === null) continue;
+      if (!node.matches(':focus-within')) continue;
+      const key = node.getAttribute('data-vm-ring');
+      const rest = window.__vmRing?.[key];
+      if (rest !== undefined && rest !== styleOf(node)) {
+        at.ring = true;
+        at.where = describe(node);
+        at.outline = `the container ${describe(node)} changed`;
+        break;
+      }
+    }
+    return at;
+  });
+
+/** What the keyboard is standing on, and whether anything on screen says so. */
+const standing = (window_) =>
+  window_.evaluate(() => {
+    const el = document.activeElement;
+    if (el === null || el === document.body) return { none: true };
+    const s = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    const cls = typeof el.className === 'string' ? el.className.split(' ').filter((one) => one !== '').join('.') : '';
+    const outline = `${s.outlineStyle} ${s.outlineWidth} ${s.outlineColor}`;
+    const ring =
+      (s.outlineStyle !== 'none' && s.outlineStyle !== '' && Number.parseFloat(s.outlineWidth) > 0) ||
+      (s.boxShadow !== 'none' && s.boxShadow !== '');
+    return {
+      what: `${el.tagName.toLowerCase()}${cls === '' ? '' : `.${cls}`}`,
+      name: (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent ?? '').trim().slice(0, 48),
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      right: Math.round(r.right),
+      bottom: Math.round(r.bottom),
+      outline,
+      shadow: s.boxShadow.slice(0, 60),
+      ring,
+      inViewport: r.x >= -0.5 && r.y >= -0.5 && r.right <= window.innerWidth + 0.5 && r.bottom <= window.innerHeight + 0.5,
+      inWindow: (() => {
+        const w = document.querySelector('main.app');
+        if (w === null) return true;
+        const box = w.getBoundingClientRect();
+        return r.x >= box.x - 0.5 && r.right <= box.right + 0.5;
+      })(),
+    };
+  });
+
+/* -------------------------------------------------------------------------- */
+/* The fixture: one folder, a long name, and enough in it to overflow          */
+/* -------------------------------------------------------------------------- */
+
+/** The project everything else runs in, named the way a real folder is. */
+const PROJECT = 'shop-front-redesign';
+
+/** A name long enough that nothing can show it whole. Kept as a second project
+ *  so the long-name case is one row with one variable in it. */
+const LONG_PROJECT = 'a-project-with-a-name-long-enough-that-it-cannot-fit-in-the-shelf';
+const LONG_LEAF =
+  'AnotherExtremelyLongFileNameThatKeepsGoingAndGoingAndGoingAndGoingAndGoingAndGoing.tsx';
+
+/** One folder, with enough in it to overflow the panel that lists it. */
+function makeProject(name, { deep = false } = {}) {
+  const project = join(mkdtempSync(join(tmpdir(), 'graphe-visual-')), name);
+  const put = (where, says) => {
+    const file = join(project, where);
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, says);
+  };
+  put('README.md', `# ${name}\n`);
+  put('package.json', `${JSON.stringify({ name, version: '1.0.0', scripts: {} }, null, 2)}\n`);
+  put(
+    join('src', 'main', 'components', 'very-long-component-folder-name', 'deeply', 'nested', LONG_LEAF),
+    '// a file whose path is wider than the panel\n',
+  );
+  if (deep) {
+    for (let folder = 1; folder <= 24; folder += 1) {
+      for (let file = 1; file <= 6; file += 1) {
+        put(
+          join('src', 'modules', `module-${String(folder).padStart(2, '0')}`, `file-${String(file)}.ts`),
+          `export const one${String(folder)}${String(file)} = ${String(folder * file)};\n`,
+        );
+      }
+    }
+  }
+  const git = (...flags) => execFileSync('git', flags, { cwd: project, stdio: 'pipe' });
+  try {
+    git('-c', 'init.defaultBranch=main', 'init', '-q');
+    git('add', '-A');
+    git('-c', 'user.email=visual@example.invalid', '-c', 'user.name=visual', 'commit', '-qm', 'first');
+  } catch {
+    // A machine without git still gets the layout rows; the folder just has no
+    // history in it.
+  }
+  return project;
+}
+
+/** What the shell reads at first paint: the project list, the theme, and the
+ *  file panel already on, so the tree is in the picture at every size. */
+function seedProfile(projects, theme) {
+  mkdirSync(profile, { recursive: true });
+  writeFileSync(
+    join(profile, 'projects.json'),
+    `${JSON.stringify({
+      version: 1,
+      projects: projects.map((one, index) => ({
+        path: one,
+        name: one.slice(one.lastIndexOf('/') + 1),
+        lastOpenedAt: Date.now() - index,
+        lastSpend: null,
+      })),
+    })}\n`,
+  );
+  writePreferences({ base: theme });
+}
+
+function writePreferences({ base, motion = 'full' }) {
+  writeFileSync(
+    join(profile, 'preferences.json'),
+    `${JSON.stringify({
+      version: 1,
+      preferences: { showFiles: true, appearance: { base, motion } },
+    })}\n`,
+  );
+}
+
+/** The same folders the app is promised, and nothing of anybody else's: a home
+ *  and a profile of its own, so a run cannot read or write a real one. */
+function environment(where) {
+  const env = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (name === 'GRAPHE_DEV_SERVER_URL' || name === 'GRAPHE_TEST_MODEL') continue;
+    if (name === 'ELECTRON_RUN_AS_NODE' || name === 'NODE_OPTIONS') continue;
+    env[name] = value;
+  }
+  env.HOME = where;
+  env.GRAPHE_PROFILE = profile;
+  env.PI_CODING_AGENT_DIR = join(profile, 'agent');
+  return env;
+}
+
+/** The built renderer over HTTP, which is where an unpackaged shell looks for
+ *  it. A `file://` window would carry the markup and not the workers. */
+async function serve(folder) {
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+    '.woff2': 'font/woff2',
+    '.png': 'image/png',
+    '.wasm': 'application/wasm',
+  };
+  const server = createServer((request, response) => {
+    const asked = decodeURIComponent((request.url ?? '/').split('?')[0] ?? '/');
+    const leaf = normalize(asked === '/' ? 'index.html' : asked).replace(/^(\.\.[/\\])+/, '');
+    const file = join(folder, leaf);
+    if (!existsSync(file) || !statSync(file).isFile()) {
+      response.writeHead(404).end('not built');
+      return;
+    }
+    response.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' });
+    createReadStream(file).pipe(response);
+  });
+  const listening = Promise.withResolvers();
+  server.listen(0, '127.0.0.1', () => {
+    listening.resolve();
+  });
+  await listening.promise;
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('the file server has no port');
+  return {
+    url: `http://127.0.0.1:${String(address.port)}/`,
+    stop: () => new Promise((done) => server.close(() => done())),
+  };
+}
+
+/** Which app this run inspects, said out loud, with the date of the build it
+ *  came from — a matrix against a stale bundle is a matrix of the wrong app. */
+function target() {
+  if (built) {
+    const renderer = join(root, 'dist', 'index.html');
+    const shell = join(root, 'dist-electron', 'boot.mjs');
+    if (!existsSync(renderer) || !existsSync(shell)) {
+      console.error(
+        '\nNo built app to inspect. Run `npx vite build && npm run app:build` first,\n' +
+          'or drop --built to use the packaged bundle in release/.\n',
+      );
+      process.exit(1);
+    }
+    return { how: 'built', renderer, shell, at: statSync(renderer).mtime.toISOString() };
+  }
+  const dir = process.arch === 'x64' ? 'mac' : `mac-${process.arch}`;
+  const app = join(root, 'release', dir, 'Graphe.app');
+  const binary = join(app, 'Contents/MacOS/Graphe');
+  if (!existsSync(binary)) {
+    console.error(
+      `\nNo packaged app for this machine in release/${dir}. Build one first:\n` +
+        '  npm run app:build && npm run package:quick\n' +
+        'Or inspect the working tree with --built.\n',
+    );
+    process.exit(1);
+  }
+  return { how: 'packaged', app, binary, at: statSync(binary).mtime.toISOString(), renderer: null };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The run                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const found = target();
+const longProject = makeProject(LONG_PROJECT);
+const project = makeProject(PROJECT, { deep: true });
+seedProfile([longProject, project], 'light');
+rmSync(shots, { recursive: true, force: true });
+mkdirSync(shots, { recursive: true });
+
+const served = found.how === 'built' ? await serve(join(root, 'dist')) : null;
+const env = environment(home);
+if (served !== null) env.GRAPHE_DEV_SERVER_URL = served.url;
+
+console.log(`\nGraphe — ${found.how}${found.how === 'packaged' ? ` (${found.app.slice(root.length)})` : ' (dist/ over http)'}`);
+console.log(`  built ${found.at}`);
+console.log(`  profile ${profile}`);
+console.log(`  screenshots ${shots.slice(root.length)}`);
+if (found.how === 'packaged' && existsSync(join(root, 'dist', 'index.html'))) {
+  const renderer = statSync(join(root, 'dist', 'index.html')).mtime.toISOString();
+  if (renderer > found.at) {
+    console.log(
+      `  note: the built renderer is newer (${renderer}) — the packaged bundle is behind the tree.` +
+        '\n        Run with --built to inspect the current source instead.',
+    );
+  }
+}
+
+const launch = () => {
+  const argv = [`--profile=${profile}`, `--user-data-dir=${profile}`];
+  if (found.how === 'packaged') {
+    return electron.launch({ executablePath: found.binary, args: argv, cwd: home, env, timeout: 60_000 });
+  }
+  return electron.launch({ args: ['.', ...argv], cwd: root, env, timeout: 60_000 });
+};
+
+/** The window, and the page inside it loaded far enough to be measured. */
+async function firstWindowOf(started) {
+  const page = await started.firstWindow();
+  await page.waitForLoadState('domcontentloaded');
+  return page;
+}
+
+let app = await launch();
+let window_ = await firstWindowOf(app);
+// Nothing is asked of the shell until it answers something.
+await tell(({ app: electronApp }) => electronApp.isReady());
+
+/** Ask the shell something, with a second and third go: a window that is still
+ *  coming up can drop one of these, and a dropped answer is not a finding. */
+async function tell(said, arg) {
+  const waits = [300, 700, 1500, 3000];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await app.evaluate(said, arg);
+    } catch (cause) {
+      if (attempt >= waits.length) throw cause;
+      // A window that has only just opened can drop one of these; a dropped
+      // answer is not a finding, so it is asked again.
+      await pause(waits[attempt]);
+    }
+  }
+}
+
+/** Sizes and zooms are applied to the window itself, which is what the plan
+ *  names: 620×520 is the window the app refuses to go below, so the content is
+ *  a little smaller than that and the check is the stricter one. */
+async function sizeWindow(w, h) {
+  await tell(({ BrowserWindow }, size) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win === undefined) return true;
+    if (win.isFullScreen()) win.setFullScreen(false);
+    if (win.isMaximized()) win.unmaximize();
+    win.setSize(size.w, size.h, false);
+    return true;
+  }, { w, h });
+  let settled = 0;
+  let last = '';
+  await until(async () => {
+    const now = JSON.stringify(await window_.evaluate(() => [window.innerWidth, window.innerHeight]));
+    if (now === last) settled += 1;
+    else settled = 0;
+    last = now;
+    return settled >= 2;
+  }, 6_000, 120);
+}
+
+async function zoomTo(factor) {
+  await tell(({ BrowserWindow }, value) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(value);
+    return true;
+  }, factor);
+  await pause(200);
+}
+
+async function shot(id) {
+  const file = join(shots, `${id}.png`);
+  await window_.screenshot({ path: file });
+  current.shot = file;
+  return file;
+}
+
+/** What hangs off the edge, so a failure names the thing that caused it rather
+ *  than only the box that noticed first. */
+const overflowing = (window_) =>
+  window_.evaluate(() => {
+    const out = [];
+    for (const el of document.querySelectorAll('body *')) {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 && r.height < 1) continue;
+      const over = Math.max(r.right - window.innerWidth, -r.left);
+      if (over <= 1) continue;
+      const s = getComputedStyle(el);
+      const cls = typeof el.className === 'string' ? el.className.split(' ').filter((one) => one !== '').join('.') : '';
+      out.push({
+        what: `${el.tagName.toLowerCase()}${cls === '' ? '' : `.${cls}`}`,
+        over: Math.round(over),
+        left: Math.round(r.left),
+        right: Math.round(r.right),
+        width: Math.round(r.width),
+        minWidth: s.minWidth,
+      });
+    }
+    return out.sort((a, b) => b.over - a.over).slice(0, 10);
+  });
+
+/** Text that is cut off rather than wrapped: the numbers a finding needs. */
+const truncated = (window_, selectors) =>
+  window_.evaluate((list) => {
+    const out = [];
+    for (const sel of list) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
+          out.push({
+            sel,
+            text: (el.textContent ?? '').trim().slice(0, 40),
+            needs: el.scrollWidth,
+            has: el.clientWidth,
+          });
+        }
+      }
+    }
+    return out;
+  }, selectors);
+
+/** Everything that has to fit, at this size, for this row. */
+async function layoutHolds(prefix = '', { composer = true } = {}) {
+  const view = await viewport(window_);
+  const measured = await boxes(window_, MUST_FIT);
+  for (const one of measured) {
+    if (one.missing === true) continue;
+    if (!inside(one, view)) {
+      bad(
+        `${prefix}${one.sel} is outside the window: ${String(one.x)},${String(one.y)} to ${String(one.right)},${String(one.bottom)} ` +
+          `in ${String(view.w)}×${String(view.h)}`,
+      );
+    }
+  }
+  const present = measured.filter((one) => one.missing !== true);
+  const outside = present.filter((one) => !inside(one, view));
+  if (outside.length === 0) {
+    ok(`${prefix}every box that carries the work is inside a ${String(view.w)}×${String(view.h)} window (${present.length} checked)`);
+  } else {
+    const why = await overflowing(window_);
+    note(`what hangs off the edge: ${why.map((one) => `${one.what} ${String(one.over)}px over (width ${String(one.width)}, min-width ${one.minWidth})`).join('; ') || 'nothing measurable'}`);
+  }
+  const sideways = await boxes(window_, NO_SIDEWAYS);
+  for (const one of sideways) {
+    if (one.missing === true) continue;
+    if (one.scrollWidth > one.clientWidth + 1) {
+      bad(`${prefix}${one.sel} scrolls sideways: ${String(one.scrollWidth)}px of content in ${String(one.clientWidth)}px`);
+    }
+  }
+  if (sideways.filter((one) => one.missing !== true).every((one) => one.scrollWidth <= one.clientWidth + 1)) {
+    ok(`${prefix}nothing that should stay put scrolls sideways`);
+  }
+  if (view.scrolls) bad(`${prefix}the document itself scrolls sideways`);
+  if (!composer) return view;
+  const composerHere = await hits(window_, '.composer__input');
+  verdict(`${prefix}the composer is reachable`, composerHere.hit === true);
+  if (composerHere.hit !== true) {
+    note(`a click in the composer would land on ${composerHere.landed ?? JSON.stringify(composerHere)}`);
+  }
+  const send = await hits(window_, '.composer__send');
+  verdict(`${prefix}the send control is reachable`, send.hit === true);
+  const cut = await truncated(window_, ['.thinking__label']);
+  for (const one of cut) {
+    bad(`${prefix}the control that names the model is cut off: "${one.text}" needs ${String(one.needs)}px in ${String(one.has)}px`);
+  }
+  if (cut.length === 0) ok(`${prefix}the model control shows its whole label`);
+  const also = await truncated(window_, ['.shelf__rowname', '.welcome__title', '.files__row', '.topbar__name']);
+  if (also.length > 0) {
+    note(
+      `${prefix}shortened with an ellipsis: ${also
+        .slice(0, 5)
+        .map((one) => `${one.sel} "${one.text.slice(0, 18)}" (${String(one.has)}px of ${String(one.needs)})`)
+        .join('; ')}`,
+    );
+  }
+  const here = await window_.evaluate(() => {
+    const tab = document.querySelector('.tabs__tab--here');
+    const strip = document.querySelector('.tabs__strip');
+    const name = document.querySelector('.topbar__name');
+    if (tab === null || strip === null) return null;
+    const one = tab.getBoundingClientRect();
+    const box = strip.getBoundingClientRect();
+    return {
+      inside: one.left >= box.left - 1 && one.right <= box.right + 1,
+      title: document.querySelector('.tabs__tab--here .tabs__title')?.textContent ?? '',
+      scrolled: Math.round(strip.scrollLeft),
+      stripWidth: strip.clientWidth,
+      stripContent: strip.scrollWidth,
+      tabsWidth: Math.round(document.querySelector('.tabs')?.getBoundingClientRect().width ?? 0),
+      nameWidth: Math.round(name?.getBoundingClientRect().width ?? 0),
+      tabs: document.querySelectorAll('.tabs__tab').length,
+    };
+  });
+  if (here !== null) {
+    verdict(
+      `${prefix}the tab in front is inside the strip${here.title === '' ? '' : ` ("${here.title.slice(0, 30)}…")`} of ${String(here.tabs)}`,
+      here.inside,
+    );
+    if (!here.inside) {
+      note(
+        `the strip is ${String(here.stripWidth)}px wide holding ${String(here.stripContent)}px of tabs, next to a ${String(here.nameWidth)}px project name`,
+      );
+    }
+  }
+  return view;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 1. The first screen, and the project list                                   */
+/* -------------------------------------------------------------------------- */
+
+await row('project-list', 'the window a stranger meets: a long name and a short one', async () => {
+  await window_.locator('.picker .pickerrow__open').first().waitFor({ timeout: 60_000 });
+  await window_.locator('.welcome').waitFor({ state: 'detached', timeout: 30_000 });
+  const rows = await window_.evaluate(() =>
+    [...document.querySelectorAll('.pickerrow')].map((one) => {
+      const name = one.querySelector('.pickerrow__name');
+      const box = one.getBoundingClientRect();
+      return {
+        text: (name?.textContent ?? '').trim(),
+        overflows: (name?.scrollWidth ?? 0) > (name?.clientWidth ?? 0) + 1,
+        fits: box.left >= -0.5 && box.right <= window.innerWidth + 0.5,
+      };
+    }),
+  );
+  await shot('project-list');
+  if (rows.length === 0) bad('there is no project row to press');
+  for (const one of rows) {
+    verdict(`"${one.text.slice(0, 24)}…" is drawn inside the window without pushing the row out`, one.fits);
+    note(
+      `the name is ${String(one.text.length)} characters and is clipped rather than wrapped: ${String(one.overflows)}`,
+    );
+  }
+  const view = await viewport(window_);
+  const [picker] = await boxes(window_, ['.picker']);
+  if (picker.missing === true) bad('there is no project list on screen');
+  else verdict('the project list is inside the window', inside(picker, view));
+  await layoutHolds('opening screen: ', { composer: false });
+});
+
+await row('empty-state', 'a project with nothing said in it yet', async () => {
+  await window_.locator('.picker .pickerrow__open', { hasText: PROJECT }).first().click();
+  await window_.locator('.welcome').waitFor({ timeout: 60_000 });
+  await sizeWindow(620, 520);
+  const said = await window_.locator('.welcome__title').innerText();
+  verdict(`the greeting names the project`, said.includes(PROJECT));
+  const list = await window_.locator('.welcome__example').count();
+  note(`${String(list)} ways to start are offered under the greeting`);
+  await shot('empty-state');
+  await layoutHolds('empty state: ');
+  await sizeWindow(1100, 780);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 2. Twenty conversations with long titles                                    */
+/* -------------------------------------------------------------------------- */
+
+const titles = [];
+for (let n = 1; n <= conversations; n += 1) {
+  titles.push(`Conversation ${String(n)} about a subject long enough to run past the strip`);
+}
+
+/** What the strip holds, and which conversation is in front. Read in one go,
+ *  because a count taken a moment before a click is a count of a different
+ *  screen. */
+const stripState = (window_) =>
+  window_.evaluate(() => ({
+    titles: [...document.querySelectorAll('.tabs__title')].map((one) => one.textContent ?? ''),
+    here: document.querySelector('.tabs__tab--here .tabs__title')?.textContent ?? '',
+    tabs: document.querySelectorAll('.tabs__tab').length,
+  }));
+
+/** Start another conversation from the sidebar, and wait until it is really
+ *  there: one more row, with the new conversation in front. */
+async function newConversation() {
+  const before = await stripState(window_);
+  /* The sidebar's own control, the plus in the strip, and the row's own button
+     when there is nothing open at all: whichever of them this window is
+     offering. */
+  const starters = ['.shelf__new', '.tabs__add', '.tabs__empty'];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await dismissConnect();
+    for (const sel of starters) {
+      const button = window_.locator(sel).first();
+      if ((await button.count()) === 0) continue;
+      await button.click({ timeout: 5_000 }).catch(() => undefined);
+      const fresh = await until(async () => {
+        const now = await stripState(window_);
+        return now.tabs === before.tabs + 1 && now.here === 'New conversation';
+      }, 8_000);
+      if (fresh) return true;
+    }
+    await pause(500);
+  }
+  return false;
+}
+
+/** The picker and the topbar menu both draw `.pickerrow__open`, so the project
+ *  list is only ever pressed through `.picker`. */
+async function ensureProjectOpen() {
+  const ready = await until(
+    async () =>
+      (await window_.locator('.composer__input').count()) > 0 ||
+      (await window_.locator('.picker .pickerrow__open').count()) > 0,
+    60_000,
+  );
+  if (!ready) throw new Error('neither the project list nor a conversation appeared');
+  if ((await window_.locator('.composer__input').count()) === 0) {
+    await window_.locator('.picker .pickerrow__open', { hasText: PROJECT }).first().click();
+    await window_.locator('.composer__input').waitFor({ timeout: 60_000 });
+  }
+  /* The sheet that asks for a model is opened by a send and arrives a moment
+     after it, so a row that opens one can leave it over the next row's
+     composer. Every row that needs a usable window starts here, so this is
+     where it is taken away. */
+  await dismissConnect();
+}
+
+await row('twenty-tabs', `${String(conversations)} open conversations, each with a long title`, async () => {
+  // A run of one row still needs a project open; the picker is the way in.
+  await ensureProjectOpen();
+  const made = [];
+  window_.on('load', () => note('the window reloaded'));
+  for (const [index, title] of titles.entries()) {
+    if (!(await dismissConnect())) {
+      note('the sheet asking for a model would not close, so no more conversations could be opened');
+      break;
+    }
+    if (index > 0) {
+      // Each conversation is named by the first thing asked in it, so a new one
+      // is started before the ask rather than after: a profile with no account
+      // refuses the second ask in the same conversation.
+      if (!(await newConversation())) {
+        note(`the sidebar stopped opening conversations after ${String(made.length)}`);
+        break;
+      }
+    }
+    const ready = await hits(window_, '.composer__input');
+    if (ready.hit !== true) {
+      note(`the composer could not be reached: a click would land on ${ready.landed ?? JSON.stringify(ready)}`);
+      break;
+    }
+    const step = await stripState(window_);
+    note(`step ${String(index)}: in front "${step.here.slice(0, 22)}", ${String(step.tabs)} open`);
+    await window_.locator('.composer__input').fill(title);
+    await window_.locator('.composer__send').first().click();
+    /* The app cuts a conversation's name to 39 characters and an ellipsis, and
+       the strip, the tooltip and the accessible name all carry that same
+       shortened string, so the check is against its first characters. */
+    const stem = title.slice(0, 30);
+    const named = await until(async () => {
+      const labels = await window_
+        .locator('.tabs__open')
+        .evaluateAll((all) => all.map((one) => one.getAttribute('aria-label') ?? ''));
+      return labels.some((one) => one.includes(stem));
+    }, 20_000);
+    if (!named) {
+      const state = await window_.evaluate(() => ({
+        titles: [...document.querySelectorAll('.tabs__title')].map((one) => one.textContent),
+        draft: (document.querySelector('.composer__input')?.value ?? '(no composer)').slice(0, 40),
+        modal: document.querySelector('.connectmodal') !== null,
+      }));
+      note(`the ask did not name a conversation: ${JSON.stringify(state)}`);
+      break;
+    }
+    made.push(title);
+  }
+  await dismissConnect();
+  const shown = await window_.locator('.tabs__title').allTextContents();
+  const drawn = await window_.evaluate(() => {
+    const one = document.querySelector('.tabs__tab--here .tabs__title');
+    const tab = document.querySelector('.tabs__tab--here .tabs__open');
+    return {
+      drawn: (one?.textContent ?? '').length,
+      asked: (tab?.getAttribute('aria-label') ?? '').length,
+      title: tab?.getAttribute('title') ?? '',
+      shortened: one?.textContent?.endsWith('…') === true,
+    };
+  });
+  note(
+    `an asked-for title of ${String(drawn.asked)} characters is drawn as ${String(drawn.drawn)}${drawn.shortened ? ' with an ellipsis' : ''}; its tooltip is "${drawn.title.slice(0, 40)}…"`,
+  );
+  await shot('twenty-tabs');
+  verdict(`${String(shown.length)} conversations are open`, shown.length >= conversations);
+  if (shown.length < conversations) {
+    note(`only ${String(shown.length)} could be opened: ${shown.map((one) => one.slice(0, 24)).join(' | ')}`);
+  }
+  const strip = await window_.evaluate(() => {
+    const one = document.querySelector('.tabs__strip');
+    if (one === null) return null;
+    return { scrollWidth: one.scrollWidth, clientWidth: one.clientWidth, more: document.querySelector('.tabs__more') !== null };
+  });
+  if (strip === null) bad('the tab strip is not there');
+  else {
+    verdict(
+      `the strip holds the row without pushing the window wider (${String(strip.scrollWidth)}px of tabs in ${String(strip.clientWidth)}px)`,
+      strip.scrollWidth > strip.clientWidth,
+    );
+    verdict('the overflow listing is offered once tabs are out of sight', strip.more);
+  }
+  await layoutHolds('twenty tabs: ');
+});
+
+/* -------------------------------------------------------------------------- */
+/* 3. Titles that collide                                                      */
+/* -------------------------------------------------------------------------- */
+
+await row('same-prefix-titles', 'two conversations whose names start the same way', async () => {
+  const pair = [
+    'A conversation about the checkout flow, which will be redesigned in the spring',
+    'A conversation about the checkout flow, which will be redesigned in the autumn',
+  ];
+  for (const title of pair) {
+    if (!(await newConversation())) {
+      bad('a third and fourth conversation could not be started');
+      return;
+    }
+    await window_.locator('.composer__input').fill(title);
+    await window_.locator('.composer__send').first().click();
+    await until(
+      async () =>
+        (
+          await window_.locator('.tabs__open').evaluateAll((all) => all.map((one) => one.getAttribute('aria-label') ?? ''))
+        ).some((one) => one.includes(title.slice(0, 30))),
+      20_000,
+    );
+    // The sheet arrives a moment after the rename, so it is waited for before
+    // it is dismissed: dismissing too early leaves it over the next row.
+    await until(async () => (await window_.locator('.connectmodal').count()) > 0, 3_000);
+    await dismissConnect();
+  }
+  await dismissConnect();
+  await shot('same-prefix-titles');
+  const told = await window_.evaluate(() => {
+    const names = [...document.querySelectorAll('.tabs__open')].map((one) => ({
+      label: one.getAttribute('aria-label') ?? '',
+      tooltip: one.getAttribute('title') ?? '',
+      drawn: (one.querySelector('.tabs__title')?.textContent ?? '').trim(),
+    }));
+    const mine = names.filter((one) => one.label.includes('A conversation about the checkout'));
+    return {
+      mine,
+      sameLabel: mine.length === 2 && mine[0].label === mine[1].label,
+      sameTooltip: mine.length === 2 && mine[0].tooltip === mine[1].tooltip,
+      sameDrawn: mine.length === 2 && mine[0].drawn === mine[1].drawn,
+    };
+  });
+  note(`the two rows read: ${told.mine.map((one) => `"${one.drawn}"`).join(' and ')}`);
+  note(
+    `where they differ is after character ${String(
+      [...pair[0]].findIndex((one, at) => one !== pair[1][at]) + 1,
+    )}, and the app cuts a name at 39`,
+  );
+  verdict('two conversations with different names have different accessible names', !told.sameLabel);
+  if (told.sameLabel) {
+    bad(
+      `both tabs are announced as "${told.mine[0]?.label ?? ''}", so a screen reader cannot tell them apart`,
+    );
+  }
+  verdict('and different tooltips', !told.sameTooltip);
+  if (told.sameTooltip) bad(`both tooltips read "${told.mine[0]?.tooltip ?? ''}"`);
+  if (told.sameDrawn) {
+    note('the two tabs are also drawn identically, which is the same thing a person sees');
+  }
+});
+
+
+
+/* -------------------------------------------------------------------------- */
+/* 4. The sizes                                                                */
+/* -------------------------------------------------------------------------- */
+
+const display = await app.evaluate(({ screen }) => {
+  const { workArea } = screen.getPrimaryDisplay();
+  return { w: workArea.width, h: workArea.height, scale: screen.getPrimaryDisplay().scaleFactor };
+});
+note(`this display's work area is ${String(display.w)}×${String(display.h)} at scale ${String(display.scale)}`);
+
+for (const one of [...SIZES, { id: 'display', w: display.w, h: display.h, what: "this machine's whole display" }]) {
+  await row(one.id, `${one.what} — ${String(one.w)}×${String(one.h)}`, async () => {
+    await ensureProjectOpen();
+    await sizeWindow(one.w, one.h);
+    await shot(one.id);
+    const view = await layoutHolds();
+    note(`the window is ${String(one.w)}×${String(one.h)}; the page inside it is ${String(view.w)}×${String(view.h)}`);
+    const shelf = await window_.evaluate(() =>
+      document.querySelector('.shelf--closed') === null ? 'open' : 'collapsed',
+    );
+    note(`the sidebar is ${shelf} at this size`);
+    const widths = await window_.evaluate(() => {
+      const strip = document.querySelector('.tabs__strip');
+      const name = document.querySelector('.topbar__name');
+      return {
+        strip: strip?.clientWidth ?? -1,
+        tabs: strip?.scrollWidth ?? -1,
+        name: Math.round(name?.getBoundingClientRect().width ?? 0),
+        column: Math.round(document.querySelector('.app__column')?.getBoundingClientRect().width ?? 0),
+      };
+    });
+    note(
+      `the conversation column is ${String(widths.column)}px: ${String(widths.name)}px to the project name, ${String(widths.strip)}px left for ${String(widths.tabs)}px of tabs`,
+    );
+  });
+}
+
+await row('long-project-name', 'the same window with a name that cannot fit', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  const stripHere = async () =>
+    window_.evaluate(() => {
+      const strip = document.querySelector('.tabs__strip');
+      const tab = document.querySelector('.tabs__tab--here');
+      const name = document.querySelector('.topbar__name');
+      const box = strip?.getBoundingClientRect();
+      const one = tab?.getBoundingClientRect();
+      return {
+        strip: strip?.clientWidth ?? -1,
+        content: strip?.scrollWidth ?? -1,
+        name: Math.round(name?.getBoundingClientRect().width ?? 0),
+        nameText: (name?.textContent ?? '').trim(),
+        inside: box !== undefined && one !== undefined && one.left >= box.left - 1 && one.right <= box.right + 1,
+        tabs: document.querySelectorAll('.tabs__tab').length,
+      };
+    });
+  const here = await stripHere();
+  note(`in ${PROJECT}: the name takes ${String(here.name)}px, the strip has ${String(here.strip)}px for ${String(here.content)}px of tabs`);
+
+  // The switcher in the strip is how somebody moves between folders.
+  await window_.locator('.topbar__name').first().click();
+  await window_.locator('.topbar__switcher .pickerrow__open', { hasText: LONG_PROJECT.slice(0, 30) }).first().waitFor({ timeout: 20_000 });
+  await window_.locator('.topbar__switcher .pickerrow__open', { hasText: LONG_PROJECT.slice(0, 30) }).first().click();
+  const arrived = await until(async () => (await window_.locator('.topbar__name').innerText()).includes(LONG_PROJECT.slice(0, 30)), 20_000);
+  await shot('long-project-name');
+  verdict('the switcher opens the other folder', arrived);
+  const there = await stripHere();
+  note(`in the long-named project: the name takes ${String(there.name)}px, the strip has ${String(there.strip)}px for ${String(there.content)}px of tabs (${String(there.tabs)} open)`);
+  verdict(
+    `with a name that cannot fit, the conversation in front is still in sight (strip ${String(there.strip)}px, next to a ${String(there.name)}px name)`,
+    there.inside,
+  );
+  if (!there.inside) {
+    bad(
+      `a ${String(LONG_PROJECT.length)}-character project name takes ${String(there.name)}px of the strip along the top and leaves ${String(there.strip)}px for the tabs`,
+    );
+  }
+  await layoutHolds('long name: ');
+
+  // And back, which is also the check that tabs belong to a project. Counted
+  // rather than assumed: rows above this one open conversations of their own, so
+  // a fixed number here would be measuring the row order, not the app.
+  const mine = (await stripState(window_)).tabs;
+  await window_.locator('.topbar__name').first().click();
+  await window_.locator('.topbar__switcher .pickerrow__open', { hasText: PROJECT }).first().click();
+  const back = await until(async () => (await window_.locator('.tabs__title').count()) === mine, 20_000);
+  await pause(400);
+  const again = await stripHere();
+  verdict(
+    `coming back shows that project's own ${String(mine)} conversations (the other project had ${String(there.tabs)})`,
+    back,
+  );
+  await shot('back-to-the-first-project');
+  if (again.tabs !== mine) note(`the strip shows ${String(again.tabs)} conversations after coming back`);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 5. Zoom                                                                     */
+/* -------------------------------------------------------------------------- */
+
+for (const one of ZOOMS) {
+  await row(one.id, `zoom ${String(one.factor * 100)}% at 800×600 — ${one.what}`, async () => {
+    await ensureProjectOpen();
+    await sizeWindow(800, 600);
+    await zoomTo(one.factor);
+    await shot(one.id);
+    const view = await layoutHolds();
+    note(`at ${String(one.factor * 100)}% the page sees ${String(view.w)}×${String(view.h)} CSS pixels`);
+  });
+}
+
+await row('620x520-zoom-200', 'the smallest window at twice the size — the worst case there is', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(620, 520);
+  await zoomTo(2);
+  await shot('620x520-zoom-200');
+  await layoutHolds();
+  const clipped = await boxes(window_, MUST_FIT);
+  const out = clipped.filter((one) => one.missing !== true).length;
+  note(`${String(out)} of the ${String(MUST_FIT.length)} boxes the window is built from are drawn here`);
+});
+
+await zoomTo(1);
+await sizeWindow(1100, 780);
+
+await row('panel-away', 'the same windows with the file panel put away', async () => {
+  await ensureProjectOpen();
+  const measure = async () =>
+    window_.evaluate(() => {
+      const app = document.querySelector('main.app');
+      const strip = document.querySelector('.tabs__strip');
+      const name = document.querySelector('.topbar__name');
+      const chip = document.querySelector('.thinking__label');
+      return {
+        app: Math.round(app?.getBoundingClientRect().width ?? 0),
+        appContent: app?.scrollWidth ?? 0,
+        strip: strip?.clientWidth ?? -1,
+        tabs: strip?.scrollWidth ?? -1,
+        name: Math.round(name?.getBoundingClientRect().width ?? 0),
+        chip: chip === null ? null : [chip.clientWidth, chip.scrollWidth],
+      };
+    });
+
+  await sizeWindow(1100, 780);
+  const atDefault = await measure();
+  note(
+    `1100×780 with the panel: the app is ${String(atDefault.app)}px wide in an 1100px window, the strip has ${String(atDefault.strip)}px for ${String(atDefault.tabs)}px of tabs`,
+  );
+
+  const collapse = window_.locator('.filespanel__collapse').first();
+  if ((await collapse.count()) === 0) {
+    bad('there is no way to put the file panel away from the panel itself');
+    return;
+  }
+  await collapse.click();
+  await until(async () => (await window_.locator('.filespanel').count()) === 0, 10_000);
+  await pause(300);
+  const atDefaultAway = await measure();
+  note(
+    `1100×780 without it: the app is ${String(atDefaultAway.app)}px wide, the strip has ${String(atDefaultAway.strip)}px for ${String(atDefaultAway.tabs)}px of tabs`,
+  );
+  await shot('1100x780-without-the-panel');
+  await layoutHolds('at 1100 without the panel: ');
+
+  await sizeWindow(620, 520);
+  const atSmallest = await measure();
+  note(
+    `620×520 without it: the app is ${String(atSmallest.app)}px wide in a 620px window, the strip has ${String(atSmallest.strip)}px`,
+  );
+  await shot('620x520-without-the-panel');
+  await layoutHolds('at 620 without the panel: ');
+
+  // Put it back the way somebody brings it back, so the rows after this see the
+  // window they expect.
+  const place = window_.locator('.shelf__row', { hasText: 'Project files' });
+  if ((await place.count()) > 0) {
+    await place.first().click();
+    const back = await until(async () => (await window_.locator('.filespanel').count()) > 0, 10_000);
+    verdict('the file panel comes back from the sidebar', back);
+  } else {
+    bad('nothing in the sidebar brings the file panel back');
+  }
+  await sizeWindow(1100, 780);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 6. The themes, and what can be read in them                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Escape, until the named overlay is gone. Every row starts from a known
+ *  state rather than from whatever the row before it left open. */
+async function escapeFrom(...selectors) {
+  for (const sel of selectors) {
+    if ((await window_.locator(sel).count()) === 0) continue;
+    await window_.keyboard.press('Escape');
+    await until(async () => (await window_.locator(sel).count()) === 0, 8_000);
+  }
+}
+
+/** The sheet that asks for a model is modal and does not answer Escape in every
+ *  state, so it is closed the way the sheet offers: its own close control. */
+async function dismissConnect() {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if ((await window_.locator('.connectmodal').count()) === 0) return true;
+    const close = window_.locator('.connectmodal__close');
+    if ((await close.count()) > 0) await close.first().click({ timeout: 5_000 }).catch(() => undefined);
+    else await window_.keyboard.press('Escape');
+    if (await until(async () => (await window_.locator('.connectmodal').count()) === 0, 5_000)) return true;
+    await pause(400);
+  }
+  return false;
+}
+
+const openSettings = async () => {
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  if ((await window_.locator('.settings').count()) > 0) return;
+  await window_.locator('.shelf__more--last').first().click();
+  await window_.locator('.settings').waitFor({ timeout: 30_000 });
+};
+
+const chooseTheme = async (choice) => {
+  await openSettings();
+  await window_.locator('.settings__bases .settings__system', { hasText: new RegExp(`^${choice}$`) }).first().click();
+  await pause(200);
+};
+
+/** What each theme resolved to, so following the computer can be compared with
+ *  the palette a person chose. */
+const palette = {};
+
+const tokenSet = (window_) =>
+  window_.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    return {
+      bg: s.getPropertyValue('--bg').trim(),
+      text: s.getPropertyValue('--text').trim(),
+      raised: s.getPropertyValue('--bg-raised').trim(),
+      dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+      mark: document.documentElement.getAttribute('data-theme'),
+      painted: getComputedStyle(document.body).backgroundColor,
+    };
+  });
+
+for (const one of THEMES) {
+  await row(one.id, `${one.what} — chosen the way somebody chooses it`, async () => {
+    await chooseTheme(one.choice);
+    await until(
+      async () => (await window_.evaluate(() => document.documentElement.getAttribute('data-theme'))) === one.mark,
+      5_000,
+    );
+    // "Match this computer" paints whichever palette the system is set to, so
+    // the renderer is told the computer is dark. The stylesheet's own
+    // prefers-color-scheme block is what has to answer that.
+    await window_.emulateMedia({ colorScheme: one.mark === 'dark' ? 'dark' : 'light' });
+    await pause(250);
+    const tokens = await tokenSet(window_);
+    await shot(one.id);
+    verdict(
+      one.mark === null
+        ? `no theme is stamped on the document, so the computer decides (${String(tokens.mark)})`
+        : `the document is stamped ${one.mark}`,
+      tokens.mark === one.mark,
+    );
+    note(
+      `${one.what}: --bg ${tokens.bg}, --text ${tokens.text}, the page painted ${tokens.painted}, the computer is read as ${tokens.dark ? 'dark' : 'light'}`,
+    );
+    if (one.mark !== null) palette[one.mark] = tokens;
+    await escapeFrom('.settings');
+    await layoutHolds(`${one.what}: `);
+  });
+}
+
+await row('theme-follows-the-computer', 'whether "match this computer" actually matches it', async () => {
+  const light = palette.light;
+  const dark = palette.dark;
+  verdict(
+    `light and dark are drawn differently (--bg ${light.bg} against ${dark.bg})`,
+    light.bg !== dark.bg,
+  );
+  // Following the computer with the computer dark has to land on the dark
+  // palette. This is the whole meaning of the setting, and the appearance's own
+  // stylesheet is written last in the head, so it is the one that decides.
+  await chooseTheme('System');
+  await window_.emulateMedia({ colorScheme: 'dark' });
+  await pause(250);
+  const darker = await tokenSet(window_);
+  await shot('theme-follows-dark');
+  verdict(`the renderer is told the computer is dark`, darker.dark === true);
+  verdict(
+    `a dark computer draws the dark palette (--bg ${darker.bg}, against dark ${dark.bg} and light ${light.bg})`,
+    darker.bg === dark.bg,
+  );
+  if (darker.bg !== dark.bg) {
+    bad(
+      `with no theme stamped and a dark computer, --bg is ${darker.bg}${darker.bg === light.bg ? ' — the light palette' : ''}, and the page is painted ${darker.painted}`,
+    );
+  }
+  await chooseTheme('System');
+  await window_.emulateMedia({ colorScheme: 'light' });
+  await pause(250);
+  const lighter = await tokenSet(window_);
+  verdict(
+    `and a light computer draws the light palette (--bg ${lighter.bg})`,
+    lighter.bg === light.bg,
+  );
+  await escapeFrom('.settings');
+  await shot('theme-follows-light');
+});
+
+await row('contrast', 'what can be read, measured against what it sits on', async () => {
+  await ensureProjectOpen();
+  for (const one of THEMES) {
+    await chooseTheme(one.choice);
+    await escapeFrom('.settings');
+    await window_.emulateMedia({ colorScheme: one.mark === 'dark' ? 'dark' : 'light' });
+    await pause(200);
+    const measured = await colours(window_, CONTRAST.map((each) => each.sel));
+    const said = [];
+    for (const [index, each] of measured.entries()) {
+      const label = CONTRAST[index].what;
+      if (each.missing === true) {
+        note(`${one.what}: ${each.sel} is not on screen, so it was not measured`);
+        continue;
+      }
+      const needed = each.large === true ? 3 : 4.5;
+      const pass = each.ratio !== null && each.ratio >= needed;
+      said.push(`${label} ${String(each.ratio)}:1 (needs ${String(needed)})`);
+      verdict(`${one.what}: ${label} reads at ${String(each.ratio)}:1`, pass);
+      if (!pass) note(`${each.sel}: ${each.ink} on ${each.ground}`);
+    }
+    note(said.join('; '));
+  }
+  await shot('contrast');
+});
+
+/* -------------------------------------------------------------------------- */
+/* 7. Keyboard only                                                            */
+/* -------------------------------------------------------------------------- */
+
+await row('keyboard-tab-order', 'Tab, from the composer, to the end of the window and back', async () => {
+  await ensureProjectOpen();
+  await window_.locator('.composer__input').click();
+  await window_.keyboard.press('Tab');
+  await window_.keyboard.press('Shift+Tab');
+  await window_.locator('.composer__input').blur().catch(() => undefined);
+  const tagged = await ringSnapshot(window_);
+  note(`${String(tagged)} elements were recorded before anything was focused`);
+  await window_.locator('.composer__input').click();
+  const stops = [];
+  for (let step = 0; step < 40; step += 1) {
+    await window_.keyboard.press('Tab');
+    const at = await ringAt(window_);
+    if (at.none === true) break;
+    stops.push(at);
+  }
+  const named = stops.filter((one) => one.name !== '').length;
+  verdict(`every stop the keyboard reaches has a name (${String(named)} of ${String(stops.length)})`, named === stops.length);
+  const ringless = stops.filter((one) => one.ring !== true);
+  verdict(
+    `every stop shows something when it is focused (${String(stops.length - ringless.length)} of ${String(stops.length)})`,
+    ringless.length === 0,
+  );
+  for (const one of ringless.slice(0, 6)) {
+    bad(`nothing on screen says the keyboard is on ${one.what}${one.name === '' ? '' : ` "${one.name}"`} (outline ${one.outline}, ${one.shadow})`);
+  }
+  const offscreen = stops.filter((one) => one.inViewport !== true);
+  verdict(`every stop is on screen where it can be seen (${String(stops.length - offscreen.length)} of ${String(stops.length)})`, offscreen.length === 0);
+  for (const one of offscreen.slice(0, 5)) {
+    bad(`focus went to ${one.what}, outside the window`);
+  }
+  note(`the order was: ${stops.slice(0, 12).map((one) => one.what).join(' → ')}${stops.length > 12 ? ' → …' : ''}`);
+  note(`where each stop shows its focus: ${stops.slice(0, 12).map((one) => one.where ?? 'nothing').join(' | ')}`);
+  await window_.locator('.composer__input').click();
+  await window_.keyboard.press('Escape');
+});
+
+await row('keyboard-tabs', 'Arrow, Home, End and close, in the tab strip', async () => {
+  await ensureProjectOpen();
+  /* Positions rather than titles: the strip draws a shortened name, and twenty
+     rows can read the same while being different conversations, so an index is
+     the only thing that says which one moved. */
+  const whereNow = () =>
+    window_.evaluate(() => {
+      const open = [...document.querySelectorAll('.tabs__open')];
+      const strip = document.querySelector('.tabs__strip');
+      const tab = document.querySelector('.tabs__tab--here');
+      const focused = document.activeElement;
+      const a = tab?.getBoundingClientRect();
+      const b = strip?.getBoundingClientRect();
+      const labels = open.map((one) => (one.getAttribute('aria-label') ?? '').slice(0, 22));
+      return {
+        count: open.length,
+        front: open.findIndex((one) => one.getAttribute('aria-selected') === 'true'),
+        focused: open.findIndex((one) => one === focused),
+        focusedWhat: typeof focused?.className === 'string' ? focused.className.split(' ')[0] : String(focused?.tagName ?? 'nothing'),
+        focusedName: (focused?.getAttribute?.('aria-label') ?? focused?.getAttribute?.('title') ?? '').slice(0, 30),
+        labels,
+        tabBox: a === undefined ? null : [Math.round(a.left), Math.round(a.right)],
+        stripBox: b === undefined ? null : [Math.round(b.left), Math.round(b.right)],
+        inside: a !== undefined && b !== undefined && a.left >= b.left - 1 && a.right <= b.right + 1,
+        scrolled: Math.round(strip?.scrollLeft ?? 0),
+      };
+    });
+
+  await window_.locator('.tabs__open[aria-selected="true"]').first().click();
+  await window_.locator('.tabs__open[aria-selected="true"]').first().focus();
+  const start = await whereNow();
+  verdict(`exactly one Tab stop, and it is the conversation in front (${String(start.count)} open)`, start.count > 1);
+  note(`before any key: ${String(start.count)} open, the front one at ${String(start.front)}, the keyboard on ${String(start.focusedWhat)}`);
+
+  /* A key is pressed and the conversation in front is waited for. The app
+     switches conversation through an async resume, so reading the strip on the
+     next line reads it before the key has landed — which is how the same run
+     reported two different positions for the same press. */
+  const press = async (key, aim) => {
+    /* Each key is measured on its own. A key above may have handed the keyboard
+       to the composer — which is a finding in itself, reported below — and an
+       End pressed in a text box moves a caret, not a conversation, so the hand
+       is put back on the strip before the next key rather than measuring the
+       consequence of the one before it. */
+    const held = await whereNow();
+    if (!held.focusedWhat.includes('tabs__')) {
+      note(`the keyboard is on ${held.focusedWhat} before ${key}, so it is put back on a tab first`);
+      await window_.locator('.tabs__open[aria-selected="true"]').first().focus();
+    }
+    const before = await whereNow();
+    const want = aim(before);
+    await window_.keyboard.press(key);
+    const arrived = await until(async () => (await whereNow()).front === want, 6_000);
+    const after = await whereNow();
+    verdict(
+      `${key} moves to position ${String(want)} in the strip (at ${String(after.front)} of ${String(after.count)})`,
+      arrived,
+    );
+    if (!arrived) {
+      bad(`${key} left the conversation at position ${String(after.front)} of ${String(after.count)}, not ${String(want)}`);
+    }
+    const inStrip = after.focusedWhat.includes('tabs__open') || after.focusedWhat.includes('tabs__close');
+    verdict(
+      `${key} leaves the keyboard in the strip (on ${after.focusedWhat}${after.focusedName === '' ? '' : ` "${after.focusedName}"`})`,
+      inStrip,
+    );
+    if (!inStrip) {
+      bad(`${key} moved the keyboard out of the tab strip, onto ${after.focusedWhat}`);
+    }
+    verdict(
+      `${key} keeps it in sight (tab ${String(after.tabBox?.join('-'))} in strip ${String(after.stripBox?.join('-'))}, scrolled ${String(after.scrolled)}px)`,
+      after.inside,
+    );
+    if (!after.inside) {
+      bad(
+        `${key} left the conversation in front drawn outside the strip: tab ${String(after.tabBox?.join('-'))}, strip ${String(after.stripBox?.join('-'))}, scrolled ${String(after.scrolled)}px`,
+      );
+    }
+    return after;
+  };
+
+  await press('ArrowRight', (before) => (before.front + 1) % before.count);
+  await press('End', (before) => before.count - 1);
+  await shot('keyboard-tabs-end');
+  await press('Home', () => 0);
+
+  // Alt+Arrow is the keyboard's answer to dragging a tab somewhere else. The
+  // keyboard is put back on a tab first, because a key above may have moved it.
+  if (start.count >= 2) {
+    await window_.locator('.tabs__open').nth(1).focus();
+    await window_.keyboard.down('Alt');
+    await window_.keyboard.press('ArrowRight');
+    await window_.keyboard.up('Alt');
+    const after = await whereNow();
+    verdict(
+      `Alt+Arrow moves a conversation along the row (${after.labels[1]} → ${after.labels[2]})`,
+      after.labels[1] !== start.labels[1] || after.labels[2] !== start.labels[2],
+    );
+  } else {
+    note('only one conversation is open, so there is nothing to move along the row');
+  }
+
+  // Closing from the keyboard has to leave the hand somewhere sensible.
+  await window_.locator('.tabs__open[aria-selected="true"]').first().focus();
+  await window_.keyboard.press('Tab');
+  const onClose = await standing(window_);
+  verdict(`Tab from a tab reaches its close control (${onClose.what})`, onClose.what.includes('tabs__close'));
+  const was = (await whereNow()).count;
+  await window_.keyboard.press('Enter');
+  await until(async () => (await window_.locator('.tabs__open').count()) === was - 1, 10_000);
+  const now = (await whereNow()).count;
+  verdict(`Enter on it closes the conversation (${String(was)} → ${String(now)})`, now === was - 1);
+  const where = await standing(window_);
+  verdict(
+    `the keyboard lands somewhere it can carry on from (${where.what}${where.name === '' ? '' : ` "${where.name}"`})`,
+    where.what.includes('tabs__') || where.what.includes('composer'),
+  );
+  if (!where.what.includes('tabs__')) {
+    bad(
+      `after closing a conversation the keyboard is on ${where.what}, not on the strip the close handler aims at (Tabs.tsx sets returnTo to the neighbour and focuses it)`,
+    );
+  }
+
+  // And the row is left as it was found: a named conversation first, because a
+  // second empty one is not offered.
+  await window_.locator('.tabs__open').first().click();
+  const restored = await newConversation();
+  if (restored) ok('another conversation can be started from the sidebar');
+  else note('a second empty conversation was not offered, so the row ends one short');
+});
+
+await row('focus-indicator', 'what the keyboard sees on the controls it lands on', async () => {
+  await ensureProjectOpen();
+  /* Focus is moved the way a keyboard moves it. Calling `.focus()` from script
+     is not the same thing: `:focus-visible` is decided from how the focus
+     arrived, and an indicator drawn for the keyboard never appears for a script
+     that focuses an element itself. */
+  const wanted = [
+    ['.composer__input', 'what you type'],
+    ['.composer__send', 'send'],
+    ['.tabs__open', 'a conversation'],
+    ['.tabs__add', 'new conversation'],
+    ['.shelf__more--last', 'settings'],
+  ];
+  await window_.locator('.composer__input').click();
+  await window_.keyboard.press('Tab');
+  await window_.keyboard.press('Shift+Tab');
+  await window_.locator('.composer__input').blur().catch(() => undefined);
+  await ringSnapshot(window_);
+  await window_.locator('.composer__input').click();
+  const seen = new Map();
+  for (let step = 0; step < 40; step += 1) {
+    await window_.keyboard.press('Tab');
+    const at = await ringAt(window_);
+    if (at.none === true) break;
+    for (const [sel, what] of wanted) {
+      const name = sel.slice(1);
+      if (at.what.includes(name) && !seen.has(what)) seen.set(what, at);
+    }
+  }
+  await shot('focus-indicator');
+  /* The composer is where the keyboard already is when a conversation opens, so
+     Tab never lands on it: it is measured here by putting the hand there. */
+  await window_.locator('.composer__input').click();
+  const typed = await ringAt(window_);
+  note(`.composer__input, clicked into: ${typed.where ?? 'nothing'} — outline ${typed.outline}, ${typed.shadow}`);
+  verdict(
+    `where you type shows something when the keyboard is in it (${typed.where ?? 'nothing'})`,
+    typed.ring === true,
+  );
+  if (typed.ring !== true) bad('the box somebody types in is focused with nothing on screen to say so');
+  for (const [sel, what] of wanted) {
+    const at = seen.get(what);
+    if (at === undefined) {
+      note(`${sel} was not reached by forty presses of Tab`);
+      continue;
+    }
+    verdict(
+      `${what} shows something when the keyboard lands on it${at.ring ? ` (${at.where ?? 'nothing'})` : ''}`,
+      at.ring === true,
+    );
+    if (at.ring !== true) {
+      bad(`${what} (${sel}) is focused with nothing on screen to say so: outline ${at.outline}, ${at.shadow}`);
+    }
+    note(`${sel}: ${at.where ?? 'nothing'} — outline ${at.outline}, ${at.shadow}${at.focusVisible ? ', :focus-visible' : ''}`);
+  }
+  await window_.locator('.composer__input').click();
+});
+
+await row('keyboard-disabled', 'a disabled action must not look like an available one', async () => {
+  await ensureProjectOpen();
+  const styleOf = (sel) =>
+    window_.evaluate((one) => {
+      const el = document.querySelector(one);
+      if (el === null) return null;
+      const s = getComputedStyle(el);
+      return {
+        disabled: el.disabled === true,
+        background: s.backgroundColor,
+        colour: s.color,
+        opacity: s.opacity,
+        cursor: s.cursor,
+        border: s.borderColor,
+      };
+    }, sel);
+  const input = window_.locator('.composer__input');
+  await input.fill('');
+  await dismissConnect();
+  const off = await styleOf('.composer__send');
+  // The button's colours are transitioned (--dur-micro), so a sample taken on
+  // the same frame as the draft change reads the colour it is leaving.
+  await pause(400);
+  const settledOff = await styleOf('.composer__send');
+  await input.fill('something to send');
+  // The button answers the draft through React, so it is waited for rather than
+  // sampled the instant the text lands: a sample taken too early reads the
+  // disabled state and calls it a finding.
+  await until(async () => (await window_.locator('.composer__send').first().isEnabled()), 5_000);
+  await pause(400);
+  const on = await styleOf('.composer__send');
+  await input.fill('');
+  await shot('keyboard-disabled');
+  if (off === null || on === null) {
+    bad('there is no send control to compare');
+    return;
+  }
+  verdict(`the send control is disabled with nothing to send (${String(off.disabled)})`, off.disabled);
+  Object.assign(off, settledOff);
+  verdict(`and available once there is something to send (${String(on.disabled)})`, on.disabled === false);
+  /* How it looks, not whether the attribute is there, and without the cursor:
+     a pointer shape is not something a person using a trackpad or the keyboard
+     ever sees, so it cannot be the whole difference. */
+  const looks = ({ background, colour, opacity, border }) => `${background}|${colour}|${opacity}|${border}`;
+  const said = `disabled: ground ${off.background}, ink ${off.colour}, opacity ${off.opacity}, border ${off.border} — available: ground ${on.background}, ink ${on.colour}, opacity ${on.opacity}, border ${on.border}`;
+  verdict(`the two are drawn differently (${said})`, looks(off) !== looks(on));
+  if (looks(off) === looks(on)) {
+    bad(
+      `a disabled Send is drawn exactly like an available one (${said}); the only difference is the cursor, ${off.cursor} against ${on.cursor}`,
+    );
+  }
+  note(`the cursor is ${off.cursor} when disabled and ${on.cursor} when available`);
+  const others = await window_.evaluate(() => {
+    const off = [];
+    for (const el of document.querySelectorAll('button[disabled], button[aria-disabled="true"]')) {
+      const s = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      if (box.width < 1) continue;
+      const cls = typeof el.className === 'string' ? el.className.split(' ').filter((one) => one !== '')[0] : '';
+      off.push(`${el.tagName.toLowerCase()}${cls === undefined || cls === '' ? '' : `.${cls}`} "${(el.textContent ?? '').trim().slice(0, 24)}" — opacity ${s.opacity}, cursor ${s.cursor}`);
+    }
+    return off;
+  });
+  note(
+    others.length === 0
+      ? 'nothing else in this state is disabled'
+      : `disabled here: ${others.join('; ')}`,
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8. Overlays                                                                 */
+/* -------------------------------------------------------------------------- */
+
+await row('overlay-settings', 'the settings sheet, over the conversation', async () => {
+  await ensureProjectOpen();
+  await openSettings();
+  await shot('overlay-settings');
+  const view = await viewport(window_);
+  const [sheet] = await boxes(window_, ['.settings']);
+  verdict('.settings is inside the window', inside(sheet, view));
+  const hit = await hits(window_, '.settings');
+  verdict('a click in the middle of the sheet lands on the sheet', hit.hit === true);
+  note(`the sheet begins ${String(sheet.x)},${String(sheet.y)} and is ${String(sheet.w)}×${String(sheet.h)}`);
+
+  // A modal sheet that is announced as one has to keep the keyboard too.
+  await window_.locator('.settings__close').first().focus();
+  let escaped = null;
+  for (let step = 0; step < 40 && escaped === null; step += 1) {
+    await window_.keyboard.press('Tab');
+    const insideSheet = await window_.evaluate(() => document.activeElement?.closest('.settings') !== null);
+    if (!insideSheet) escaped = await standing(window_);
+  }
+  verdict(
+    escaped === null
+      ? 'Tab stays inside the sheet for forty presses'
+      : `the keyboard stays inside the sheet (it left after ${String(escaped.what)}${escaped.name === '' ? '' : ` "${escaped.name}"`})`,
+    escaped === null,
+  );
+  if (escaped !== null) {
+    bad(`focus escapes the modal sheet to ${escaped.what}${escaped.name === '' ? '' : ` "${escaped.name}"`} — the sheet is aria-modal but not trapping`);
+    await shot('overlay-settings-focus-escaped');
+  }
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.settings').count()) === 0, 10_000);
+  verdict('Escape closes the sheet', (await window_.locator('.settings').count()) === 0);
+});
+
+await row('overlay-composer-popover', 'the composer popover, with the conversation behind it', async () => {
+  await ensureProjectOpen();
+  const input = window_.locator('.composer__input');
+  await input.click();
+  // `@` offers the files and skills this project can use; `/` offers its
+  // workflows, and this fixture has none.
+  await input.fill('@');
+  const opened = await until(async () => (await window_.locator('.composer__skills').count()) > 0, 15_000);
+  await input.fill('/');
+  const slashes = await until(async () => (await window_.locator('.composer__skills').count()) > 0, 4_000);
+  note(
+    slashes
+      ? 'both @ and / open a list here'
+      : 'the / list is empty on this profile: a project with no workflows of its own has none to offer',
+  );
+  await input.fill('@');
+  await window_.locator('.composer__skills').first().waitFor({ timeout: 15_000 });
+  verdict('the @ list opens over the conversation', opened);
+  await shot('overlay-composer-popover');
+  const view = await viewport(window_);
+  const [popover] = await boxes(window_, ['.composer__skills']);
+  const [box] = await boxes(window_, ['.composer__input']);
+  verdict('the popover is inside the window', inside(popover, view));
+  verdict('it opens above the box rather than over it', popover.bottom <= box.y + 1);
+  const hit = await hits(window_, '.composer__skills');
+  verdict('a click in the middle of it lands on it, not on the conversation behind it', hit.hit === true);
+  if (hit.hit !== true) note(`a click would land on ${hit.landed ?? JSON.stringify(hit)}`);
+  const options = await window_.locator('.composer__skills [role="option"]').count();
+  verdict(`it is a listbox with ${String(options)} rows in it`, options > 0);
+  if (options > 0) {
+    const first = (await window_.locator('.composer__skills [role="option"]').first().innerText()).split('\n')[0] ?? '';
+    await window_.keyboard.press('ArrowDown');
+    await window_.keyboard.press('Enter');
+    const filled = await input.inputValue();
+    verdict(
+      `the keyboard can choose from it without a mouse (typing "@" then Enter put "${filled.slice(0, 30)}" in the box, first row "${first.slice(0, 24)}")`,
+      filled !== '@' && filled !== '',
+    );
+    await input.fill('');
+  }
+  await layoutHolds('composer popover: ');
+});
+
+await row('overlay-palette', 'the command palette, over everything', async () => {
+  await ensureProjectOpen();
+  await window_.keyboard.press('Meta+Shift+P');
+  await window_.locator('.palette').first().waitFor({ timeout: 20_000 });
+  await shot('overlay-palette');
+  const view = await viewport(window_);
+  const [palette] = await boxes(window_, ['.palette']);
+  verdict('the palette is inside the window', inside(palette, view));
+  const hit = await hits(window_, '.palette__input');
+  verdict('a click in its field lands on its field', hit.hit === true);
+  const focused = await window_.evaluate(() => document.activeElement?.className ?? '');
+  verdict('it takes the keyboard when it opens', String(focused).includes('palette__input'));
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.palette').count()) === 0, 10_000);
+  verdict('Escape closes it', (await window_.locator('.palette').count()) === 0);
+});
+
+await row('overlay-ask', 'the find-anything bar, over everything', async () => {
+  await ensureProjectOpen();
+  // Not from inside the box somebody is typing in: there the key is a letter.
+  await window_.locator('.welcome__title').first().click().catch(() => undefined);
+  await window_.keyboard.press('Meta+K');
+  let viaKey = await until(async () => (await window_.locator('.askanything').count()) > 0, 10_000);
+  if (!viaKey) {
+    // The same panel from the row that names it, which is how somebody who has
+    // not learnt the key reaches it.
+    await window_.locator('.shelf__row', { hasText: 'Find anything' }).first().click();
+    viaKey = await until(async () => (await window_.locator('.askanything').count()) > 0, 15_000);
+    note('the keyboard shortcut did not open it; the sidebar row did');
+  }
+  verdict('it opens', viaKey);
+  if (!viaKey) {
+    await shot('overlay-ask');
+    return;
+  }
+  await shot('overlay-ask');
+  const view = await viewport(window_);
+  const [bar] = await boxes(window_, ['.askanything']);
+  verdict('it is inside the window', inside(bar, view));
+  const hit = await hits(window_, '.askanything');
+  verdict('a click in the middle of it lands on it', hit.hit === true);
+  const role = await window_.locator('.askanything').first().getAttribute('role');
+  note(`it announces itself as ${String(role)}`);
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.askanything').count()) === 0, 10_000);
+  verdict('Escape closes it', (await window_.locator('.askanything').count()) === 0);
+});
+
+await row('overlay-connect', 'what the app says when nothing can answer', async () => {
+  await ensureProjectOpen();
+  const input = window_.locator('.composer__input');
+  await input.click();
+  await input.fill('something with no model to answer it');
+  await window_.locator('.composer__send').first().click();
+  await window_.locator('.connectmodal').first().waitFor({ timeout: 30_000 });
+  await shot('overlay-connect');
+  const view = await viewport(window_);
+  const [sheet] = await boxes(window_, ['.connectmodal']);
+  verdict('the sheet that asks for a model is inside the window', inside(sheet, view));
+  const hit = await hits(window_, '.connectmodal');
+  verdict('a click in the middle of it lands on it', hit.hit === true);
+  const text = await window_.locator('.connectmodal').first().innerText();
+  verdict('it says what it wants', /model|account|connect/i.test(text));
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.connectmodal').count()) === 0, 10_000);
+  verdict('Escape closes it', (await window_.locator('.connectmodal').count()) === 0);
+  await input.fill('');
+});
+
+/* -------------------------------------------------------------------------- */
+/* 9. The file tree, the terminal, named things                                */
+/* -------------------------------------------------------------------------- */
+
+await row('file-tree', 'the project tree, scrolled to the bottom, with names longer than it is', async () => {
+  await ensureProjectOpen();
+  await window_.locator('.files__tree').first().waitFor({ timeout: 30_000 });
+  // Folders come folded. Two of them opened is what puts a column of rows in
+  // front of the panel that has to scroll them.
+  for (const name of ['src', 'modules']) {
+    const folder = window_.locator('.files__row', { hasText: new RegExp(`^${name}$`) }).first();
+    if ((await folder.count()) > 0) {
+      await folder.click();
+      await pause(300);
+    }
+  }
+  const before = await window_.evaluate(() => {
+    const tree = document.querySelector('.files__tree');
+    const rows = [...document.querySelectorAll('.files__row')];
+    const box = tree?.getBoundingClientRect();
+    const widest = rows
+      .map((one) => ({ text: (one.textContent ?? '').trim().slice(0, 60), right: one.getBoundingClientRect().right }))
+      .reduce((most, one) => (box === undefined || one.right > most.right ? one : most), { text: '', right: 0 });
+    return {
+      rows: rows.length,
+      scrollHeight: tree?.scrollHeight ?? 0,
+      clientHeight: tree?.clientHeight ?? 0,
+      scrollWidth: tree?.scrollWidth ?? 0,
+      clientWidth: tree?.clientWidth ?? 0,
+      treeRight: box?.right ?? 0,
+      widest,
+    };
+  });
+  verdict(`the tree lists the project (${String(before.rows)} rows)`, before.rows > 20);
+  verdict(
+    `it scrolls up and down (${String(before.scrollHeight)}px of rows in ${String(before.clientHeight)}px)`,
+    before.scrollHeight > before.clientHeight,
+  );
+  verdict(
+    `it does not scroll sideways (${String(before.scrollWidth)}px of content in ${String(before.clientWidth)}px)`,
+    before.scrollWidth <= before.clientWidth + 1,
+  );
+  verdict(
+    `no row is drawn past the edge of the panel (widest ends at ${String(Math.round(before.widest.right))}, panel at ${String(Math.round(before.treeRight))})`,
+    before.widest.right <= before.treeRight + 1,
+  );
+  const longName = await window_.evaluate(() => {
+    const rows = [...document.querySelectorAll('.files__row')];
+    const longest = rows.map((one) => (one.textContent ?? '').trim()).sort((a, b) => b.length - a.length)[0] ?? '';
+    return longest;
+  });
+  note(`the longest name in the tree is ${String(longName.length)} characters: ${longName.slice(0, 60)}`);
+  await window_.evaluate(() => {
+    const tree = document.querySelector('.files__tree');
+    if (tree !== null) tree.scrollTop = tree.scrollHeight;
+  });
+  await pause(300);
+  await shot('file-tree-bottom');
+  const after = await window_.evaluate(() => {
+    const tree = document.querySelector('.files__tree');
+    return { top: Math.round(tree?.scrollTop ?? 0), at: tree?.scrollTop !== undefined && tree.scrollTop + tree.clientHeight >= tree.scrollHeight - 2 };
+  });
+  verdict(`it scrolled to the bottom (${String(after.top)}px)`, after.at);
+  await layoutHolds('file tree: ');
+});
+
+await row('terminal', 'the terminal, and what happens when the window changes size', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  await window_.keyboard.press('Meta+`');
+  await window_.locator('.commands').first().waitFor({ timeout: 20_000 });
+  const press = window_.locator('.commands__press', { hasText: /^Terminal$/ });
+  if ((await press.count()) === 0) {
+    bad('the commands drawer offers no Terminal to open');
+    await shot('terminal');
+    return;
+  }
+  await press.first().click();
+  const arrived = await until(async () => (await window_.locator('.termpane').count()) > 0, 30_000);
+  if (!arrived) {
+    bad('pressing Terminal did not draw a terminal');
+    await shot('terminal');
+    return;
+  }
+  await pause(1_500);
+  const [pane] = await boxes(window_, ['.termpane']);
+  const view = await viewport(window_);
+  await shot('terminal');
+  verdict('the terminal is inside the window', inside(pane, view));
+  const trouble = await window_.locator('.termpane__trouble').count();
+  const ended = await window_.locator('.termpane__ended').count();
+  note(`trouble shown: ${String(trouble)}, ended: ${String(ended)}`);
+  const screenBefore = await window_.evaluate(() => {
+    const one = document.querySelector('.termpane__screen');
+    if (one === null) return null;
+    const box = one.getBoundingClientRect();
+    return { w: Math.round(box.width), h: Math.round(box.height) };
+  });
+  await sizeWindow(800, 600);
+  await pause(1_200);
+  const screenAfter = await window_.evaluate(() => {
+    const one = document.querySelector('.termpane__screen');
+    if (one === null) return null;
+    const box = one.getBoundingClientRect();
+    return { w: Math.round(box.width), h: Math.round(box.height) };
+  });
+  await shot('terminal-resized');
+  if (screenBefore === null || screenAfter === null) {
+    bad('the terminal has no screen to measure');
+  } else {
+    verdict(
+      `the terminal follows the window (${String(screenBefore.w)}×${String(screenBefore.h)} → ${String(screenAfter.w)}×${String(screenAfter.h)})`,
+      screenBefore.w !== screenAfter.w || screenBefore.h !== screenAfter.h,
+    );
+  }
+  const [after] = await boxes(window_, ['.termpane']);
+  verdict('and it is still inside the window afterwards', inside(after, await viewport(window_)));
+  const closed = await window_.locator('.termpane__close').count();
+  if (closed > 0) {
+    await window_.locator('.termpane__close').first().click();
+    await window_.keyboard.press('Escape');
+  }
+  await sizeWindow(1100, 780);
+});
+
+await row('named-controls', 'every control a screen reader would have to announce', async () => {
+  await ensureProjectOpen();
+  const said = await nameless(window_);
+  verdict(
+    said.nameless.length === 0
+      ? 'every button in the window has a name'
+      : `every button has a name (${String(said.nameless.length)} do not: ${said.nameless.slice(0, 8).join(', ')})`,
+    said.nameless.length === 0,
+  );
+  verdict(
+    said.unlabelled.length === 0
+      ? 'every input is tied to a label'
+      : `every input is tied to a label (${String(said.unlabelled.length)} are not: ${said.unlabelled.slice(0, 8).join(', ')})`,
+    said.unlabelled.length === 0,
+  );
+  const tooltips = await window_.evaluate(() => {
+    const all = [...document.querySelectorAll('[title]')];
+    return {
+      count: all.length,
+      sample: all.slice(0, 6).map((one) => `${one.className.toString().split(' ')[0]}: ${one.getAttribute('title') ?? ''}`),
+    };
+  });
+  note(`${String(tooltips.count)} controls carry a title attribute; the native tooltip itself is drawn by the OS: ${tooltips.sample.join(' | ')}`);
+});
+
+await row('error-state', 'what a turn that could not run looks like', async () => {
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  // Asked here rather than borrowed from an earlier row: a profile with no
+  // account answers a turn by stopping part way through, and that is the state
+  // this row is about.
+  if ((await window_.locator('.errorcard').count()) === 0) {
+    await window_.locator('.composer__input').fill('a turn that nothing can answer');
+    await window_.locator('.composer__send').first().click();
+    await dismissConnect();
+  }
+  const there = await until(async () => (await window_.locator('.errorcard').count()) > 0, 20_000);
+  if (there === 0) {
+    bad('a turn that could not run left no error on screen');
+    await shot('error-state');
+    return;
+  }
+  await shot('error-state');
+  const view = await viewport(window_);
+  const [card] = await boxes(window_, ['.errorcard']);
+  verdict('the error is inside the window', inside(card, view));
+  const said = await window_.locator('.errorcard').first().innerText();
+  note(`it says: ${said.replace(/\s+/g, ' ').slice(0, 170)}`);
+  const role = await window_.locator('.errorcard').first().getAttribute('role');
+  verdict('it is announced as an alert, not left silent', role === 'alert');
+  const act = window_.locator('.errorcard button').first();
+  if ((await act.count()) > 0) {
+    const hit = await act.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return at === el || el.contains(at);
+    });
+    verdict(`its action is reachable ("${(await act.innerText()).trim()}")`, hit === true);
+  }
+});
+
+await row('missing-project', 'a project whose folder has gone', async () => {
+  // The folder is taken away under the app, which is what happens when somebody
+  // moves or deletes one. Nothing is written into the list behind its back.
+  rmSync(longProject, { recursive: true, force: true });
+  await tell(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.reload();
+    return true;
+  });
+  await window_.waitForLoadState('domcontentloaded');
+  const arrived = await until(async () => (await window_.locator('.picker .pickerrow__open').count()) > 0, 30_000);
+  if (!arrived) {
+    bad('the project list did not come back after reloading');
+    return;
+  }
+  const marked = await until(async () => (await window_.locator('.picker .pickerrow--missing').count()) > 0, 15_000);
+  await shot('missing-project');
+  verdict('a folder that has gone is marked in the list before it is pressed', marked);
+  if (marked) {
+    const row = window_.locator('.picker .pickerrow--missing').first();
+    const says = (await row.innerText()).replace(/\s+/g, ' ').trim();
+    const hit = await hits(window_, '.picker .pickerrow--missing .pickerrow__open');
+    note(`the row reads: ${says}`);
+    verdict('the marked row is still reachable, so it can be taken off the list', hit.hit === true);
+    await row.locator('.pickerrow__open').click();
+    const gone = await until(async () => (await window_.locator('.picker .pickerrow--missing').count()) === 0, 10_000);
+    verdict('pressing it answers by taking it off the list', gone);
+    const stillThere = (await window_.locator('.picker .pickerrow__open').count()) > 0;
+    verdict('and the rest of the list is left alone', stillThere);
+  } else {
+    bad('a folder that has gone is not marked: it is listed as if it were there');
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 10. Layout and settings that have to survive a relaunch                      */
+/* -------------------------------------------------------------------------- */
+
+await row('persistence', 'the size, the theme and the panels, after quitting and coming back', async () => {
+  await ensureProjectOpen();
+  await chooseTheme('Dark');
+  await escapeFrom('.settings');
+  await sizeWindow(900, 640);
+  await pause(600);
+  await tell(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close();
+    return true;
+  });
+  await until(() => app.windows().length === 0, 10_000);
+  const written = JSON.parse(readFileSync(join(profile, 'window.json'), 'utf8'));
+  verdict(
+    `the window's size and place were written down (${String(written.width)}×${String(written.height)} at ${String(written.x)},${String(written.y)})`,
+    typeof written.width === 'number' && typeof written.height === 'number',
+  );
+  const preferences = JSON.parse(readFileSync(join(profile, 'preferences.json'), 'utf8'));
+  const held = preferences.preferences ?? {};
+  verdict(`the theme is in the file, not only in the window (${String(held.appearance?.base)})`, held.appearance?.base === 'dark');
+  verdict('the file panel is remembered', held.showFiles === true);
+
+  /* The process has to end before another can start: the app takes a single
+     instance lock, so a second copy of it would quit on the way up. */
+  await app.close().catch(() => undefined);
+  app = await launch();
+  window_ = await firstWindowOf(app);
+  await window_.locator('.picker .pickerrow__open').first().waitFor({ timeout: 60_000 });
+  const back = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    return { ...win.getNormalBounds(), zoom: win.webContents.getZoomFactor() };
+  });
+  verdict(
+    `the window came back at the size it was left (${String(back.width)}×${String(back.height)})`,
+    Math.abs(back.width - 900) <= 2 && Math.abs(back.height - 640) <= 2,
+  );
+  note(`zoom on the way back in: ${String(back.zoom)}`);
+  await window_.locator('.pickerrow__open', { hasText: PROJECT }).first().click();
+  await window_.locator('.welcome').first().waitFor({ timeout: 60_000 });
+  const mark = await window_.evaluate(() => document.documentElement.getAttribute('data-theme'));
+  verdict(`the theme survived the relaunch (${String(mark)})`, mark === 'dark');
+  const files = await window_.locator('.filespanel').count();
+  verdict('the file panel came back with it', files > 0);
+  await shot('persistence');
+});
+
+await row('offscreen-restore', 'a window remembered on a monitor that is no longer there', async () => {
+  const real = JSON.parse(readFileSync(join(profile, 'window.json'), 'utf8'));
+  writeFileSync(
+    join(profile, 'window.json'),
+    `${JSON.stringify({ ...real, x: 9000, y: 9000, width: 1000, height: 700 })}\n`,
+  );
+  await tell(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.close();
+    return true;
+  });
+  await until(() => app.windows().length === 0, 10_000);
+  await app.close().catch(() => undefined);
+  app = await launch();
+  window_ = await firstWindowOf(app);
+  await window_.locator('.picker .pickerrow__open').first().waitFor({ timeout: 60_000 });
+  const where = await app.evaluate(({ BrowserWindow, screen }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const bounds = win.getBounds();
+    const on = screen.getDisplayMatching(bounds).workArea;
+    const overlaps = Math.min(bounds.x + bounds.width, on.x + on.width) - Math.max(bounds.x, on.x);
+    const down = Math.min(bounds.y + bounds.height, on.y + on.height) - Math.max(bounds.y, on.y);
+    return { bounds, work: on, overlaps, down };
+  });
+  await shot('offscreen-restore');
+  verdict(
+    `a window remembered off the screen comes back where it can be reached (${String(Math.round(where.overlaps))}×${String(Math.round(where.down))}px of it on a display that is here)`,
+    where.overlaps > 200 && where.down > 100,
+  );
+  note(`it was put at 9000,9000 ×1000×700 and came back at ${String(where.bounds.x)},${String(where.bounds.y)}`);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 11. Reduced motion                                                          */
+/* -------------------------------------------------------------------------- */
+
+await row('reduced-motion', 'less movement, as the renderer is told to want it', async () => {
+  await ensureProjectOpen();
+  const before = await window_.evaluate(() => {
+    const s = getComputedStyle(document.querySelector('.composer') ?? document.body);
+    return { matches: window.matchMedia('(prefers-reduced-motion: reduce)').matches, transition: s.transitionDuration };
+  });
+  await window_.emulateMedia({ reducedMotion: 'reduce' });
+  await pause(250);
+  const after = await window_.evaluate(() => {
+    const s = getComputedStyle(document.querySelector('.composer') ?? document.body);
+    return {
+      matches: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      transition: s.transitionDuration,
+      animation: s.animationDuration,
+      tokens: {
+        ui: getComputedStyle(document.documentElement).getPropertyValue('--dur-ui').trim(),
+        micro: getComputedStyle(document.documentElement).getPropertyValue('--dur-micro').trim(),
+      },
+    };
+  });
+  await shot('reduced-motion');
+  verdict('the renderer is told reduced motion is wanted', after.matches === true);
+  verdict(
+    `transitions are cut to nothing (${before.transition} → ${after.transition})`,
+    after.transition !== before.transition,
+  );
+  note(`animations are ${after.animation}, and the app's own timings are still --dur-ui ${after.tokens.ui}, --dur-micro ${after.tokens.micro}`);
+  await window_.emulateMedia({ reducedMotion: 'no-preference' });
+});
+
+await row('motion-off', "the app's own setting: instant everywhere", async () => {
+  await ensureProjectOpen();
+  await openSettings();
+  const choice = window_.locator('.appearance__choices [role="radio"]', { hasText: /^Off$/ });
+  if ((await choice.count()) === 0) {
+    bad('the appearance band offers no Motion setting');
+    await window_.keyboard.press('Escape');
+    return;
+  }
+  await choice.first().click();
+  await pause(250);
+  const tokens = await window_.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    return {
+      ui: s.getPropertyValue('--dur-ui').trim(),
+      large: s.getPropertyValue('--dur-large').trim(),
+      stagger: s.getPropertyValue('--dur-stagger').trim(),
+    };
+  });
+  await shot('motion-off');
+  verdict(
+    `with motion off every duration is zero (--dur-ui ${tokens.ui}, --dur-large ${tokens.large}, --dur-stagger ${tokens.stagger})`,
+    tokens.ui === '0s' || tokens.ui === '0ms',
+  );
+  const chosen = window_.locator('.appearance__choices [role="radio"]', { hasText: /^Full$/ });
+  await chosen.first().click();
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.settings').count()) === 0, 10_000);
+});
+
+/* -------------------------------------------------------------------------- */
+/* What was found, and what only a person can find                             */
+/* -------------------------------------------------------------------------- */
+
+writeFileSync(
+  join(scratch, 'visual-matrix.json'),
+  `${JSON.stringify(
+    {
+      at: new Date().toISOString(),
+      app: found,
+      display,
+      node: process.version,
+      platform: `${process.platform} ${process.arch}`,
+      electron: await app.evaluate(({ app: electronApp }) => electronApp.getVersion()),
+      rows: results.map((one) => ({
+        id: one.id,
+        what: one.what,
+        shot: one.shot === null ? null : one.shot.slice(root.length),
+        checks: one.checks,
+        notes: one.notes,
+      })),
+      failed,
+    },
+    null,
+    2,
+  )}\n`,
+);
+
+await app.close().catch(() => undefined);
+if (served !== null) await served.stop();
+if (!keep) rmSync(home, { recursive: true, force: true });
+
+const rows = results.length;
+const checks = results.reduce((all, one) => all + one.checks.length, 0);
+console.log(`\n${String(rows)} rows, ${String(checks)} checks, ${String(failed)} failed.`);
+const broken = results.filter((one) => one.checks.some((each) => !each.ok));
+if (broken.length > 0) {
+  console.log('\nWhat failed, by row:');
+  for (const one of broken) {
+    const first = one.checks.find((each) => !each.ok);
+    const count = one.checks.filter((each) => !each.ok).length;
+    console.log(`  ${one.id} (${String(count)}): ${first === undefined ? '' : first.says}`);
+  }
+}
+console.log(`Screenshots and results: ${scratch.slice(root.length)}`);
+console.log(
+  '\nA machine cannot check, and this run does not claim:\n' +
+    '  · a screen reader — VoiceOver reading the window, the tab strip and the overlays.\n' +
+    '  · a monitor being unplugged while the window is open (the off-screen restore is above).\n' +
+    '  · the OS reduced-motion switch itself; the renderer was told instead.\n' +
+    '  · the native file dialog, and a native page view under an overlay.\n' +
+    '  · whether a ratio that passes the arithmetic reads well to an eye.\n',
+);
+process.exit(failed === 0 ? 0 : 1);

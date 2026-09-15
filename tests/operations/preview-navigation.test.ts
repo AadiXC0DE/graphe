@@ -48,14 +48,14 @@ describe('what the pane will go to', () => {
     expect(shortAddress('https://example.test/')).toBe('example.test');
   });
 
-  /* `asAddress` passes any `scheme://` straight through, and `pageAt`
-     (electron/main.ts:11865) hands whatever it is given to `loadURL` with no
-     scheme allowlist — so a `file:` address is a page the pane will open. The
-     view cannot reach Node, so this is a local file shown to nobody but the
-     person who typed the address; it is still a read of this machine the preview
-     has no reason to make. Recorded rather than fixed: electron/ and
-     src/preview are outside this ticket. */
-  it.fails('refuses a local file as a page', () => {
+  /* `asAddress` allows http and https and nothing else, and `pageAt`
+     (electron/main.ts) asks the same rule at the one place that would hand an
+     address to `loadURL` — the window's address bar hands over what somebody
+     typed, so `file:///etc/passwd` is not a page the pane will open. */
+  it('refuses a local file as a page', () => {
     expect(asAddress('file:///etc/passwd')).toBeNull();
+    // The other schemes that look like addresses, for the same reason.
+    expect(asAddress('chrome://settings')).toBeNull();
+    expect(asAddress('ftp://example.test/pub')).toBeNull();
   });
 });

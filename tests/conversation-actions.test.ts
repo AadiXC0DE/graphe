@@ -262,7 +262,9 @@ describe('the note a continue answers with', () => {
 
     const box = host.querySelector('textarea');
     expect(box?.value).toBe(note);
-    expect(document.activeElement).toBe(box);
+    // The sentence is in the box; the keyboard is not taken for it. A draft
+    // handed in from outside — a Continue note, the other chat's box — is not a
+    // request for focus, and taking it moved the hand out of the tab strip.
     expect(sent).toEqual([]);
   });
 });

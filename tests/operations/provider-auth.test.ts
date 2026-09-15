@@ -83,13 +83,16 @@ describe('a credential that is missing or expired', () => {
     expect(readsLikeAPerson('The server closed the door')).toBe(true);
   });
 
-  /* The raw text goes into `details` untouched, and that paragraph is exactly
-     where a provider that echoes the key it was given would put it. `mask`
-     exists for the log and for tool results (src/agent/pi/redact.ts) and is not
-     used here. Recorded rather than fixed: electron/ is outside this change. */
-  it.fails('keeps a key out of the details it carries', () => {
+  /* The raw text goes into `details` untouched by the rewrite, and that
+     paragraph is exactly where a provider that echoes the key it was given
+     would put it. `mask` (electron/log.ts, the same detector the Guard uses) is
+     applied on the way into `details`, so the key is named rather than shown. */
+  it('keeps a key out of the details it carries', () => {
     const said = plainTrouble('401 Unauthorized for key sk-abcdefghijklmnopqrstuvwxyz012345');
     expect(said.details ?? '').not.toContain('sk-abcdefghijklmnopqrstuvwxyz012345');
+    // Named rather than dropped: a person reading the disclosure still learns
+    // which credential the provider was given.
+    expect(said.details ?? '').toContain('sign-in key hidden');
   });
 });
 

@@ -17,7 +17,13 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { inFlight, Sessions, type DurableFacts } from '../src/domain/conversations';
+import {
+  inFlight,
+  movedByWork,
+  reportedState,
+  Sessions,
+  type DurableFacts,
+} from '../src/domain/conversations';
 import { runOwner } from '../src/domain/events';
 import { asConversationId, newConversationId, newRunId } from '../src/domain/identity';
 import {
@@ -225,5 +231,100 @@ describe('the launch after a run was cut off', () => {
     // The file is written as text a person could read, under the profile.
     expect(runNotesFile(profile)).toContain(profile);
     expect(JSON.parse(await readFile(runNotesFile(profile), 'utf8'))).toHaveLength(2);
+  });
+});
+
+describe('a question on screen, and Pi tidying up', () => {
+  it('moves a running conversation to waiting-input, and back when it is answered', () => {
+    // A question interrupts a run that is going: anything else and the event is
+    // somebody else's, which is what null means.
+    expect(movedByWork('running', 'asked', true)).toBe('waiting-input');
+    expect(movedByWork('idle', 'asked', true)).toBeNull();
+    expect(movedByWork('queued', 'asked', true)).toBeNull();
+
+    // Answered by the run picking up again, or by the run ending under it. The
+    // second is the one that used to have nowhere to go.
+    expect(movedByWork('waiting-input', 'unasked', true)).toBe('running');
+    expect(movedByWork('waiting-input', 'unasked', false)).toBe('idle');
+    expect(movedByWork('running', 'unasked', true)).toBeNull();
+  });
+
+  it('moves a conversation to compacting for Pi own tidying, and back', () => {
+    expect(movedByWork('running', 'tidying', true)).toBe('compacting');
+    // The early tidy runs between turns, so idle is where it starts from too.
+    expect(movedByWork('idle', 'tidying', false)).toBe('compacting');
+    expect(movedByWork('waiting-input', 'tidying', true)).toBeNull();
+    expect(movedByWork('compacting', 'tidied', true)).toBe('running');
+    expect(movedByWork('compacting', 'tidied', false)).toBe('idle');
+    expect(movedByWork('running', 'tidied', true)).toBeNull();
+  });
+
+  it('walks the whole way through the shell, and leaves nothing stuck waiting', () => {
+    const states = new Sessions();
+    const one = newConversationId();
+    const at = (steps: number): number => AT + steps;
+
+    states.move(one, 'opening', at(0));
+    states.move(one, 'idle', at(1));
+    states.move(one, 'running', at(2));
+
+    // The permission question, and what the shell does with it: the move the
+    // event names, refused or not by the same table as everything else.
+    states.move(one, movedByWork(states.stateOf(one), 'asked', true)!, at(3));
+    expect(states.stateOf(one)).toBe('waiting-input');
+
+    // Answered, and the run picks up again underneath the card.
+    states.move(one, movedByWork(states.stateOf(one), 'unasked', true)!, at(4));
+    expect(states.stateOf(one)).toBe('running');
+
+    // Pi's own tidying, and the end of it.
+    states.move(one, movedByWork(states.stateOf(one), 'tidying', true)!, at(5));
+    expect(states.stateOf(one)).toBe('compacting');
+    states.move(one, movedByWork(states.stateOf(one), 'tidied', false)!, at(6));
+    expect(states.stateOf(one)).toBe('idle');
+
+    // The note is a run's, and every one of these was in flight while it was
+    // going, so a launch that finds the last of them calls it interrupted.
+    expect(states.factsOf(one)?.status).toBe('idle');
+    expect(inFlight('waiting-input')).toBe(true);
+    expect(inFlight('compacting')).toBe(true);
+  });
+
+  it('refuses a move the table does not allow rather than inventing a wait', () => {
+    const states = new Sessions();
+    const one = newConversationId();
+    states.move(one, 'opening', AT);
+    states.move(one, 'idle', AT + 1);
+    // Nothing is running, so there is nothing for a question to interrupt —
+    // and the domain is what says so, not the caller.
+    expect(movedByWork('idle', 'asked', true)).toBeNull();
+    expect(states.stateOf(one)).toBe('idle');
+    // And the wait a question does create can end with the run.
+    states.move(one, 'running', AT + 3);
+    states.move(one, 'waiting-input', AT + 4);
+    expect(states.move(one, 'idle', AT + 5)).toBe('idle');
+  });
+});
+
+describe('a conversation somebody put away', () => {
+  it('is reported archived for as long as the flag says so', () => {
+    // Put away, and nothing running: archived, whatever the runtime last said.
+    expect(reportedState('unloaded', true)).toBe('archived');
+    expect(reportedState('idle', true)).toBe('archived');
+    // A run really going is reported as going, whoever put it away: archive
+    // hides a row from the list, it does not stop work.
+    expect(reportedState('running', true)).toBe('running');
+    expect(reportedState('waiting-input', true)).toBe('waiting-input');
+    // And the flag is not invented: nothing archived, nothing archived.
+    for (const state of ['idle', 'unloaded', 'failed', 'interrupted'] as const) {
+      expect(reportedState(state, false)).toBe(state);
+    }
+  });
+
+  it('comes back archived after a restart, because nothing was running in it', () => {
+    // The flag is durable and the runtime is not, so the state a restart reads
+    // back is the one the registry keeps, not one a dead process left.
+    expect(reportedState('archived', true)).toBe('archived');
+    expect(inFlight('archived')).toBe(false);
   });
 });

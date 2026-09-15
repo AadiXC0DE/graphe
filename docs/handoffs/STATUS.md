@@ -49,18 +49,14 @@ it.
 | # | Item | Phase | State |
 | --- | --- | --- | --- |
 | 1 | A draft in a chat nobody has sent in: `draftKey` writes a null address as `''`, so two never-sent chats in one project share one key, and the name such a chat is known by is a process-local `new-N` | 4.5, S01 | open |
-| 2 | The three session states nothing drives (`waiting-input`, `compacting`, `archived`), and the second pane that would make T21 and T22 testable | 4.2 | open |
-| 3 | Held-work singletons keyed by their run (S05), and the normalised store the plan's 5.1 asks for | 5, 7 | open |
-| 4 | The visual and accessibility matrix (8.5) and the minimum-window pass: 620×520, zoom to 200%, keyboard-only, a screen reader, 20+ tabs | 8 | open (needs somebody at the window, and a screen reader; not started) |
-| 5 | Competing continuations unified (A03), the designer-specific prompt instructions (7.5), and A02's truncation | 7 | open |
-| 6 | The navigation model (U03), composer polish (8.4), and the three retirement rows still in the 8.2 table | 8 | open |
-| 7 | Dependency majors: React 19.3, Electron 44, electron-builder 26, ESLint 10, jsdom 29, Playwright 1.63, Vite 8, Vitest 5, TypeScript 7, concurrently 10, `glob`, `unpdf` — each with its reason and reassessment date in `phase-2-upgrade.md` | 2 | open, reassessed 2026-10-13 |
-| 8 | The main-chunk gate: 577.2 KB against 450 KB, recorded in CI as a non-blocking artifact | 9 | open, assessed |
-| 9 | The rest of phase 6: the bundled package-management route (E11), the global advisor file (E12), an install that can actually be cancelled, a terminal opened inside a packaged app, custom renderer fidelity, the fixture gaps | 6 | open |
-| 10 | Agent runtimes out of the Electron main process (6.2) and terminal compatibility mode (6.5) | 6 | blocked on re-hosting the Guard and the trust filter |
-| 11 | The rest of phase 9 and 10: the 9.1 packaged measurements, the 9.4 lifecycle checks (sleep/wake, a renderer crash, the quit sequence), the 9.6 clean machine from Finder and the x64 bundle, a real model provider, and something that reads the `launch-budget` artifact back | 9, 10 | open |
-| 12 | External-change detection against a reader's revision (nothing compares one today), the recovery UI for the states migration records, and W09's rescue-root collision victims | 3 | open |
-| 13 | The seven findings the 9.5 files record as `it.fails` (a key in error details, an erase-on-unseal, an MCP abort, a duplicate server name, a log-line bound, `file://` in the pane, the main chunk) | 9 | open, each with a test that reproduces it |
+| 2 | The navigation model (U03) and the conversation panes (8.3): one global target remains, no second pane, and that pane is also what would make T21/T22 testable | 4.2, 8 | open |
+| 3 | The normalised renderer store the plan's 5.1 asks for (S05's singleton slots were removed with the held-back row; the review queue keeps an unattributable row labelled rather than dropped) | 5 | open |
+| 4 | The person-only half of the visual matrix (8.5): a screen reader, an external monitor unplugged, the OS reduced-motion switch, the native file dialog, real contrast judgement — the machine half is green (38 rows, 225 checks, `npm run test:visual`) | 8 | open, needs somebody at the window |
+| 5 | Dependency majors: React 19.3, Electron 44, electron-builder 26, ESLint 10, jsdom 29, Playwright 1.63, Vite 8, Vitest 5, TypeScript 7, concurrently 10, `glob`, `unpdf` — each with its reason and reassessment date in `phase-2-upgrade.md` | 2 | open, reassessed 2026-10-13 |
+| 6 | The rest of phase 6: the bundled package-management route (E11), the global advisor file (E12), an install that can actually be cancelled, a terminal opened inside a packaged app, custom renderer fidelity, the fixture gaps | 6 | open |
+| 7 | Agent runtimes out of the Electron main process (6.2) and terminal compatibility mode (6.5) | 6 | blocked on re-hosting the Guard and the trust filter |
+| 8 | The rest of phase 9 and 10: the runtime measurements are in (`npm run test:measure`: cold launch, tab switch, typing while streaming, stop, cancellation, idle CPU, open/close plateau — two budgets missed); what is left is the 9.4 lifecycle checks (sleep/wake, a renderer crash, the quit sequence), the 9.6 clean machine from Finder, a real model provider, the plan's remaining fixtures (100k files, 5 MiB output, 20 extensions, two previews), and something that reads the `launch-budget` artifact back | 9, 10 | open |
+| 9 | The recovery UI for the states migration records, and W09's rescue-root collision victims | 3 | open |
 
 ## Done
 
@@ -68,15 +64,19 @@ Everything else: phase 1, phase 3 except the recovery UI, external-change
 detection and the rescue-root hashing, phase 4 except the rows above, phase 5
 except S05 and the normalised store, phase 6's E01/E03/E04/E05/E06/E07/E09/E10 and
 its fixtures, phase 7 except A03, 7.5's designer-specific instructions and A02's
-remainder, phase 8's tabs and three retirement rows, phase 9's P02 to P06, the
+remainder, phase 8's retirements in full plus its tabs, phase 9's P02 to P06, the
 9.5 coverage, the packaged smoke and the CI artifact, phase 10's catalogue,
-real-window suite and rollback refusal. See `phase-1-contract.md` through
+real-window suite and rollback refusal. The main-chunk gate is met (446.3 KB
+against 450 KB, CI blocking again) and the six 9.5 findings are fixed at the
+cause. See `phase-1-contract.md` through
 `phase-10-scenarios.md`.
 
-Verified on this tree, 2026-09-15: `npm run typecheck` clean; `npm run lint`
-clean; `npm run copy:check` clean; `npm test` **348 files passed, 1 skipped (349),
-6428 tests passed, 4 skipped**; `npm run test:electron` green (4 tests); `npm run
-test:packaged` green on arm64; `npm run verify:package` green on both bundles;
-`npm run licenses:check` 471 of 471; `node scripts/perf-report.mjs --check` fails
-at **577.2 KB** against 450 KB, recorded in CI as a non-blocking artifact while
-the red `it.fails` in `tests/operations/build-budget.test.ts` stays the gate.
+Verified on this tree, 2026-09-15: `npm run typecheck`, `npm run lint` and
+`npm run copy:check` clean; `npm test` **351 files passed, 1 skipped (352), 6449
+tests passed, 11 skipped**; `npm run test:electron` green (11 tests);
+`npm run test:packaged` green on arm64; `npm run verify:package` green on both
+bundles; `npm run licenses:check` 471 of 471; `npm run test:visual` green (38 rows,
+225 checks) after nine findings were fixed; `npm run test:measure` measured against
+the plan's budgets; `node scripts/perf-report.mjs --check` **passes at 446.3 KB**,
+the CI step blocking on it and the assertion in
+`tests/operations/build-budget.test.ts` a plain `it`.

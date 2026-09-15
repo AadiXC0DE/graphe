@@ -115,7 +115,7 @@ import {
   type ConnectStep,
   type ConnectionState,
   type Fetched,
-  type FileEntry,
+  type FilesRead,
   type GitBranch,
   type GitSnapshot,
   type Hatches,
@@ -127,6 +127,7 @@ import {
   type ExtensionAnswer,
   type ExtensionAsk,
   type TerminalKind,
+  type TextRead,
   type TerminalSession,
   type Overview,
   type Artifact,
@@ -171,7 +172,7 @@ import {
   setDownWords,
   whereIn,
 } from '../src/lib/ipc';
-import { saidFrom, type Said } from '../src/preview/tabs';
+import { asAddress, saidFrom, type Said } from '../src/preview/tabs';
 import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
 import { parseBranches } from '../src/lib/branches';
 import { capture, forgetEverything } from '../src/diff/capture';
@@ -272,7 +273,16 @@ import { moveToTrash, TRASH_RULE, emptyTrash, listTrash, restoreFromTrash } from
 import { copyOf, keep, type Incoming } from './services/attachment-store';
 import { Terminals } from './services/terminal';
 import { interruptedWords, readRunNotes, tookRunNoteAway, wroteRunNote } from './services/run-record';
-import { inFlight, Sessions } from '../src/domain/conversations';
+import { readReviewIndex, reviewIndexText, type ReviewIndex } from './services/review-record';
+import {
+  diffKey,
+  fileKey,
+  fileRevision,
+  listRevision,
+  listingKey,
+  Readings,
+} from './services/readings';
+import { inFlight, movedByWork, reportedState, Sessions, type WorkEvent } from '../src/domain/conversations';
 import { asConversationId, type ConversationId } from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
 import { handoffMessage } from '../src/work/continuing';
@@ -2807,6 +2817,31 @@ async function ghComment(
  *  exists, which is before anything it says can arrive. */
 type Speaking = { address: string | null };
 
+/**
+ * The events that say where a run is rather than what it did.
+ *
+ * A question on screen arrives as three different events — a permission being
+ * asked for, the questions asked before the first change, and the same being
+ * taken back — and Pi's tidying as two. They are one vocabulary in the domain,
+ * so the mapping lives here rather than a copy of it per caller.
+ */
+function workEventOf(event: AgentEvent): WorkEvent | null {
+  switch (event.type) {
+    case 'needs-confirmation':
+    case 'asked-first':
+      return 'asked';
+    case 'questions-withdrawn':
+    case 'asking-withdrawn':
+      return 'unasked';
+    case 'tidying':
+      return 'tidying';
+    case 'tidied':
+      return 'tidied';
+    default:
+      return null;
+  }
+}
+
 function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
   return (event) => {
     // Failures are the one kind of event that can arrive in somebody else's
@@ -2826,6 +2861,22 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
        pair of moments that says a turn really is in flight. */
     if (said.type === 'busy' && from.address !== null) {
       states.move(named(from.address), said.on ? 'running' : 'idle', Date.now());
+    }
+
+    /* The two things a run stops being `running` for without ending: a question
+       on screen, and Pi's own tidying of a long conversation. Neither is visible
+       from the shell otherwise, so they are read off the events that say them —
+       and both are cleared by the event that says the wait is over, so nothing
+       is left waiting for a person who has already answered. */
+    const work = workEventOf(said);
+    if (work !== null && from.address !== null) {
+      const conversation = named(from.address);
+      const moved = movedByWork(
+        states.stateOf(conversation),
+        work,
+        held.sessions.find(from.address)?.held.working === true,
+      );
+      if (moved !== null) states.move(conversation, moved, Date.now());
     }
 
     // Which files a turn wrote, collected as it goes. Read off the same stream
@@ -3356,17 +3407,22 @@ async function conversationsInProject(
       // a checkout still belongs to the project that owns the checkout.
       const cwd = one.cwd === null ? '' : canonical(one.cwd);
       return cwd !== '' && (cwd === root || cwd === under || cwd.startsWith(`${under}${sep}`));
-    }).map((one) => ({
-      ...one,
-      // Whether somebody put it away is the shell's to know, not Pi's.
-      archived:
+    }).map((one) => {
+      // Whether somebody put it away is the registry's to know, not Pi's — and
+      // with it the state that leaves the conversation in: put away with
+      // nothing running is `archived`, whatever the runtime last said. A turn
+      // really going is still going, and says so: the window forgets a
+      // conversation the moment its tab goes, so one working behind a closed
+      // tab would otherwise read as sitting still.
+      const putAway =
         conversationById(index, one.path)?.archived === true ||
-        conversationById(index, one.id)?.archived === true,
-      // And so is whether a turn is in flight in it. The window forgets a
-      // conversation the moment its tab goes, so a conversation still working
-      // behind a closed tab would otherwise read as one sitting still.
-      state: states.stateOf(named(one.path)),
-    })),
+        conversationById(index, one.id)?.archived === true;
+      return {
+        ...one,
+        archived: putAway,
+        state: reportedState(states.stateOf(named(one.path)), putAway),
+      };
+    }),
   };
 }
 
@@ -4156,79 +4212,11 @@ function reviewIndexFile(project: string): string {
   return join(app.getPath('userData'), 'review-queue', `${key}.json`);
 }
 
-type ReviewIndex = { entries: readonly ReviewQueued[]; mirroring: readonly string[] };
-
-/** One stored row, checked field by field. Anything that does not read as an
- *  entry is dropped rather than repaired: a half-understood row would draw a
- *  card offering to carry files nobody can name. */
-function reviewRow(value: unknown): ReviewQueued | null {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const id = row['id'];
-  const title = row['title'];
-  const address = row['address'];
-  const at = row['at'];
-  const from = row['from'];
-  if (typeof id !== 'string' || id === '') return null;
-  if (typeof title !== 'string' || typeof address !== 'string') return null;
-  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
-  if (from !== 'conversation' && from !== 'board' && from !== 'schedule') return null;
-  const files: FileTally[] = [];
-  for (const one of Array.isArray(row['files']) ? (row['files'] as unknown[]) : []) {
-    if (one === null || typeof one !== 'object') continue;
-    const file = one as Record<string, unknown>;
-    if (typeof file['path'] !== 'string' || file['path'] === '') continue;
-    files.push({
-      path: file['path'],
-      added: typeof file['added'] === 'number' ? file['added'] : 0,
-      removed: typeof file['removed'] === 'number' ? file['removed'] : 0,
-    });
-  }
-  if (files.length === 0) return null;
-  const choices: Record<string, FileVerdict> = {};
-  const stored = row['choices'];
-  if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
-    for (const [path, choice] of Object.entries(stored as Record<string, unknown>)) {
-      if (choice === 'take theirs' || choice === 'keep mine') choices[path] = choice;
-    }
-  }
-  // Written down with the entry, so a review survives a restart still scoped to
-  // the state it was read against.
-  const held = row['snapshot'];
-  const read = held !== null && typeof held === 'object' ? (held as Record<string, unknown>) : {};
-  const source = typeof read['source'] === 'string' ? read['source'] : '';
-  const target = typeof read['target'] === 'string' ? read['target'] : '';
-  return {
-    id,
-    from,
-    title,
-    address,
-    files,
-    at,
-    read: row['read'] === true,
-    ...(source === '' || target === '' ? {} : { snapshot: { source, target } }),
-    ...(Object.keys(choices).length === 0 ? {} : { choices }),
-  };
-}
-
+/** One project's queue, read back off disk. A file that will not parse is an
+ *  empty queue rather than a throw — see `readReviewIndex`. */
 async function readReviewQueue(project: string): Promise<ReviewIndex> {
-  try {
-    const parsed = JSON.parse(await readFile(reviewIndexFile(project), 'utf8')) as unknown;
-    if (parsed === null || typeof parsed !== 'object') return { entries: [], mirroring: [] };
-    const held = parsed as Record<string, unknown>;
-    const rows = Array.isArray(held['entries']) ? (held['entries'] as unknown[]) : [];
-    const entries: ReviewQueued[] = [];
-    for (const row of rows) {
-      const one = reviewRow(row);
-      if (one !== null) entries.push(one);
-    }
-    const mirroring = Array.isArray(held['mirroring'])
-      ? (held['mirroring'] as unknown[]).filter((one): one is string => typeof one === 'string')
-      : [];
-    return { entries: queueFrom(entries), mirroring };
-  } catch {
-    return { entries: [], mirroring: [] };
-  }
+  const text = await readFile(reviewIndexFile(project), 'utf8').catch(() => null);
+  return text === null ? { entries: [], mirroring: [] } : readReviewIndex(text);
 }
 
 async function saveReviewQueue(project: string, held: Held): Promise<void> {
@@ -4238,7 +4226,7 @@ async function saveReviewQueue(project: string, held: Held): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   await writeAtomically(
     file,
-    JSON.stringify({ entries: held.review, mirroring: held.mirroringLegacy }),
+    reviewIndexText({ entries: held.review, mirroring: held.mirroringLegacy }),
   );
 }
 
@@ -5127,6 +5115,19 @@ async function insideFolder(where: string): Promise<readonly Found[]> {
   }
   return found;
 }
+
+/**
+ * What each listing and each file was last read at.
+ *
+ * Kept so an answer can say whether the folder has moved since the window last
+ * looked: a panel drawn from memory is the thing that goes stale, and this is
+ * the record it is checked against. Nothing here is a cache — every read goes
+ * to disk — so the worst a wrong entry can do is make a caller read again.
+ */
+const listingReadings = new Readings();
+const fileReadings = new Readings();
+/** One per copy and base: what the diff on screen was read from. */
+const reviewDiffReadings = new Readings();
 
 /** Where a file the window asked for really is, or why it is not somewhere we
  *  will read from. Checked as written and again as resolved, so a link out of
@@ -7782,10 +7783,10 @@ function register(): void {
 
   /** Everything the project holds. Nothing open is an empty list rather than a
    *  failure: the panel simply has nothing to draw. */
-  handle<readonly FileEntry[]>(CHANNEL.projectFiles, async (_event, args) => {
+  handle<FilesRead>(CHANNEL.projectFiles, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
-    if (open === null) return done([]);
+    if (open === null) return done({ files: [], revision: '' });
     // The folder the conversation works in, not the project root: a chat in its
     // own copy is shown the files it is actually changing.
     const folder = folderFor(open, where);
@@ -7806,32 +7807,58 @@ function register(): void {
           )
         : readGitStatus(folder).then((status) => status?.files ?? []),
     ]);
-    return done(markChanged(walked.files, changed));
+    const files = markChanged(walked.files, changed);
+    /* What this listing was read from, so the window can tell whether the
+       folder has moved under it: the folder, and every name and size in it. An
+       editor writing a file of the same length is not in here — that is what
+       the open file's own revision is for, since it is the bytes that matter
+       once somebody is reading one. */
+    const revision = listRevision([
+      folder,
+      ...files.map((one) => `${one.path} ${String(one.size)}`),
+      ...changed.map((one) => one.path),
+    ]);
+    listingReadings.note(listingKey(folder), revision);
+    return done({ files, revision });
   });
 
   /** One file, to read. Everything that could go wrong here — a location
-   *  outside the folder, a file that is bytes rather than words, one too big
-   *  for a screen — comes back as a sentence instead of as content. */
-  handle<string>(CHANNEL.fileText, async (_event, args) => {
-    const [path] = args;
-    const open = projectAt(whereIn(args));
+   *  outside the project, a file too big, bytes that are not text — comes back
+   *  as a sentence instead of content.
+   *
+   *  `args[1]` is the revision the window last read this file at, when it has
+   *  one. A file that no longer matches it is answered as it is now, with
+   *  `changed` set: an editor or a terminal writing the same path between two
+   *  looks must not leave the old bytes drawn as the current ones. */
+  handle<TextRead>(CHANNEL.fileText, async (_event, args) => {
+    const [path, expect] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof path !== 'string' || path.trim() === '') {
       return fail(cannotShowFile(cannotOpen.gone));
     }
     // Out of the conversation's own folder, so a chat working in a copy opens
     // the version it is changing rather than the project's.
-    const where = await fileInProject(folderFor(open, whereIn(args)), path);
-    if (where.full === undefined) return fail(cannotShowFile(where.because));
+    const folder = folderFor(open, where);
+    const full = await fileInProject(folder, path);
+    if (full.full === undefined) return fail(cannotShowFile(full.because));
 
-    const found = await stat(where.full).catch(() => null);
+    const found = await stat(full.full).catch(() => null);
     if (found === null || !found.isFile()) return fail(cannotShowFile(cannotOpen.gone));
     if (tooBig(found.size)) return fail(cannotShowFile(cannotOpen.tooBig));
 
-    const bytes = await readFile(where.full).catch(() => null);
+    const bytes = await readFile(full.full).catch(() => null);
     if (bytes === null) return fail(cannotShowFile(cannotOpen.gone));
     if (looksBinary(bytes)) return fail(cannotShowFile(cannotOpen.notText));
-    return done(bytes.toString('utf8'));
+    const revision = fileRevision(bytes);
+    const read = fileReadings.note(fileKey(folder, path), revision);
+    return done({
+      path,
+      text: bytes.toString('utf8'),
+      revision,
+      changed: read.changed && typeof expect === 'string' && expect !== revision,
+    });
   });
 
   /** Against the project in front, so the window never has to name a folder to
@@ -9836,11 +9863,27 @@ function register(): void {
 
     const repo = reviewRepo(open, where);
     const checkout = await checkoutForReview(repo, open.held, entry.address);
-    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '' });
+    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '', revision: null, changed: false });
     const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    if (base === null) {
+      return done({ entries: reviewRows(open.held), diff: '', revision: null, changed: false });
+    }
+    /* What this diff is of, read the same way a decision is checked: the copy's
+       revision and its working tree together, since a copy's work is usually
+       uncommitted. A second look at the same entry compares, and one that has
+       moved is reported as moved rather than drawn as the change somebody
+       already read. */
+    const now = await reviewSnapshotOf(checkout.folder, repo);
+    const diff = await reviewDiff(checkout.folder, base);
+    if (now === null) {
+      return done({ entries: reviewRows(open.held), diff, revision: null, changed: false });
+    }
+    const read = reviewDiffReadings.note(diffKey(checkout.folder, base), now.source);
     return done({
       entries: reviewRows(open.held),
-      diff: base === null ? '' : await reviewDiff(checkout.folder, base),
+      diff,
+      revision: now.source,
+      changed: read.changed && entry.snapshot !== undefined && entry.snapshot.source !== now.source,
     });
   });
 
@@ -11489,6 +11532,14 @@ function register(): void {
         typeof box.width !== 'number' ||
         typeof box.height !== 'number')
     ) {
+      return done(null);
+    }
+    /* The address rule, at the one place that would load it. The window's address
+       bar hands over what somebody typed, and this view is not a way to read
+       this machine's own files: anything the rule turns down leaves the pane
+       empty rather than loading. */
+    if (asAddress(address) === null) {
+      dropPageView();
       return done(null);
     }
     const view = makePageView();

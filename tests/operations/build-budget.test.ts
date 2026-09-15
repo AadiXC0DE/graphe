@@ -20,12 +20,12 @@
  * chunk nothing names — and what keeps the entry's own copy of every lazy chunk
  * name, which the build writes into it as text, out of the launch set.
  *
- * The budget is not met. The main chunk is over the 450 KB the app promises,
- * which is finding P01 — measured once in
- * docs/handoffs/phase-9-performance.md (646.4 KB) and left as an accepted
- * exception rather than relaxed silently. The assertion that it should pass is
- * here as `it.fails`, so the number stays recorded and the gate stays red until
- * somebody either splits the chunk or changes the promise in writing.
+ * The budget is met: the main chunk is 446.3 KB against the 450 KB the app
+ * promises. Finding P01 was 646.4 KB when it was measured; phase 8's retirements
+ * took much of it and splitting the press-reached views out of the shell took
+ * the rest, so this is a plain assertion rather than the `it.fails` it was while
+ * the number was over. If it fails, the fix is to put a view behind a dynamic
+ * import, not to raise the limit.
  */
 
 import { execFile } from 'node:child_process';
@@ -150,10 +150,10 @@ describe('what a fresh build costs', () => {
     );
   });
 
-  /* P01. A fresh build's main chunk is over the 450 KB the app promises, so the
-     script's own gate fails on this tree. Recorded as a failing expectation
-     rather than by raising the limit, which is the one thing 9.1 forbids. */
-  it.fails('holds the 450 KB main chunk budget', async () => {
+  /* P01. A fresh build's main chunk is inside the 450 KB the app promises. The
+     script's own gate is the assertion: it exits non-zero when the number is
+     over, and the fix is a dynamic import rather than a raised limit. */
+  it('holds the 450 KB main chunk budget', async () => {
     const { said, code } = await report(fresh as string);
     expect(code, said).toBe(0);
   });

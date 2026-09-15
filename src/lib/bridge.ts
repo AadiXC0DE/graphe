@@ -51,6 +51,8 @@ import {
   type Decision,
   type Fetched,
   type FileEntry,
+  type FilesRead,
+  type TextRead,
   type FoundAccount,
   type GrapheApi,
   type Hatches,
@@ -1084,15 +1086,22 @@ let previewPlanMode = false;
     /** A whole project, made up, so the panel can be opened and reviewed in a
      *  browser tab — folders inside folders, and the same files the overview
      *  says have moved. */
-    projectFiles(): Promise<Result<readonly FileEntry[]>> {
-      return Promise.resolve(done(PREVIEW_FILES));
+    projectFiles(): Promise<Result<FilesRead>> {
+      // One revision for the whole made-up folder: nothing in a browser tab
+      // changes underneath it, so nothing there is ever stale.
+      return Promise.resolve(done({ files: PREVIEW_FILES, revision: 'browser-preview' }));
     },
 
     /** Three of them are written out; the rest say so rather than inventing a
      *  file somebody might believe. */
-    fileText(path: string): Promise<Result<string>> {
+    fileText(path: string): Promise<Result<TextRead>> {
       const text = PREVIEW_TEXT[path];
-      if (text !== undefined) return Promise.resolve(done(text));
+      if (text !== undefined) {
+        return Promise.resolve({
+          ok: true,
+          value: { path, text, revision: `browser-preview:${String(text.length)}`, changed: false },
+        });
+      }
       return Promise.resolve({
         ok: false,
         trouble: {
@@ -1264,7 +1273,9 @@ let previewPlanMode = false;
     },
 
     reviewOpen(): Promise<Result<ReviewOpened>> {
-      return Promise.resolve(done({ entries: PREVIEW_REVIEW, diff: PREVIEW_DIFF }));
+      return Promise.resolve(
+        done({ entries: PREVIEW_REVIEW, diff: PREVIEW_DIFF, revision: 'browser-preview', changed: false }),
+      );
     },
 
     reviewChoose(): Promise<Result<readonly ReviewEntry[]>> {
@@ -2239,7 +2250,7 @@ function connect(): Bridge {
     setAppearance: (appearance) => api.setAppearance(appearance),
     ownStyles: () => api.ownStyles(),
     projectFiles: (where) => api.projectFiles(where),
-    fileText: (path, where) => api.fileText(path, where),
+    fileText: (path, where, expect) => api.fileText(path, where, expect),
     hatches: () => api.hatches(),
     getHelper: (id) => api.getHelper(id),
     openInEditor: (file, where) => api.openInEditor(file, where),

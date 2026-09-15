@@ -22,6 +22,11 @@ import { mask } from './log';
 /** Enough to see the shape of what happened without pasting a novel. */
 export const LOG_LINES = 200;
 
+/** How much of one line goes in. The count above bounds the number of lines and
+ *  says nothing about their length; a single line the sink wrote is whatever it
+ *  wrote, up to the size of the file. */
+const LOG_LINE_CHARS = 4_000;
+
 export type Diagnostics = {
   version: string;
   /** `darwin 24.6.0 arm64` — the machine, in the terms an issue needs. */
@@ -166,7 +171,17 @@ export function saysDiagnostics(d: Diagnostics): string {
 
   lines.push('', `Log, last ${String(d.log.length)} lines`);
   if (d.log.length === 0) lines.push('  nothing written yet');
-  else for (const line of d.log) lines.push(`  ${line}`);
+  else
+    for (const line of d.log) {
+      // How long a line is, is whatever the sink wrote: the log's own cap is
+      // the size of the file, not the line. One enormous line is cut here
+      // rather than pasted whole, and the cut says what it left out.
+      lines.push(
+        line.length > LOG_LINE_CHARS
+          ? `  ${line.slice(0, LOG_LINE_CHARS)} … (cut at ${String(LOG_LINE_CHARS)} characters)`
+          : `  ${line}`,
+      );
+    }
 
   lines.push('', 'No conversations, files or keys are in this.');
   return lines.join('\n');

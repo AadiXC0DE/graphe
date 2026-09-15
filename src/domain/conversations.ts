@@ -44,8 +44,10 @@ export const SESSION_STATES: readonly SessionState[] = [
  *  `unloaded` is where a conversation sits before any runtime holds it. A second
  *  `opening` while one is in flight is not allowed: two opens would be two
  *  writers for one transcript. `waiting-input` is a wait, not a stall, so nothing
- *  here turns it into a retry. The interrupted/failed/archived states end an
- *  attempt and reach `opening` only because the user asked again.
+ *  here turns it into a retry — but a question whose run ended is over, which is
+ *  why the wait reaches `idle` as well as back to `running`. The
+ *  interrupted/failed/archived states end an attempt and reach `opening` only
+ *  because the user asked again.
  */
 export const TRANSITIONS: Readonly<Record<SessionState, readonly SessionState[]>> = {
   unloaded: ['opening', 'archived'],
@@ -53,7 +55,7 @@ export const TRANSITIONS: Readonly<Record<SessionState, readonly SessionState[]>
   idle: ['queued', 'running', 'compacting', 'opening', 'stopping', 'interrupted', 'failed', 'archived', 'unloaded'],
   queued: ['running', 'idle', 'stopping', 'interrupted', 'failed', 'archived'],
   running: ['idle', 'queued', 'waiting-input', 'compacting', 'stopping', 'interrupted', 'failed', 'archived'],
-  'waiting-input': ['running', 'stopping', 'interrupted', 'failed', 'archived'],
+  'waiting-input': ['running', 'idle', 'stopping', 'interrupted', 'failed', 'archived'],
   compacting: ['running', 'idle', 'stopping', 'interrupted', 'failed', 'archived'],
   stopping: ['idle', 'interrupted', 'failed', 'archived'],
   interrupted: ['opening', 'archived'],
@@ -127,6 +129,62 @@ export function inFlight(state: SessionState): boolean {
     state === 'compacting' ||
     state === 'stopping'
   );
+}
+
+/**
+ * The things a run does that stop it being `running` without ending it.
+ *
+ * Both are the run's own to say and neither is visible from the shell
+ * otherwise: a question on screen (`asked`) and Pi's tidying of a long
+ * conversation. `tidying` is Pi's own compaction — ours to narrate, never to
+ * perform — and it arrives whether the app asked for it or Pi decided on its
+ * own.
+ */
+export type WorkEvent = 'asked' | 'unasked' | 'tidying' | 'tidied';
+
+/**
+ * Where one of those leaves a conversation, or null when it says nothing about
+ * where the conversation is.
+ *
+ * A question only ever interrupts a run that is going, and it is answered by
+ * the run picking up again (`running`) or by the run ending under it (`idle`),
+ * which is why the answer comes from `working` rather than from a guess. A
+ * tidying pass is entered from wherever the conversation was and left the same
+ * way. Anything else — a question withdrawing on a conversation that was never
+ * waiting, a tidy finishing on one that never started — is null, so the caller
+ * invents nothing.
+ */
+export function movedByWork(
+  from: SessionState,
+  event: WorkEvent,
+  working: boolean,
+): SessionState | null {
+  switch (event) {
+    case 'asked':
+      return from === 'running' ? 'waiting-input' : null;
+    case 'unasked':
+      return from === 'waiting-input' ? (working ? 'running' : 'idle') : null;
+    case 'tidying':
+      return from === 'running' || from === 'idle' ? 'compacting' : null;
+    case 'tidied':
+      return from === 'compacting' ? (working ? 'running' : 'idle') : null;
+  }
+}
+
+/**
+ * The state to report for a conversation, with the archive flag taken into
+ * account.
+ *
+ * Archive is a durable fact the registry owns rather than something a runtime
+ * is doing, so it cannot be read off the runtime states alone: a conversation
+ * put away in an earlier sitting has no runtime here at all, and no note about
+ * it survives either, because only a run still in flight is written down. So
+ * the flag decides for anything that is not in flight — a run really going is
+ * reported as going, whoever put the conversation away — and it is not invented
+ * for a conversation nobody archived.
+ */
+export function reportedState(state: SessionState, archived: boolean): SessionState {
+  return archived && !inFlight(state) ? 'archived' : state;
 }
 
 /* -------------------------------------------------------------------------- */

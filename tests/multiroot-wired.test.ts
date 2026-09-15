@@ -70,8 +70,12 @@ describe('what reads and what refuses', () => {
   });
 
   it('marks changed files under their project name', () => {
-    const start = MAIN.indexOf('handle<readonly FileEntry[]>(CHANNEL.projectFiles');
-    const block = MAIN.slice(start, MAIN.indexOf("handle<{ looks: readonly Look[]"));
+    // The handler's own block, up to the next one: the neighbours in `register`
+    // move around, and the claim is about this handler's body.
+    const start = MAIN.indexOf('CHANNEL.projectFiles');
+    expect(start).toBeGreaterThan(-1);
+    const next = MAIN.indexOf('\n  handle<', start + 1);
+    const block = MAIN.slice(start, next === -1 ? undefined : next);
     expect(block).toContain('changedAcross(');
   });
 

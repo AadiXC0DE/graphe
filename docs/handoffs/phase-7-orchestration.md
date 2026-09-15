@@ -1,6 +1,7 @@
 # Phase 7 handoff: one orchestration model, and tools that tell the truth
 
-Findings: A01 done, A02 partial, E08 done, E06/E07 done, E12 open, A03 open, S05 open.
+Findings: A01 done, A02 done, E06/E07/E08 done, E12 open, A03 done except the
+second pane, S05 open.
 
 ## Done
 
@@ -127,12 +128,12 @@ after Stop not being picked up), `tests/continuation.test.ts` (71).
 | Finding | Status |
 | --- | --- |
 | ~~A02, prompt truncation~~ | **DONE after the first draft.** `src/agent/pi/prompt.ts` assembles named sections in fixed precedence (runtime, repository, skills, extensions, plan, optional memory) with caps that carry a pointer to the file rather than a silent cut; optional memory is what gives way, and the drop is stated in the prompt; a required instruction survives any budget (tested); the estimate is labelled an estimate. Project instruction files now come from Pi's own context paths, so Graphe's duplicate `<agents_md>` block is gone (`src/lib/agentsMd.ts` deleted). Advisor settings are held by one conversation at a time instead of being rewritten on every turn. 11 new tests in `tests/advisor-scope.test.ts` |
-| A03, competing continuations | Open. The board/goal/checklist loops are untouched, and phase 8's retirements are not done, so nothing was unified |
+| A03, competing continuations | Done except the second pane. The last competing loop was the canvas flow's settle-driven continuation, and it went with phase 8's row 5; `electron/continuation-owner.ts` is the one send path per conversation, with `tests/continuation-owner.test.ts` holding one send per settle and the ordering when a person's message, an add-on's ask and a child's completion arrive together. What remains is the second pane (8.3), which is what would make T21/T22 reachable |
 | ~~E06, lifecycle hooks~~ | **DONE after the first draft.** Whole or not at all, with `tools-only` only where the add-on declares it — see above |
 | ~~E07, admission point~~ | **DONE after the first draft.** One typed request against the facts the asking seam can see, and the limit on turns an add-on starts reported rather than covered — see above |
 | E12, advisor scope | Open |
 | S05, held-work slots | Open |
-| 7.5 removing designer-specific prompt instructions | Not done. `CLAUDE.md` was not edited either (it is untracked, see the phase 8 handoff) |
+| 7.5 removing designer-specific prompt instructions | Not a defect on this tree. The prompt assembly (`src/agent/pi/prompt.ts`, `standing.ts`) names no designer workflow and hides no Git term; `CLAUDE.md` (untracked) was read and states the new product contract without naming a removed control, so it was deliberately left alone rather than rewritten for churn |
 
 Exit criteria: the tool-truthfulness criterion passes (no fake LSP capability is
 advertised, and the name says what the tool does). The admission ordering is
@@ -141,4 +142,9 @@ tested — `tests/admission.test.ts`, `tests/continuation-owner.test.ts` and
 a message somebody typed, an add-on's follow-up and a child's completion arrive
 together, and a run that was stopped staying stopped when the settle after it
 reports a failure, when a child finishes, or when an add-on starts a turn of its
-own. The no-false-checklist and long-instruction tests do not exist.
+own. A required instruction surviving any budget and the optional notes giving way
+first are held by `tests/prompt-budget.test.ts`; long repository instructions keeping
+their semantics with a pointer rather than a silent cut are held by
+`tests/standing-block.test.ts`. What is not held: a test for the no-false-checklist
+rule beyond `tests/continuation.test.ts`'s decision cases, and the second pane
+(8.3) that would make two-view behaviour reachable.

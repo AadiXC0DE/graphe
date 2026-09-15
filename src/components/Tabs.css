@@ -6,9 +6,11 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  min-width: 0;
-  /* Width comes from the number of tabs, worked out in Tabs.tsx. It may shrink
-     beside the project menu, but must never grow into empty header space. */
+  /* Width comes from the number of tabs, worked out in Tabs.tsx, and it gives
+     way to the project's name only down to what it holds: one tab and the two
+     controls that end the row. That is its automatic minimum, so the one place
+     it is left unset is here. */
+  min-width: auto;
   flex: 0 1 auto;
   -webkit-app-region: no-drag;
 }
@@ -26,7 +28,10 @@
      tab contents paint through one another before overflow can clip it. */
   flex: 1 1 auto;
   width: 0;
-  min-width: 0;
+  /* One tab's worth is the least this can be and still be a strip. Below it the
+     tab in front is drawn outside the box meant to hold it, and a row of twenty
+     gives the whole header away to a name that is only a label. */
+  min-width: 96px;
   /* Sideways, and with no bar: a reserved gutter takes width from the tabs and
      a visible one changes that width the moment it appears, which moves every
      tab out from under the pointer. Wheel and keyboard still reach the rest,

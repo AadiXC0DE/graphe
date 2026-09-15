@@ -17,12 +17,14 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: var(--shelf-width);
+  /* The same number the composition pads by. */
+  width: var(--shelf-take);
   display: flex;
   flex-direction: column;
-  padding: var(--space-2) var(--space-2) var(--space-3);
+  /* And a shelf given no room paints no room — see the file panel in App.css. */
+  padding: var(--space-2) min(var(--space-2), var(--shelf-take)) var(--space-3);
   background: var(--bg);
-  border-right: 1px solid var(--border);
+  border-right: min(1px, var(--shelf-take)) solid var(--border);
   /* The shelf itself does not scroll: only the conversations band inside it
      does, so the projects, the pinned work and the foot keep their places
      while a long history ends in one quiet moving strip. */
@@ -33,7 +35,7 @@
    animates — toggling is the definition of the hundred-times-a-day motion the
    frequency rule bans. */
 .shelf--closed {
-  width: var(--shelf-thin);
+  width: var(--shelf-take);
   padding: var(--space-2);
   overflow: visible;
 }

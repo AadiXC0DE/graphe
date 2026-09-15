@@ -78,6 +78,16 @@ export type Entry = {
   /** Decisions taken file by file. A path with no entry follows whatever the
    *  whole entry is told to do. */
   choices?: Readonly<Record<string, FileVerdict>>;
+  /**
+   * A row an older version of the app wrote, with no conversation behind it.
+   *
+   * Held work used to be recorded once per project rather than once per run, so
+   * a row can outlive any record of which chat it came from. It is kept rather
+   * than dropped — its files are still on disk, and a review nobody can see is
+   * worse than one nobody can answer — and it is drawn without anything that
+   * would carry it over, because there is no copy to carry it from.
+   */
+  unattributed?: true;
 };
 
 /** What a person says about a whole entry. */
@@ -148,6 +158,12 @@ export const reviewWords = {
     board: 'From the board',
     schedule: 'From a schedule',
   } as Record<Entry['from'], string>,
+  /** A row with no conversation behind it: an older version recorded finished
+   *  work once per project, so which chat it came from is not written down
+   *  anywhere. Said plainly, because the row is otherwise unanswerable. */
+  older: 'From an older version of Graphe',
+  olderWhy:
+    'This was recorded before Graphe kept which chat the work came from, so there is no copy here to carry it over from. It is listed rather than thrown away: its files are still where they were.',
   badge: (count: number): string =>
     count === 1 ? '1 waiting for you' : `${String(count)} waiting for you`,
   tally: (added: number, removed: number): string => `+${String(added)} −${String(removed)}`,
@@ -375,5 +391,6 @@ export function saysEntry(entry: Entry): string {
     added += file.added;
     removed += file.removed;
   }
-  return `${reviewWords.froms[entry.from]} · ${reviewWords.files(entry.files.length)} ${reviewWords.tally(added, removed)}`;
+  const from = entry.unattributed === true ? reviewWords.older : reviewWords.froms[entry.from];
+  return `${from} · ${reviewWords.files(entry.files.length)} ${reviewWords.tally(added, removed)}`;
 }

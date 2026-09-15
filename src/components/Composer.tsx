@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -8,7 +10,9 @@ import {
 } from 'react';
 import { offerFor, withMention, type Mentionable } from '../lib/mentions';
 import { createPortal } from 'react-dom';
-import Annotate from './Annotate';
+/* Drawing on a picture is a press away and never on the first screen, and the
+   canvas it brings is the heaviest thing in this file. */
+const Annotate = lazy(() => import('./Annotate'));
 import Attachments, { type Attachment } from './Attachments';
 import LinkFigma from './LinkFigma';
 import { LINK_FIGMA } from '../lib/linkfigma';
@@ -463,14 +467,22 @@ export default function Composer({
      keystroke continues the sentence rather than landing in the middle of it.
      Nothing to do when the sentence handed in is the one already in the box:
      that is the conversation reporting back what was just typed, and seeding it
-     would move the cursor out from under somebody writing. */
+     would move the cursor out from under somebody writing.
+
+     The cursor is only moved for somebody already writing here. A tab that
+     hands in the other chat's draft is not a request for the keyboard, and
+     taking it there moved the hand out of the strip on the way to the tab
+     somebody had just chosen. */
   useEffect(() => {
     if (draft === undefined || draft === '' || draft === valueNow.current) return;
-    setValue(draft);
     const field = areaRef.current;
+    const writing = field !== null && document.activeElement === field;
+    setValue(draft);
     if (field === null) return;
-    field.focus();
-    field.setSelectionRange(draft.length, draft.length);
+    if (writing) {
+      field.focus();
+      field.setSelectionRange(draft.length, draft.length);
+    }
     resize(field);
   }, [draft]);
 
@@ -854,29 +866,31 @@ export default function Composer({
           came from, so the chip stays the same chip and the message still has
           exactly one of it. */}
       {open === null ? null : (
-        <Annotate
-          source={open.preview ?? ''}
-          name={open.name}
-          onClose={() => setDrawingOn(null)}
-          onDone={(marked) => {
-            change(
-              attachedRef.current.map((one) =>
-                one.id === open.id
-                  ? {
-                      ...one,
-                      name: marked.file.name,
-                      note: ['PNG', readableSize(marked.file.size)].join(' · '),
-                      preview: marked.dataUrl,
-                      file: marked.file,
-                    }
-                  : one,
-              ),
-            );
-            setDrawn(marked.said);
-            setDrawingOn(null);
-            areaRef.current?.focus();
-          }}
-        />
+        <Suspense fallback={null}>
+          <Annotate
+            source={open.preview ?? ''}
+            name={open.name}
+            onClose={() => setDrawingOn(null)}
+            onDone={(marked) => {
+              change(
+                attachedRef.current.map((one) =>
+                  one.id === open.id
+                    ? {
+                        ...one,
+                        name: marked.file.name,
+                        note: ['PNG', readableSize(marked.file.size)].join(' · '),
+                        preview: marked.dataUrl,
+                        file: marked.file,
+                      }
+                    : one,
+                ),
+              );
+              setDrawn(marked.said);
+              setDrawingOn(null);
+              areaRef.current?.focus();
+            }}
+          />
+        </Suspense>
       )}
 
       <textarea

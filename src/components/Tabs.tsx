@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import './Tabs.css';
 
 /** What a tab is doing, when it is doing anything. Idle carries no mark at all:
@@ -95,27 +101,40 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder }: Pr
   }, [listing]);
 
   /* Keep the tab in front where it can be seen, without ever moving the row:
-     scrolling is not rearrangement, and nothing here takes focus. */
-  useEffect(() => {
+     scrolling is not rearrangement, and nothing here takes focus. It is brought
+     back whenever the row changes shape as well, because a window dragged
+     narrower leaves the strip at an offset that no longer shows it.
+
+     The tab, not the name inside it: the close control is a sibling of that
+     button, so bringing the button into view left the tab it belongs to
+     twenty-odd pixels past the strip's own edge — which is the one thing 8.3
+     asks an overflow strip to keep in sight. */
+  const showTheFront = useCallback((): void => {
     if (at === null) return;
     const node = buttons.current.get(at);
     if (node === undefined) return;
+    const tab = node.closest('.tabs__tab') ?? node;
     // A layout-less test environment has no scrollIntoView to call.
-    if (typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (typeof tab.scrollIntoView === 'function') {
+      tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
-  }, [at, tabs]);
+  }, [at]);
+
+  useEffect(() => showTheFront(), [showTheFront, tabs]);
 
   useEffect(() => {
     const node = strip.current;
     if (node === null) return;
-    const measure = (): void => setClipped(node.scrollWidth > node.clientWidth + 1);
+    const measure = (): void => {
+      setClipped(node.scrollWidth > node.clientWidth + 1);
+      showTheFront();
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const watching = new ResizeObserver(measure);
     watching.observe(node);
     return () => watching.disconnect();
-  }, [tabs]);
+  }, [tabs, showTheFront]);
 
   useEffect(() => {
     if (returnTo === null) return;

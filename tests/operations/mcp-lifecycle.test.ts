@@ -138,12 +138,10 @@ describe('the bound on a call', () => {
   });
 
   /* The bound is the app's; a caller that gives up should not have to wait it
-     out. `mcpTool(...).execute` is handed Pi's call id and parameters, and the
-     SDK's own cancellation path runs on the AbortSignal Pi passes beside them -
-     which never reaches `McpRegistry.call` (src/agent/pi/mcp.ts:373, :484), so
-     an aborted call waits for the patience to expire. Recorded, not papered
-     over. */
-  it.fails('stops early when the caller aborts', async () => {
+     out. `mcpTool(...).execute` is handed Pi's call id, parameters and signal,
+     and that signal is handed on to the SDK, whose own cancellation path runs
+     on it — so an aborted call ends there rather than at the patience. */
+  it('stops early when the caller aborts', async () => {
     const registry = await registryFor(await serverFile());
     const controller = new AbortController();
     const run = mcpTool(registry).execute as unknown as (

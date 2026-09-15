@@ -50,18 +50,18 @@ describe('CR-02 what does not', () => {
   });
 });
 
-describe('CR-03 the narrow rules still say how far', () => {
-  it('a maximum on the model name, tightening as the composer narrows', () => {
-    const caps = [...CSS.matchAll(/\.composer__row \.thinking__label \{\s*max-width: (\d+)ch/g)].map(
-      (one) => Number(one[1]),
-    );
-    expect(caps.length).toBeGreaterThanOrEqual(2);
-    // Narrower composer, shorter name — in that order, or the queries fight.
-    expect([...caps].sort((a, b) => b - a)).toEqual(caps);
+describe('CR-03 the row makes room rather than cutting a label', () => {
+  /* The model's name is the one label in the row that cannot be worked out
+     anywhere else in the window, so it is never capped below its own words: a
+     name clipped to 66px while the row had a second line free left "Connect a
+     model" — the only thing on the screen saying there is nothing to answer
+     with — reading "Connect a m…". */
+  it('never caps the model name to a number of characters', () => {
+    expect(CSS).not.toMatch(/\.thinking__label \{\s*max-width: [^;]+;/);
   });
 
-  it('and a second line as the last resort rather than running off the edge', () => {
-    expect(CSS).toMatch(/@container \(max-width: 380px\)[^@]*flex-wrap: wrap/s);
+  it('and wraps instead when the words do not fit in the line', () => {
+    expect(ALWAYS).toMatch(/\.composer__row \{[^}]*flex-wrap: wrap/s);
   });
 });
 

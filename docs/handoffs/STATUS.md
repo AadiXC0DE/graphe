@@ -74,14 +74,9 @@ real-window suite and rollback refusal. See `phase-1-contract.md` through
 `phase-10-scenarios.md`.
 
 Verified on this tree, 2026-09-15: `npm run typecheck` clean; `npm run lint`
-clean; `npm run copy:check` clean; `npm test` **347 files passed, 1 failed, 1
-skipped (349), 6427 tests passed, 1 failed, 4 skipped**; `npm run test:electron`
-green (4 tests); `npm run test:packaged` green on arm64; `npm run verify:package`
-green on both bundles; `npm run licenses:check` 471 of 471; `node
-scripts/perf-report.mjs --check` fails at **577.2 KB** against 450 KB, recorded in
-CI as a non-blocking artifact while the red `it.fails` in
-`tests/operations/build-budget.test.ts` stays the gate. The one failure is
-`tests/project-context.test.ts` "carries the project's items, named as the
-project's and not this chat's": the block now renders `- the brief.pdf: what the
-site is for` and the test still expects an em dash there, which is a test pinning
-copy wording in two files that are not committed yet.
+clean; `npm run copy:check` clean; `npm test` **348 files passed, 1 skipped (349),
+6428 tests passed, 4 skipped**; `npm run test:electron` green (4 tests); `npm run
+test:packaged` green on arm64; `npm run verify:package` green on both bundles;
+`npm run licenses:check` 471 of 471; `node scripts/perf-report.mjs --check` fails
+at **577.2 KB** against 450 KB, recorded in CI as a non-blocking artifact while
+the red `it.fails` in `tests/operations/build-budget.test.ts` stays the gate.

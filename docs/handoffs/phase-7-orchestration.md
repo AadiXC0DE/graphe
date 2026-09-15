@@ -1,7 +1,7 @@
 # Phase 7 handoff: one orchestration model, and tools that tell the truth
 
-Findings: A01 done, A02 done, E06/E07/E08 done, E12 open, A03 done except the
-second pane, S05 open.
+Findings: A01 done, A02 done, E06/E07/E08 done, E12 done (see phase 6), A03
+done except the second pane, S05 open.
 
 ## Done
 
@@ -131,7 +131,7 @@ after Stop not being picked up), `tests/continuation.test.ts` (71).
 | A03, competing continuations | Done except the second pane. The last competing loop was the canvas flow's settle-driven continuation, and it went with phase 8's row 5; `electron/continuation-owner.ts` is the one send path per conversation, with `tests/continuation-owner.test.ts` holding one send per settle and the ordering when a person's message, an add-on's ask and a child's completion arrive together. What remains is the second pane (8.3), which is what would make T21/T22 reachable |
 | ~~E06, lifecycle hooks~~ | **DONE after the first draft.** Whole or not at all, with `tools-only` only where the add-on declares it — see above |
 | ~~E07, admission point~~ | **DONE after the first draft.** One typed request against the facts the asking seam can see, and the limit on turns an add-on starts reported rather than covered — see above |
-| E12, advisor scope | Open |
+| ~~E12, advisor scope~~ | **Done, serialized and labelled.** See the phase 6 handoff: Pi 0.85.1 has no per-session seam for an extension's settings, so the plan's fallback applies — the integration is serialized by `AdvisorFile` (`src/agent/advisor.ts`, driven by `tests/advisor-scope.test.ts`, 15), a second chat asking for a different advisor never reaches the file, and the limitation is drawn on the advisor add-on's row |
 | S05, held-work slots | Open |
 | 7.5 removing designer-specific prompt instructions | Not a defect on this tree. The prompt assembly (`src/agent/pi/prompt.ts`, `standing.ts`) names no designer workflow and hides no Git term; `CLAUDE.md` (untracked) was read and states the new product contract without naming a removed control, so it was deliberately left alone rather than rewritten for churn |
 

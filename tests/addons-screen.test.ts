@@ -161,6 +161,7 @@ describe('what is here, in the state it is in', () => {
       says: 'Added. Not loaded in this chat yet.',
       activeIn: [],
       commands: [],
+      limits: [],
       problem: null,
       logs: [],
       ...overrides,
@@ -212,6 +213,23 @@ describe('what is here, in the state it is in', () => {
     const drawn = host?.textContent ?? '';
     expect(drawn).toContain('Running in 2 chats.');
     expect(drawn).toContain('/lens /lens-symbols');
+    // A count says how many; the row says which, because that is the question
+    // somebody asks before taking an add-on off.
+    expect(drawn).toContain('Loaded in the one about type, the second look');
+  });
+
+  it('says nothing about chats when nothing has it loaded', () => {
+    draw({ here: [row({ state: 'installed' })] });
+    expect(host?.textContent).not.toContain(SAYS.inChats);
+  });
+
+  it('draws the limits that apply here, and nothing where there are none', () => {
+    const said = 'It keeps one advisor setting for this whole computer.';
+    draw({ here: [row({ id: 'pi-advisor-flow', limits: [said] })] });
+    expect(host?.textContent).toContain(said);
+
+    draw({ here: [row({ id: 'pi-advisor-flow', limits: [] })] });
+    expect(host?.textContent).not.toContain(said);
   });
 
   it('keeps the loader\u2019s own reason behind a press', () => {
@@ -227,5 +245,27 @@ describe('what is here, in the state it is in', () => {
     });
     const folded = host?.querySelector('details');
     expect(folded?.textContent).toContain('boom: no such export');
+  });
+
+  /* A failed add-on with nowhere to read the reason is the shrug the plan
+     names: the row has to carry both the one sentence and the raw text behind
+     it, folded. */
+  it('draws a failed add-on\u2019s error and its logs together', () => {
+    draw({
+      here: [
+        row({
+          id: 'pi-lens',
+          state: 'failed',
+          says: "Cannot find module 'fast-glob'",
+          problem: "Cannot find module 'fast-glob'",
+          logs: ["Cannot find module 'fast-glob'", 'Require stack:', ' - /Users/you/.pi/...'],
+          activeIn: [],
+        }),
+      ],
+    });
+    expect(host?.textContent).toContain("Cannot find module 'fast-glob'");
+    const folded = host?.querySelector('details');
+    expect(folded?.tagName).toBe('DETAILS');
+    expect(folded?.textContent).toContain('Require stack');
   });
 });

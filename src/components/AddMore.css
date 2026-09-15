@@ -525,6 +525,19 @@
   white-space: nowrap;
 }
 
+/* Which chats have it loaded, and what it cannot do. Both plain sentences: this
+   is the part somebody reads before deciding to take an add-on off. */
+.addmore__chats,
+.addmore__limit {
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__limit {
+  color: var(--text-faint);
+}
+
 /* The loader's own output, kept behind the press that asks for it. */
 .addmore__logtext {
   margin: var(--space-2) 0 0;

@@ -58,6 +58,7 @@ import {
   createSession,
   warmUp,
   defaultAgentDir,
+  advisorScopeSaid,
   disconnectProvider,
   discoveredAccounts,
   importAccount,
@@ -149,6 +150,7 @@ import {
   type KeptAttachments,
   type TrashView,
   type StorageNow,
+  type MigrationNow,
   type AddonReport,
   type CarriedExtension,
   type Room,
@@ -190,6 +192,7 @@ import { pagesIn, type Page } from '../src/preview/pages';
 import { packageShelf, reloadWords, CANNOT_STOP, npmSetup, type Pack } from '../src/agent/pi/packages';
 import { extensionsIn } from '../src/agent/pi/extension-probe';
 import { extensionRows, type SeenHere, type SessionHere } from '../src/agent/pi/extension-states';
+import { ADVISOR_PACKAGE, fromPackage } from '../src/agent/advisor';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
 import { pickerCommands, routeFor, type AddonCommand } from '../src/agent/pi/commands';
@@ -283,7 +286,7 @@ import {
   Readings,
 } from './services/readings';
 import { inFlight, movedByWork, reportedState, Sessions, type WorkEvent } from '../src/domain/conversations';
-import { asConversationId, type ConversationId } from '../src/domain/identity';
+import { asConversationId, newConversationId, type ConversationId } from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
 import { handoffMessage } from '../src/work/continuing';
 import {
@@ -293,10 +296,12 @@ import {
   discover,
   readMarker,
 } from './services/migration-service';
+import { readoutOf } from './services/migration-readout';
 import {
   addConversation,
   addWorkspace,
   conversationById,
+  conversationInFile,
   attachConversation,
   canonical,
   emptyIndex,
@@ -1996,11 +2001,62 @@ function workingAt(open: Workspace<Held>, where: Where): GrapheSession | null {
   return found.held;
 }
 
-/** What a conversation answers to for as long as it is open. The file it is
- *  written down in, or a name of its own until there is one. */
-let unwritten = 0;
-function addressOf(session: GrapheSession): string {
-  return session.conversation ?? `new-${String(++unwritten)}`;
+/**
+ * The id a conversation is known by for the whole of its life.
+ *
+ * Minted when the chat is made and kept when it is written down, so a
+ * conversation nobody has sent in yet has an identity of its own rather than a
+ * name taken from how many chats the process had already made. A counter
+ * restarts with the process, so a draft kept under one could resurface in a
+ * later launch's new chat; a generated id cannot.
+ *
+ * The transcript is an attribute of the conversation, not the conversation, so
+ * the id does not change when Pi writes one.
+ */
+function newAddress(): string {
+  return newConversationId();
+}
+
+/**
+ * The id for the conversation a session is, reusing the one already written
+ * down for the transcript it holds.
+ *
+ * A conversation opened again is the conversation already recorded rather than
+ * a second row pointing at the same file, so the record is found by the file
+ * before an id is made.
+ */
+function addressFor(session: GrapheSession): string {
+  const file = session.conversation;
+  const known =
+    file === null || !workspaceIndexLoaded ? null : conversationInFile(workspaceIndex, file);
+  return known?.conversationId ?? newAddress();
+}
+
+/**
+ * A checkout row filed under the name a conversation used to be known by.
+ *
+ * Rows written by an older version are keyed by the Pi transcript, because that
+ * is what an address was then. They are moved onto the conversation's own id
+ * the first time it is opened, so the row is not orphaned by the change.
+ */
+function claimCheckout(held: Held, address: string, session: GrapheSession): void {
+  const file = session.conversation;
+  if (file === null || file === address) return;
+  const row = held.checkouts.get(file) ?? held.checkouts.get(address);
+  if (row === undefined) return;
+  held.checkouts.delete(file);
+  held.checkouts.set(address, row);
+}
+
+/**
+ * What a conversation is called, by the session holding it.
+ *
+ * Found rather than made: a call that is only asking the name of a live
+ * conversation must not mint a second identity for it. A session nobody has
+ * adopted has no name of its own yet, and its transcript is the honest answer.
+ */
+function addressOf(held: Held, session: GrapheSession): string {
+  return held.sessions.open.find((one) => one.held === session)?.path ?? session.conversation ?? '';
 }
 
 /** Put a conversation in front of its project. Whatever it is called on the
@@ -3440,7 +3496,26 @@ async function migrateWorkspacesOnce(): Promise<void> {
   const markerFile = join(dir, MARKER_FILE);
   const already = await readFile(markerFile, 'utf8').catch(() => null);
   if (already !== null && readMarker(already) !== null) return;
+  await runWorkspaceMigration();
+}
+
+/**
+ * The move itself, for a profile that has not been through it or somebody who
+ * asked for the check again.
+ *
+ * Safe to run twice: what it writes is decided by what is on the disk rather
+ * than by what it did last time, and a copy is never written over one that is
+ * already there. Running it on a migrated profile therefore re-reads the same
+ * folders and reports the same counts.
+ */
+async function runWorkspaceMigration(): Promise<void> {
+  const dir = app.getPath('userData');
+  const markerFile = join(dir, MARKER_FILE);
   const lock = join(dir, LOCK_FILE);
+  // A move that already happened keeps the moment it happened. Asking for the
+  // check again re-reads the same folders; it does not make the move newer.
+  const before = await readFile(markerFile, 'utf8').catch(() => null);
+  const wasAt = before === null ? null : readMarker(before)?.completedAt ?? null;
   // Somebody else is doing it, or did it a moment ago. A second writer here
   // would decide the same ids and fight over the same file.
   const mine = await mkdir(lock, { recursive: false }).then(
@@ -3498,15 +3573,34 @@ async function migrateWorkspacesOnce(): Promise<void> {
       indexFile: workspaceIndexFile(),
     });
     // The copies first: a migration that rewrote the index and then failed to
-    // keep the old files would have nothing to go back to.
+    // keep the old files would have nothing to go back to. Exclusive, so a
+    // check run after this one cannot replace the pre-migration state it kept
+    // with the migrated one.
+    const kept: string[] = [];
     for (const one of run.backups) {
-      await copyFile(one.path, one.backup).catch(() => undefined);
+      await copyFile(one.path, one.backup, constants.COPYFILE_EXCL).catch(() => undefined);
+      // A copy that was already there is the one from the first run, and it is
+      // still the way back, so a second run reports it too. The source path is
+      // what is written down: the copy is that path with `.bak` after it.
+      if (existsSync(one.backup)) kept.push(one.path);
     }
     workspaceIndex = run.index;
     await saveWorkspaceIndex();
     await writeAtomically(
       markerFile,
-      `${JSON.stringify({ ...run.marker, unlinked: run.unlinked, quarantined: run.quarantined }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          ...run.marker,
+          completedAt: wasAt ?? run.marker.completedAt,
+          unlinked: run.unlinked,
+          quarantined: run.quarantined,
+          // What was really kept, which is not the same list as what was about
+          // to be: a copy already there is the one from the first run.
+          backups: kept,
+        },
+        null,
+        2,
+      )}\n`,
     );
     log.line('info', 'workspaces migrated', {
       sources: run.marker.sources,
@@ -3518,6 +3612,27 @@ async function migrateWorkspacesOnce(): Promise<void> {
   } finally {
     await rm(lock, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * What the move found, for the Storage page.
+ *
+ * The record is the whole answer except for two things it cannot know about
+ * itself: whether this profile is from a newer app, and how many of the copies
+ * it names are still there. Both are asked here rather than stored twice.
+ */
+async function migrationNow(): Promise<MigrationNow> {
+  // Reading the index is what notices a newer profile, and the page can be the
+  // first thing opened in a session.
+  await loadWorkspaceIndex();
+  const dir = app.getPath('userData');
+  const marker = await readFile(join(dir, MARKER_FILE), 'utf8').catch(() => null);
+  return readoutOf({
+    marker,
+    newer: workspaceIndexTooNew,
+    backupFolder: dir,
+    keptBackups: (paths) => paths.filter((one) => existsSync(one)).length,
+  });
 }
 
 /* ---------------------------------------------- which folder, written down -- */
@@ -3689,12 +3804,12 @@ async function namedWorkspaceOf(how: Opening): Promise<WorkspaceRecord | null> {
 }
 
 /**
- * Write down which workspace a conversation works in.
+ * Write down which workspace a conversation works in, and the transcript it is
+ * being written into.
  *
- * Under both names it will be known by: the address the window is using now,
- * and the one Pi files the transcript under once there is a word written. An
- * address is temporary and a record must not be, or a conversation resumed
- * tomorrow is a conversation nobody can say the folder of.
+ * One record, under the conversation's own id: the id is minted when the chat
+ * is made and the transcript is attached to it, so the record is not a second
+ * name for the same conversation and a resume does not make another one.
  */
 async function noteWhereItWorks(
   open: { path: string; held: Held },
@@ -3711,25 +3826,23 @@ async function noteWhereItWorks(
           open.held.checkouts.get(address)?.branch ?? null,
           null,
         );
-  const durable = checkoutKey(open.held, address);
   const found = open.held.sessions.find(address);
   await loadWorkspaceIndex();
-  // The record first, then the link: a conversation exists from the moment it
-  // starts, so its folder is answerable before Pi has written a word of it.
-  for (const id of durable === address ? [address] : [address, durable]) {
-    const added = addConversation(workspaceIndex, {
-      conversationId: id,
-      workspaceId: home.workspaceId,
-      title: found?.name ?? '',
-      lineage,
-      now: Date.now(),
-    });
-    workspaceIndex = updateConversation(added.index, id, {
-      sessionFile: found?.held.conversation ?? null,
-      updatedAt: Date.now(),
-      ...(lineage === null ? {} : { lineage }),
-    });
-  }
+  // The record first, then the transcript: a conversation exists from the
+  // moment it starts, so its folder is answerable before Pi has written a word
+  // of it.
+  const added = addConversation(workspaceIndex, {
+    conversationId: address,
+    workspaceId: home.workspaceId,
+    title: found?.name ?? '',
+    lineage,
+    now: Date.now(),
+  });
+  workspaceIndex = updateConversation(added.index, address, {
+    sessionFile: found?.held.conversation ?? null,
+    updatedAt: Date.now(),
+    ...(lineage === null ? {} : { lineage }),
+  });
   await saveWorkspaceIndex();
 }
 
@@ -3946,14 +4059,13 @@ function lastThingSaid(history: readonly AgentEvent[]): string | null {
 
 /** Write down where a conversation came from. A link, never a copy. */
 async function rememberLineage(
-  open: { path: string; held: Held },
   address: string,
   lineage: { from: string; kind: 'continue' | 'fork' },
 ): Promise<void> {
   await loadWorkspaceIndex();
-  for (const id of new Set([address, checkoutKey(open.held, address)])) {
-    workspaceIndex = updateConversation(workspaceIndex, id, { lineage });
-  }
+  // One id, because a conversation has one: the record is keyed by it, and the
+  // transcript is an attribute of it rather than a second name for it.
+  workspaceIndex = updateConversation(workspaceIndex, address, { lineage });
   await saveWorkspaceIndex();
 }
 
@@ -4036,20 +4148,11 @@ async function readCheckouts(project: string): Promise<Map<string, Checkout>> {
 async function saveCheckouts(project: string, held: Held): Promise<void> {
   const file = checkoutIndexFile(project);
   await mkdir(dirname(file), { recursive: true });
-  const rows = Object.fromEntries(
-    [...held.checkouts].map(([address, one]) => [checkoutKey(held, address), one]),
-  );
+  const rows = Object.fromEntries([...held.checkouts]);
   // Beside it and moved into place: a half-written index orphans every
   // checkout of the project, and there is nothing left that knows where the
   // work was.
   await writeAtomically(file, JSON.stringify(rows));
-}
-
-/** What a conversation is asked for by once it has been written down. An
- *  address is `new-N` until the first write and never changes after it, so an
- *  index filed under one is an index a resume never matches. */
-function checkoutKey(held: Held, address: string): string {
-  return held.sessions.find(address)?.held.conversation ?? address;
 }
 
 /** Put a conversation's checkout away, and remember where it went. Quiet: a
@@ -4057,15 +4160,10 @@ function checkoutKey(held: Held, address: string): string {
 async function putAwayCheckoutAt(project: string, held: Held, address: string): Promise<void> {
   const one = held.checkouts.get(address);
   if (one === undefined || !existsSync(one.folder)) return;
-  const filed = checkoutKey(held, address);
   const away = await putAwayWorktree(gitRunHereFor(), project, one.folder, {
     rescue: keepAside(project, basename(one.folder)),
   }).catch(() => ({ put: false }));
   if (!away.put) return;
-  if (filed !== address) {
-    held.checkouts.delete(address);
-    held.checkouts.set(filed, one);
-  }
   await saveCheckouts(project, held).catch(() => undefined);
 }
 
@@ -4877,8 +4975,26 @@ async function startConversationUnlocked(
 
   // `keep` is a conversation rebuilt in place — the window is already calling it
   // something, and a new name for the same thread would lose it.
-  const address = keep ?? addressOf(session);
+  //
+  // Otherwise the talk has one of three shapes. A fresh chat takes the name of
+  // the press that asked for it, so the window can keep a draft under the id the
+  // conversation will really have, and a retry of that press is the same chat
+  // rather than a second one. One the window named by its transcript keeps the
+  // id already written down for that file — which is how a profile from before
+  // ids existed stays one conversation rather than becoming two. Anything else
+  // is found by the file the session is writing, or minted.
+  await loadWorkspaceIndex();
+  const written = asked === undefined ? null : conversationById(workspaceIndex, asked);
+  const address =
+    keep ??
+    written?.conversationId ??
+    asked ??
+    (how.kind === 'fresh' ? how.key : undefined) ??
+    addressFor(session);
   from.address = address;
+  // A checkout row filed under the old name — the transcript path — is moved
+  // onto the conversation's own id, so the work it points at is not orphaned.
+  claimCheckout(held, address, session);
   // How far the agent may go is held on the session, so a conversation built
   // again — a reload after an add-on changed, most of all — would come back at
   // the cautious default rather than at what somebody chose for it. Put back
@@ -5693,7 +5809,7 @@ const terminals = new Terminals(
 function takeBackFromTheFolder(open: Workspace<Held>, where: Where): readonly string[] {
   const session = sessionAt(open, where);
   if (session === null) return [];
-  const whose = keyOf(open.path, addressOf(session));
+  const whose = keyOf(open.path, addressOf(open.held, session));
   const waiting = waitingForTheFolder.get(whose) ?? [];
   waitingForTheFolder.delete(whose);
   for (const one of waiting) workspaceLocks.cancel(one.workspace, one.id);
@@ -7250,6 +7366,9 @@ const NEEDS_NO_PROGRAMS = new Set<string>([
   CHANNEL.goalLoad,
   CHANNEL.goalSave,
   CHANNEL.goalClear,
+  // Neither reaches for a program: reading the record, and showing a folder.
+  CHANNEL.migration,
+  CHANNEL.showBackups,
 ]);
 
 function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unknown[]) => Promise<Result<T>>): void {
@@ -8640,7 +8759,7 @@ function register(): void {
       home === null ? { kind: 'fresh' } : openingIn(home.workspaceId),
     );
     if (!started.ok) return started;
-    await rememberLineage(open, started.value.address, { from: from.path, kind: 'continue' });
+    await rememberLineage(started.value.address, { from: from.path, kind: 'continue' });
     return done({ ...openedFrom(open, started.value), handoff: note });
   });
 
@@ -8731,7 +8850,7 @@ function register(): void {
       if (cut !== null) await rm(cut, { force: true }).catch(() => undefined);
     }
     if (!started.ok) return started;
-    await rememberLineage(open, started.value.address, { from: from.path, kind: 'fork' });
+    await rememberLineage(started.value.address, { from: from.path, kind: 'fork' });
     return done(openedFrom(open, started.value));
   });
 
@@ -9196,6 +9315,11 @@ function register(): void {
         // it could not fingerprint is not a yes anybody could have given.
         needsTrust: mine && !trusted(one.id),
         filesMissing: one.missing.length > 0,
+        // The advisor keeps one setting for the whole computer, and this is the
+        // one place a person can read that. The picker that chooses it cannot
+        // say it: what the setting is doing depends on which conversation is
+        // holding it, which only the sessions in this process know.
+        limit: fromPackage(one.where, ADVISOR_PACKAGE) ? advisorScopeSaid(agentDir) : null,
       };
     });
 
@@ -10256,7 +10380,7 @@ function register(): void {
       const chain = detailsOf(cause);
       return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
     }
-    const address = addressOf(session);
+    const address = addressFor(session);
     from.address = address;
     open.held.checkouts.set(address, { folder, branch });
     await saveCheckouts(open.path, open.held).catch(() => undefined);
@@ -10505,7 +10629,7 @@ function register(): void {
    *  request that names none means the one in front. */
   function listAddress(open: Workspace<Held>, where: Where): string | null {
     const found = conversationAt(open.held, where);
-    return found === null ? null : addressOf(found.held);
+    return found === null ? null : addressOf(open.held, found.held);
   }
 
   /** A card has been answered, so the loop is no longer held back by it. A
@@ -10777,6 +10901,50 @@ function register(): void {
     },
   );
 
+  /* What the one-time move found. The record was written by the run itself and
+     only ever reached the log; this is the same reading, in front of somebody
+     who might need it. */
+  handle<MigrationNow>(CHANNEL.migration, async () => done(await migrationNow()));
+
+  /**
+   * The check again, on somebody's word.
+   *
+   * The same run the app does at launch, so it can only ever find the same
+   * folders and write the same counts. It is offered because "check again" is
+   * the first thing anybody does with a number they do not like, and a press
+   * that answers with the same number is an answer.
+   */
+  handle<MigrationNow>(CHANNEL.migrationCheck, async () => {
+    await runWorkspaceMigration();
+    return done(await migrationNow());
+  });
+
+  /** The copies the move kept, in the Finder, so a recovery is one press rather
+   *  than a path somebody has to find by hand. */
+  handle<null>(CHANNEL.showBackups, async () => {
+    const dir = app.getPath('userData');
+    const marker = await readFile(join(dir, MARKER_FILE), 'utf8').catch(() => null);
+    const named = marker === null ? null : readMarker(marker);
+    // The files themselves, when there are any: opening the profile folder and
+    // leaving somebody to guess which of forty files is the copy is not a way
+    // back. Nothing named means the folder is still the honest place.
+    const first = named?.backups?.[0];
+    if (first !== undefined && existsSync(`${first}.bak`)) {
+      shell.showItemInFolder(`${first}.bak`);
+      return done(null);
+    }
+    const trouble = await shell.openPath(dir);
+    if (trouble !== '') {
+      return fail({
+        what: 'I could not open that folder.',
+        because: 'This computer would not show it to me just now.',
+        actionLabel: 'Got it',
+        details: trouble,
+      });
+    }
+    return done(null);
+  });
+
   handle<{ ok: boolean; why?: string }>(CHANNEL.keepCredential, async (_event, args) => {
     const [name, value] = args;
     if (typeof name !== 'string' || typeof value !== 'string') return fail(NOTHING_OPEN);
@@ -10935,25 +11103,25 @@ function register(): void {
        itself start again from zero and whatever they stopped is behind them.
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
-    continuations.spoke(open.path, addressOf(conversation.held));
-    askingSomebody.delete(keyOf(open.path, addressOf(conversation.held)));
+    continuations.spoke(open.path, addressOf(open.held, conversation.held));
+    askingSomebody.delete(keyOf(open.path, addressOf(open.held, conversation.held)));
     // A new job, so the next apply puts a version down again, and whatever the
     // app had queued for itself is behind us.
-    open.held.snappedBeforeApply.delete(addressOf(conversation.held));
-    ours.delete(keyOf(open.path, addressOf(conversation.held)));
+    open.held.snappedBeforeApply.delete(addressOf(open.held, conversation.held));
+    ours.delete(keyOf(open.path, addressOf(open.held, conversation.held)));
     // Their words, not the workflow's expansion of them: the branch is named
     // after what was asked for.
     await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
     /* One writer per folder. A second chat working in the same files waits its
        turn here — before anything is sent, so nothing it asked for has begun —
        and the waiting line beside the composer is where that is said. */
-    const whose = keyOf(open.path, addressOf(conversation.held));
+    const whose = keyOf(open.path, addressOf(open.held, conversation.held));
     const workspaceKey = canonical(folderFor(open, where));
     const own = runsHere.get(whose);
     const runId = `run-${String((runsSoFar += 1))}`;
     // Whoever is ahead is a conversation, so that is what somebody waiting is
     // told: the folder's own name says nothing about who has it.
-    const held = open.held.sessions.find(addressOf(conversation.held))?.name;
+    const held = open.held.sessions.find(addressOf(open.held, conversation.held))?.name;
     const admission = workspaceLocks.request(
       { key: workspaceKey, runId, label: held === undefined || held.trim() === '' ? open.name : held },
       own !== undefined && own.key === workspaceKey ? own.runId : undefined,
@@ -11122,7 +11290,7 @@ function register(): void {
        start again. Told here as well as from the carrying-on Stop, because a
        caller that only stops the run must not leave the loop able to restart
        it. */
-    continuations.stopped(open.path, found === null ? '' : addressOf(found.held));
+    continuations.stopped(open.path, found === null ? '' : addressOf(open.held, found.held));
     if (found === null) return done(null);
     // Stopping is its own state, said before the run ends rather than after: a
     // window drawing a turn being ended is not a window drawing a turn that is

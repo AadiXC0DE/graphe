@@ -159,11 +159,13 @@ type Props = {
  *  — see src/lib/attachments.ts. */
 const ACCEPT = 'image/*,application/pdf';
 
-/** Where a half-written message is kept. Per project and per conversation:
- *  one key for both would hand somebody the sentence they were writing
- *  somewhere else. */
-export function draftKey(project: string, conversation?: string | null): string {
-  return `graphe:draft:${project}\u0000${conversation ?? ''}`;
+/** Where a half-written message is kept. Per project and per conversation: one
+ *  key for both would hand somebody the sentence they were writing somewhere
+ *  else, and one key for every chat with no name yet would hand them the
+ *  sentence they left in another one. Both are required for that reason — the
+ *  caller keeps nothing rather than keeping it in the wrong place. */
+export function draftKey(project: string, conversation: string): string {
+  return `graphe:draft:${project}\u0000${conversation}`;
 }
 
 /** How long the typing has to stop before the box is written down. */
@@ -420,8 +422,12 @@ export default function Composer({
     [onAttachmentsChange],
   );
 
-  /** Where this box's draft is kept, or null where nothing is kept. */
-  const keptAt = project === undefined || project === '' ? null : draftKey(project, conversation);
+  /** Where this box's draft is kept, or null where nothing is kept. A chat
+   *  with no id yet is not a place to keep one: two of them would share a key. */
+  const keptAt =
+    project === undefined || project === '' || conversation === undefined || conversation === null || conversation === ''
+      ? null
+      : draftKey(project, conversation);
 
   /* What is in the box this instant, for the write on the way out: an effect
      cleaning up cannot read state it closed over a render ago. */

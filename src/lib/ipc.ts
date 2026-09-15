@@ -469,6 +469,10 @@ export type ExtensionHere = {
   activeIn: readonly string[];
   /** The `/` commands it offers here. */
   commands: readonly string[];
+  /** The limits that apply to it here, one sentence each. Empty where there is
+   *  none to state — a limit nobody applies is worse than silence. The
+   *  advisor's one-setting limit is the one this exists for. */
+  limits: readonly string[];
   /** A concise error, and the raw text behind it. Both empty when nothing went
    *  wrong. */
   problem: string | null;
@@ -508,6 +512,35 @@ export type StorageNow = {
   couldClear: number;
   because: string;
   rows: readonly StorageRow[];
+};
+
+/** The one-time move of what an older version left behind, as the Storage page
+ *  reads it. Counts only: the folder each record ended up in is the app's own
+ *  business, and the sentence a person reads is built from these. */
+export type MigrationNow = {
+  /** When the move finished, or null when this computer has never been through
+   *  it. Everything below is zero then. */
+  completedAt: number | null;
+  /** Records accounted for: the ones it resolved and the ones it could not
+   *  read, together, because both were looked at. */
+  sources: number;
+  /** How each record's folder turned out, by the answer discovery reached. */
+  verdicts: { verified: number; missing: number; gone: number; foreign: number };
+  /** Chats it pointed at the folder they work in. */
+  connected: number;
+  /** Chats it could not point anywhere, usually because a live record already
+   *  holds them. */
+  unlinked: number;
+  /** Records it could not read at all, kept aside rather than dropped. */
+  unreadable: number;
+  /** Copies kept of the files the move was about to replace, and the folder
+   *  they are beside. Null when the record predates that list, rather than 0,
+   *  which would claim none were kept. */
+  backups: number | null;
+  backupFolder: string;
+  /** The saved work was written by a newer version of Graphe, so nothing here
+   *  may be written to it. */
+  newer: boolean;
 };
 
 export type Pack = {
@@ -1668,6 +1701,13 @@ export const CHANNEL = {
   /** Empty one storage row outright, where that is safe. */
   clearFolder: 'graphe:clear-folder',
   clearFinishedWork: 'graphe:clear-finished-work',
+  /** What the one-time move of older chats found, and where the copies of the
+   *  files it replaced are kept. */
+  migration: 'graphe:migration',
+  /** Do that check again. Running it twice changes nothing. */
+  migrationCheck: 'graphe:migration-check',
+  /** Show the folder those copies are kept in. */
+  showBackups: 'graphe:show-backups',
   /** Which of those are held, and whether this machine can hold any. */
   credentialsKept: 'graphe:credentials-kept',
   /** Stop it carrying on. Escape, and the Stop beside the line it draws. */
@@ -2320,4 +2360,10 @@ export type GrapheApi = {
   storage(): Promise<Result<StorageNow>>;
   clearFolder(name: string): Promise<Result<StorageNow>>;
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
+  /** What the one-time move of older chats found, or nothing to say. */
+  migration(): Promise<Result<MigrationNow>>;
+  /** Run that check again. It changes nothing the second time. */
+  migrationCheck(): Promise<Result<MigrationNow>>;
+  /** Show the copies it kept, so a recovery does not start with a path hunt. */
+  showBackups(): Promise<Result<null>>;
 };

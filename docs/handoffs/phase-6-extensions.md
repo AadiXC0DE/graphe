@@ -256,6 +256,54 @@ which is also why an install cannot be cancelled (see 6.6 above).
   to ship honestly today. What a person gets instead is the real terminal above,
   which is a shell rather than a second agent, and which says so.
 
+## E12 and 6.1's last gap, landed in this pass
+
+**What Pi allows, read off the installed package.** `@earendil-works/pi-coding-agent`
+0.85.1 exposes no per-session seam for an extension's settings:
+`CreateAgentSessionOptions` takes `model`, `thinkingLevel` and `scopedModels`, and
+nothing that reaches an extension's own config; `ExtensionAPI` has
+`registerFlag`/`getFlag` and no per-session settings object, and the flags are
+process-wide anyway; `ExtensionContext` carries `cwd`, the model, thinking level
+and the session manager, and no settings slot. `pi-advisor-flow` 0.4.0 (the
+version installed here) resolves its configuration from
+`join(getAgentDir(), "advisor.json")` on every load, deliberately refuses
+project-local config with the comment "Repository-controlled project
+configuration is never applied", and never reads a flag. So there is no version
+of "pass the choice through the extension instance" that Pi supports today.
+
+**What was chosen.** The plan's second branch: serialize the integration and
+label it. One conversation holds the machine's one advisor file while it is
+open; a second asking for a *different* advisor is refused, left running with no
+second opinion, and told why in a sentence naming both models — it is never
+quietly answered by the first conversation's model. A second conversation asking
+for the *same* setting is granted, because that serves nobody else's model. The
+rule now lives in `AdvisorFile` in `src/agent/advisor.ts` (with the reasoning in
+the `AdvisorChoice` comment, where the next person will read it), not in loose
+state inside the adapter's `createSession` closure.
+
+**What the UI says.** The advisor's row on the add-ons screen carries the
+limitation, in whichever of three states is true: nobody holding it (what the
+addition does), this conversation holding it (with the model it is set to), or
+another conversation holding it. The picker itself was deliberately not touched:
+`src/components/ThinkingWith.tsx` and `src/components/Composer.tsx` are
+`PanesAndIdentity`'s during this pass, and the fact is per-project rather than
+per-control, so the add-ons screen is where it belongs.
+
+**6.1's last gap.** The row already carried a count of conversations; it now
+names them (`Loaded in <chat>, <chat>`, from the same `activeIn` the count came
+from), and a failed add-on draws its one-sentence error with the loader's own
+output behind a `<details>`. Both were already in the data and are now drawn and
+tested: `tests/addons-screen.test.ts` (13) renders the row with a chat name, with
+no chats, with a stated limit, with no limit, and with a failure whose logs are
+folded; `tests/extension-states.test.ts` (16) holds the join that produces them.
+
+**The limit on turns an add-on starts, labelled.** Phase 7 reported that limit
+in the handoff and nowhere a person could see it. `limitWords.startsTurns` in
+`src/agent/pi/extension-states.ts` states it on the row of any add-on whose own
+capability card says it starts turns — read from the loaded session's report, not
+from a package name — naming the round budget that ends an overrun. An add-on
+that starts nothing gets no such line.
+
 ## What is not done, and what it costs
 
 | Finding | Status |
@@ -268,9 +316,9 @@ which is also why an install cannot be cancelled (see 6.6 above).
 | ~~E09, tool collisions~~ | Done, see above, for names. The name itself never changes, so an old transcript still reads as the tool that ran |
 | ~~E10, package lifecycle~~ | Done, see above. A change under an open conversation marks it activation pending, says so in one sentence, and the conversation is built again when it is opened |
 | 6.6, the rest of that section | Open. Nothing reads a custom renderer an add-on registers: a custom tool call has no renderer of its own here. An add-on's commands do reach the composer's picker now, read live from the session in front (`electron/main.ts:9396`, `rowsForThePicker`), and a command that left during a queued wait is answered rather than sent as prose (`electron/main.ts:10956`, `/${name} is not here any more`); `tests/extension-commands.test.ts` (13) is the proof, including a command an add-on registered running in Pi's command context in a real chat rather than being sent as prose. An install that has started still cannot be cancelled, and the reason is the host rather than the screen. The shelf's half is whole and tested: `PackageHost.stop?`, `Shelf.stop()` answered with `StopOutcome { stopped, says }`, a bounded record of what the installer said on the way, `CANNOT_STOP` for a host that cannot reach the installer, and one channel carrying all of it (`CHANNEL.stopPackage`, `electron/main.ts:9249`), with `tests/packages.test.ts` and `tests/package-stop.test.ts` (5) on the route. **What is missing is the host, and this is the plain statement of it:** Pi's `DefaultPackageManager` (0.85.1) owns its npm child privately and has no `stop`, cancel or abort member at all — `packageHost` in `src/agent/pi/adapter.ts:1665` returns `search`, `list`, `add`, `update`, `remove`, `installed` and `watching`, and nothing else — so `canStop` is false and the screen prints the shelf's own sentence rather than drawing a Stop that could only ever fail (`AddonReport.stopping`, `src/components/AddMore.tsx:525`). The route that would make it real is hosting the install ourselves — npm run by the shell, which is also E11's bundled package-management route — after which the same channel ends installs with nothing else to change |
-| 6.1, the states Extensions shows | Done for the display. The eight words are decided in `src/agent/pi/extension-states.ts` (`stateOf`, `extensionRows`) from facts the shell and the open conversations already have, and drawn one row each on the add-ons screen with version, origin, scope, the conversations it is running in, the commands it offers and the loader's own reason behind a press (`electron/main.ts` `addonsHere`, `src/components/AddMore.tsx`). From real facts: `discovered` and `needs trust` from the files found on this computer and the project's own trust store; `installed` from where Pi puts an npm package; `active here`, `disabled` and `failed` from what an open conversation's loader did with it; `activation pending` from the ids a change landed on while a chat was open; `incompatible` from the files a package's own manifest names and this disk does not have. Defaulted, and honest about it: with no conversation open nothing is loaded anywhere, so a row shows its install state rather than a session's — which is what its own sentence then says. Evidence: `tests/extension-states.test.ts` (13), `tests/addons-screen.test.ts` (10) |
+| ~~6.1, the states Extensions shows~~ | **Done.** The last gap was drawn in this pass: the row names the conversations the add-on is loaded into rather than only counting them, a failed add-on's error is drawn with its logs foldable, every add-on carries the limit that applies to it where the host imposes one, and the advisor's one-setting limitation is stated on its own row. Done for the display. The eight words are decided in `src/agent/pi/extension-states.ts` The eight words are decided in `src/agent/pi/extension-states.ts` (`stateOf`, `extensionRows`) from facts the shell and the open conversations already have, and drawn one row each on the add-ons screen with version, origin, scope, the conversations it is running in, the commands it offers and the loader's own reason behind a press (`electron/main.ts` `addonsHere`, `src/components/AddMore.tsx`). From real facts: `discovered` and `needs trust` from the files found on this computer and the project's own trust store; `installed` from where Pi puts an npm package; `active here`, `disabled` and `failed` from what an open conversation's loader did with it; `activation pending` from the ids a change landed on while a chat was open; `incompatible` from the files a package's own manifest names and this disk does not have. Defaulted, and honest about it: with no conversation open nothing is loaded anywhere, so a row shows its install state rather than a session's — which is what its own sentence then says. Evidence: `tests/extension-states.test.ts` (13), `tests/addons-screen.test.ts` (10) |
 | E11, installing add-ons without host npm | Open, one step. `CHANNEL.addPackage` asks `npmOnPath()` before it hands the press to the installer and says "Adding an add-on needs npm, and this Mac does not have it on the path." rather than npm's own words, and the add-ons screen now says so before anybody presses anything: one line, the page that installs Node, and `brew install node` offered only where there is a Homebrew to run it with (`npmSetup` in `src/agent/pi/packages.ts`, `brewOnPath` in `src/work/storage.ts`, drawn in `src/components/AddMore.tsx`; `tests/packages.test.ts` and `tests/addons-screen.test.ts`). What the finding still asks for, and this does not provide, is the bundled package-management route: add-ons are installed by host npm, which is also why an install cannot be cancelled |
-| E12, advisor settings | Open. The advisor choice is still a global file rewritten around turns |
+| ~~E12, advisor settings~~ | **Done, serialized and labelled.** The advisor choice is no longer rewritten around turns (that went in phase 7); what was still missing was the plan's label and a test that a second chat cannot reach the file. Pi has no per-session seam for an extension's settings: `CreateAgentSessionOptions` carries a model and a thinking level, not an extension's settings, `ExtensionAPI` has no per-session settings object, and `pi-advisor-flow` 0.4.0 resolves its path from `getAgentDir()` alone and refuses project-local config by design, with its two registered flags never read. So the plan's fallback stands: the integration is serialized, the reason is in the code (`src/agent/advisor.ts`, the `AdvisorChoice` comment), and the limitation is labelled on the advisor add-on's own row on the add-ons screen. `AdvisorFile` in `src/agent/advisor.ts` holds the rule and is driven directly by `tests/advisor-scope.test.ts` (15): one chat holding the file, a second asking for a different model refused with both model names in the sentence, the file's contents unchanged and the write never called, sharing granted where both want the same, and writes serialized one at a time. The adapter uses that object rather than its own map. See below |
 | 6.2, agent runtimes in a child process | Not started. Extension code still runs on Electron's main event loop, which is what makes a synchronous loop in a trusted add-on a hang for the whole app. This is the largest unbuilt piece of the plan |
 | 6.5, terminal compatibility mode | Not shipped, deliberately. See the section above: the boundary hooks (Guard, extension policy, transcript ownership) are the ones that do not cross a process boundary yet, so there is no version of it that preserves them |
 | Phase 6 fixtures | Done for the plan's list. `tests/fixtures/extensions/` holds `plain`, `orchestrating`, `throws`, `spins`, `marker` and the rest of the register: unknown tool names, custom messages, streamed output, image/resource results, notifications/status, the four dialogs, abortable questions, custom TUI, provider registration, slash commands, shortcut conflicts, asynchronous result delivery, a throwing hook, an unresolved async hook, installation failure, a transitive-file trust change, removal during a running tool, and two independently authored helpers with different schemas. What each one is and what proves it: `docs/handoffs/extension-compatibility.md` |

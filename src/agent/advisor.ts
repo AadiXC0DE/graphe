@@ -119,11 +119,17 @@ export function worthHaving(models: readonly Priced[]): boolean {
  * different advisors used to overwrite each other, and a chat could be answered
  * by a model nobody chose there.
  *
- * Until the package can be told a conversation's choice directly, one
- * conversation holds the file. Another, asking for a different advisor, is left
- * without a second opinion and told why, rather than quietly taking the first
- * one's model. The holder gives it back when it is finished with, or when
- * somebody turns the advisor off there.
+ * There is no seam to fix that with. Pi's `CreateAgentSessionOptions` carries a
+ * model and a thinking level, not an extension's settings, and `ExtensionAPI`
+ * has no per-session settings object; `pi-advisor-flow` 0.4.0 resolves its
+ * config path from `getAgentDir()` alone and refuses project-local config on
+ * purpose, and the two flags it registers are never read. So this is the
+ * serialization the plan allows and not the scoped setting it prefers: one
+ * conversation holds the file while it is open. Another, asking for a different
+ * advisor, is left without a second opinion and told why, rather than quietly
+ * taking the first one's model. The holder gives it back when it is finished
+ * with, or when somebody turns the advisor off there. `advisorScopeWords`
+ * carries the same limitation to the screen, so it is not only in a comment.
  */
 export type AdvisorChoice = {
   advises: ModelChoice | null;
@@ -142,6 +148,18 @@ export type AdvisorScope = {
 };
 
 export const advisorScopeWords = {
+  /** The standing limitation, said on the advisor add-on's own row. The
+   *  addition keeps one setting for the whole computer; the plan asks for that
+   *  to be labelled rather than left to be discovered by a chat that quietly
+   *  has no advisor. */
+  oneSetting:
+    'It keeps one advisor setting for this whole computer, and there is nowhere to set one per chat. Whoever has it on holds it until that conversation closes.',
+  /** The same row while this conversation is the one holding it. */
+  ours: (holds: string): string =>
+    `This conversation holds the one advisor setting for this computer, set to ${holds}. Another chat asking for a different advisor runs without one until this closes.`,
+  /** And while another conversation is. */
+  inUse: (holds: string): string =>
+    `Another conversation holds the one advisor setting for this computer, set to ${holds}. This one has no second opinion unless it asks for the same.`,
   /** Said to the conversation that cannot have the file, naming what it asked
    *  for and what is already there. Both model names, because the person is
    *  the only one who can say which conversation should win. */
@@ -207,6 +225,55 @@ export function holdScope(scope: AdvisorScope, who: string, choice: AdvisorChoic
 /** A conversation finished with the file. Only the holder can give it back. */
 export function letGoScope(scope: AdvisorScope, who: string): AdvisorScope {
   return scope.owner === who ? noScope() : scope;
+}
+
+/**
+ * The machine's one settings file, as the conversations sharing it see it.
+ *
+ * One of these exists per Pi folder for as long as the app is running, and
+ * every conversation in that folder goes through it. It is a class rather than
+ * loose state in the adapter because this is the rule the plan asks to be able
+ * to prove: a second conversation asking for a different advisor must not reach
+ * the file, and the file must not be rewritten while it is being read. Both are
+ * reachable here without a live Pi session.
+ */
+export class AdvisorFile {
+  #scope: AdvisorScope = noScope();
+  #writing: Promise<void> = Promise.resolve();
+
+  /** What the file holds, and whose choice it is. */
+  get scope(): AdvisorScope {
+    return this.#scope;
+  }
+
+  /**
+   * One write at a time. Two conversations starting together used to interleave
+   * two half-written files, and the addition reads this file between the two.
+   */
+  write(work: () => Promise<void>): Promise<void> {
+    const next = this.#writing.then(work).catch(() => undefined);
+    this.#writing = next;
+    return next;
+  }
+
+  /**
+   * The file, for a conversation that wants `choice`. `put` is the write that
+   * makes the choice true on disk; it runs only for the conversation that was
+   * granted the file.
+   */
+  async take(who: string, choice: AdvisorChoice, put: () => Promise<void>): Promise<Holder> {
+    const taken = holdScope(this.#scope, who, choice);
+    if (!taken.granted) return taken;
+    this.#scope = taken.scope;
+    await this.write(put);
+    return taken;
+  }
+
+  /** A conversation finished with the file. Only the holder can give it back. */
+  release(who: string): AdvisorScope {
+    this.#scope = letGoScope(this.#scope, who);
+    return this.#scope;
+  }
 }
 
 /* -------------------------------------------------------------------------- */

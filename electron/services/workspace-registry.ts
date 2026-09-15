@@ -510,15 +510,46 @@ export function workspaceForConversation(
   index: WorkspaceIndex,
   conversationId: string,
 ): WorkspaceRecord | null {
-  const record = index.conversations[conversationId];
-  return record === undefined ? null : workspaceById(index, record.workspaceId);
+  const record = recordFor(index, conversationId);
+  return record === null ? null : workspaceById(index, record.workspaceId);
 }
 
 export function conversationById(
   index: WorkspaceIndex,
   conversationId: string,
 ): ConversationRecord | null {
-  return index.conversations[conversationId] ?? null;
+  return index.conversations[conversationId] ?? conversationInFile(index, conversationId);
+}
+
+/**
+ * The conversation written down against a Pi session file.
+ *
+ * A conversation's own id is minted, so the transcript it ends up in is an
+ * attribute rather than its identity — and the two have to be joined the one
+ * way round that works: by the file, because that is what a listing, a resume
+ * and a checkout row all carry.
+ */
+export function conversationInFile(
+  index: WorkspaceIndex,
+  sessionFile: string,
+): ConversationRecord | null {
+  for (const one of Object.values(index.conversations)) {
+    if (one.sessionFile !== null && one.sessionFile === sessionFile) return one;
+  }
+  return null;
+}
+
+/**
+ * One conversation's record, by either name it can carry.
+ *
+ * Its own id is what everything new is written under. The file it is written
+ * in is the other name, and it is not going away: a listing, a saved
+ * conversation the window names, and every row on disk from before ids existed
+ * all carry that. Resolving both in one place is what keeps one conversation
+ * one row.
+ */
+function recordFor(index: WorkspaceIndex, asked: string): ConversationRecord | null {
+  return index.conversations[asked] ?? conversationInFile(index, asked);
 }
 
 /** Every conversation of a project, archived ones included: hiding is the
@@ -584,9 +615,9 @@ export function attachConversation(
   workspaceId: string,
 ): WorkspaceIndex {
   if (index.workspaces[workspaceId] === undefined) throw new Error('no such workspace');
-  const known = index.conversations[conversationId];
+  const known = recordFor(index, conversationId);
   const projectId = index.workspaces[workspaceId]?.projectId ?? '';
-  if (known === undefined) {
+  if (known === undefined || known === null) {
     return {
       ...index,
       conversations: {
@@ -610,11 +641,13 @@ export function attachConversation(
     };
   }
   if (known.workspaceId === workspaceId) return index;
+  // Always written under the record's own id, however it was asked for: a file
+  // name is a way of naming a conversation, never a second row for it.
   return {
     ...index,
     conversations: {
       ...index.conversations,
-      [conversationId]: { ...known, workspaceId, projectId },
+      [known.conversationId]: { ...known, workspaceId, projectId },
     },
   };
 }
@@ -626,11 +659,14 @@ export function updateConversation(
   conversationId: string,
   change: Partial<Omit<ConversationRecord, 'conversationId' | 'version'>>,
 ): WorkspaceIndex {
-  const known = index.conversations[conversationId];
-  if (known === undefined) return index;
+  const known = recordFor(index, conversationId);
+  if (known === null) return index;
   return {
     ...index,
-    conversations: { ...index.conversations, [conversationId]: { ...known, ...change } },
+    conversations: {
+      ...index.conversations,
+      [known.conversationId]: { ...known, ...change },
+    },
   };
 }
 

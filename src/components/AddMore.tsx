@@ -74,6 +74,7 @@ export const SAYS = {
   stop: 'Stop',
   hereHeading: 'What is here',
   hereNote: 'Everything Graphe can load in this project, and what each one is doing.',
+  inChats: 'Loaded in',
   getNode: 'Get Node',
   details: 'What it said',
 } as const;
@@ -573,6 +574,21 @@ function HereRow({ one }: { one: ExtensionHere }) {
           <span className="addmore__uses">{one.commands.map((name) => `/${name}`).join(' ')}</span>
         )}
       </div>
+
+      {/* Which conversations have it loaded right now, by the name each one is
+          known by. "Running in 2 chats" is a count; a person deciding whether
+          to remove something wants to know which two. */}
+      {one.activeIn.length === 0 ? null : (
+        <span className="addmore__chats">{`${SAYS.inChats} ${one.activeIn.join(', ')}`}</span>
+      )}
+
+      {/* What it cannot do, in its own terms — the advisor keeping one setting
+          for the whole computer is the one this exists for. */}
+      {one.limits.map((limit) => (
+        <span className="addmore__limit" key={limit}>
+          {limit}
+        </span>
+      ))}
 
       <span className="addmore__where">{one.where}</span>
 

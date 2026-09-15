@@ -79,6 +79,7 @@ import { goalElapsed, withElapsed } from "./work/goal";
 import { keyOf, ownerOf } from "./work/owner";
 import { continuationWords } from "./work/continuing";
 import { trashActions } from "./work/trash";
+import { migrationActions } from "./work/migration";
 import { useResearch } from "./hooks/useResearch";
 import { useGoalChip } from "./hooks/useGoalChip";
 import { useBoard } from "./hooks/useBoard";
@@ -124,6 +125,7 @@ import {
   type ShowProgress,
   type SpendLimit,
   type StorageNow,
+  type MigrationNow,
   type ThinkingLevel,
   type TrashView,
   type Trouble,
@@ -292,9 +294,11 @@ const SHELF_STORE = 'graphe:shelfAtLaunch';
 const SHELF_WAS_STORE = 'graphe:shelfWas';
 
 /** A name for one press, so every request that press makes answers with the
- *  same conversation. Two presses carry two names and are two chats, which is
- *  what somebody who pressed New twice asked for; the shell forgets a name
- *  after a minute, so a stale one cannot come back as somebody's new chat. */
+ *  same conversation — and so the window knows the id of the chat it is
+ *  starting before the shell has answered. Two presses carry two names and are
+ *  two chats, which is what somebody who pressed New twice asked for; the shell
+ *  forgets a name after a minute, so a stale one cannot come back as somebody's
+ *  new chat. */
 let pressesMade = 0;
 function newPress(): string {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -2404,6 +2408,9 @@ function Conversation() {
   /** What has been deleted, and the rule it is kept under. Listing it walks the
    *  trash folder, so it is asked with the folders above rather than at launch. */
   const [trash, setTrash] = useState<TrashView | null>(null);
+  /** What the one-time move of older chats found. Read with the two above, so
+   *  the screen somebody opens to ask "what happened to my chat" has it. */
+  const [migration, setMigration] = useState<MigrationNow | null>(null);
   /** What this Mac reports about Computer use, or null before it is asked. */
   const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
 
@@ -2718,6 +2725,11 @@ function Conversation() {
    *  the trash again: what is left in the list is the proof it worked. */
   const trashHere = useMemo(() => trashActions(bridge, setTrash, say), [say]);
 
+  /** The move's two presses: the check again, and showing the copies it kept.
+   *  The check is the same run the app does at launch, so what comes back is
+   *  the shell's answer and not a hope. */
+  const movedHere = useMemo(() => migrationActions(bridge, setMigration, say), [say]);
+
   /* Only while the sheet is open, and once each time it opens. */
   useEffect(() => {
     if (!settingsOpen) return;
@@ -2725,7 +2737,8 @@ function Conversation() {
       if (answer.ok) setStorage(answer.value);
     });
     trashHere.reload();
-  }, [settingsOpen, trashHere]);
+    movedHere.reload();
+  }, [settingsOpen, trashHere, movedHere]);
 
   /* The moments the targets are written against, so "under 400ms to first
      paint" is a number somebody can read rather than a hope. */
@@ -5500,6 +5513,9 @@ function Conversation() {
         trash={trash}
         onTrashRestore={trashHere.restore}
         onTrashEmpty={trashHere.empty}
+        migration={migration}
+        onMigrationCheck={movedHere.check}
+        onShowBackups={movedHere.backups}
         onClearFinishedWork={() => {
             void bridge.clearFinishedWork().then((answer) => {
               if (!answer.ok) return;

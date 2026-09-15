@@ -17,12 +17,14 @@ import type {
   AlwaysRow,
   ComputerStatus,
   ConnectionState,
+  MigrationNow,
   ModelChoice,
   StorageNow,
   ThinkingLevel,
   TrashView,
 } from '../lib/ipc';
 import Trash from './Trash';
+import Migration from './Migration';
 import { defaultComputerUse, type ComputerUse as ComputerUsePrefs } from '../work/computeruse';
 import { chordOf, saysChord } from '../lib/keys';
 import { THEME_WORDS, showing, type Theme } from '../lib/theme';
@@ -103,6 +105,13 @@ type Props = {
   onTrashRestore?: (name: string) => void;
   /** Throw away exactly the conversations picked on the section. */
   onTrashEmpty?: (names: readonly string[]) => void;
+  /** What the one-time move of older chats found, or null before the shell has
+   *  answered. Quiet unless something was really moved. */
+  migration?: MigrationNow | null;
+  /** Run that check again. It changes nothing the second time. */
+  onMigrationCheck?: () => void;
+  /** Show the copies it kept, where this computer keeps files. */
+  onShowBackups?: () => void;
   /** Everything worth sending when somebody says "it stopped", on the
    *  clipboard. Never a conversation, never a key. */
   onCopyDiagnostics?: () => void;
@@ -212,7 +221,7 @@ const ADDON_WORDS = {
 /** Rows whose control will not sit on the right-hand end of a row, so each one
  *  gets a card of its own. The model chip opens a menu over the card, which a
  *  card that clips its corners would cut in half. */
-const BLOCKS = new Set(['folders', 'trash', 'theme', 'model', 'addons', 'new-model']);
+const BLOCKS = new Set(['folders', 'trash', 'moved', 'theme', 'model', 'addons', 'new-model']);
 
 /** The three answers to which way the palette runs, in the order a segmented
  *  control reads them. */
@@ -296,6 +305,9 @@ export default function Settings({
   trash = null,
   onTrashRestore,
   onTrashEmpty,
+  migration = null,
+  onMigrationCheck,
+  onShowBackups,
   onCopyDiagnostics,
   caps,
   appearance,
@@ -1074,6 +1086,20 @@ export default function Settings({
           <li key={row.id} className={`settings__block${at}`}>
             <div className="settings__blockhead">{words(row)}</div>
             <Trash trash={trash} onRestore={onTrashRestore} onEmpty={onTrashEmpty} />
+          </li>
+        );
+
+      /* Drawn under Deleted conversations and under the folders above it: the
+         same question, what happened to the work that was here before. */
+      case 'moved':
+        return (
+          <li key={row.id} className={`settings__block${at}`}>
+            <div className="settings__blockhead">{words(row)}</div>
+            <Migration
+              migration={migration}
+              {...(onMigrationCheck === undefined ? {} : { onCheck: onMigrationCheck })}
+              {...(onShowBackups === undefined ? {} : { onBackups: onShowBackups })}
+            />
           </li>
         );
 

@@ -152,16 +152,13 @@ import { dirname, join, sep } from 'node:path';
 
 import {
   ADVISOR_SETTINGS_FILE,
+  AdvisorFile,
   advisorScopeWords,
   advisorSettings,
   advisorToolNames,
-  holdScope,
-  letGoScope,
-  noScope,
   reconcile,
   saysChoice,
   type AdvisorChoice,
-  type AdvisorScope,
   type AdvisorSwitches,
   type LoadedExtension,
 } from '../advisor';
@@ -1530,15 +1527,31 @@ function theirsTrustedAndPolicied(
 }
 
 /**
- * Whose choice the machine's one advisor file holds, per agent folder.
+ * The machine's one advisor file, per agent folder, for as long as the app runs.
  *
  * `pi-advisor-flow` reads its own settings file and has nowhere to take a
  * per-conversation choice from, so a conversation's choice only takes effect by
- * being written there. One conversation holds the file at a time — see
- * `holdScope` — and the writes are serialized, because two conversations
- * starting together used to interleave two half-written files.
+ * being written there — and the rule that keeps two conversations off each
+ * other's setting is `AdvisorFile` in `../advisor`, where it can be proved
+ * without a live session. This map is only which file belongs to which folder.
  */
-const advisorHolders = new Map<string, { scope: AdvisorScope; writing: Promise<void> }>();
+const advisorFiles = new Map<string, AdvisorFile>();
+
+/**
+ * What the advisor's one setting is doing right now, in the shell's own words.
+ *
+ * The capability card cannot carry this — it says what the add-on does, and who
+ * holds the setting is a fact about this moment — and the shell cannot work it
+ * out either, because the holders live in this process. So the add-ons screen
+ * asks here, once per agent folder. Nobody having opened a conversation yet is
+ * the same answer as nobody holding it: the standing limitation.
+ */
+export function advisorScopeSaid(agentDir: string): string {
+  const held = advisorFiles.get(agentDir)?.scope.holds;
+  return held === null || held === undefined
+    ? advisorScopeWords.oneSetting
+    : advisorScopeWords.inUse(saysChoice(held));
+}
 
 /** Names one session so two conversations of the same folder can tell each
  *  other's claim apart. Only ever compared, never shown. */
@@ -1654,6 +1667,32 @@ export async function listAllConversations(
 }
 
 export type { Conversation, Moment };
+
+/**
+ * One saved conversation's words, read off disk without opening anything.
+ *
+ * A conversation whose recorded folder is gone cannot be opened — there is no
+ * working directory to run in — but its transcript is still there, and reading
+ * it is the whole of what "open it read-only" means. Nothing is resumed, no
+ * model is asked for and no file is touched: this is the transcript as it was
+ * left, through exactly the same reader a reopened conversation uses, so the
+ * window draws it with the markup it always had.
+ *
+ * An empty transcript reads as nothing said rather than as a failure; a file
+ * that will not parse is a failure, because "nothing was said here" and "this
+ * cannot be read" are different sentences and only one of them is true.
+ */
+export async function readTranscript(
+  path: string,
+): Promise<{ ok: true; value: readonly AgentEvent[] } | { ok: false; because: string }> {
+  try {
+    const pi = await loadPi();
+    const text = await readFile(path, 'utf8');
+    return { ok: true, value: eventsFromEntries(pi.parseSessionEntries(text)) };
+  } catch (cause) {
+    return { ok: false, because: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
 
 /**
  * The things that can be added to Graphe, and the two verbs that change them.
@@ -2845,6 +2884,9 @@ const MOST_AFTER_SAYINGS = 3;
             ? null
             : policyFor(card, options.sessionKind ?? 'conversation', options.addonsChosen),
         commands: [...(here?.commands?.keys() ?? [])].filter((name) => typeof name === 'string'),
+        // Off the add-on's own card, so a limit is stated about what is
+        // actually loaded rather than about a package that shares its name.
+        startsTurns: here !== undefined && card?.startsTurns === true,
         problem:
           failed === null
             ? null
@@ -2862,8 +2904,8 @@ const MOST_AFTER_SAYINGS = 3;
      choice used to be written on every turn, which meant a conversation asking
      for a different advisor rewrote what another was in the middle of using. */
   const advisorWho = `session-${String((sessionsOpened += 1))}`;
-  const advisorFile = advisorHolders.get(agentDir) ?? { scope: noScope(), writing: Promise.resolve() };
-  advisorHolders.set(agentDir, advisorFile);
+  const advisorFile = advisorFiles.get(agentDir) ?? new AdvisorFile();
+  advisorFiles.set(agentDir, advisorFile);
 
   /**
    * The machine's one advisor setting, taken for this conversation.
@@ -2874,28 +2916,20 @@ const MOST_AFTER_SAYINGS = 3;
    */
   async function takeTheAdvisor(choice: AdvisorChoice): Promise<boolean> {
     if (advisorTools.length === 0) return false;
-    const taken = holdScope(advisorFile.scope, advisorWho, choice);
-    advisorFile.scope = taken.scope;
+    const taken = await advisorFile.take(advisorWho, choice, () =>
+      keepAdvisorSettings(agentDir, choice),
+    );
     if (!taken.granted) {
       if (taken.because !== null) options.onEvent({ type: 'notice', what: taken.because });
       return false;
     }
-    await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, choice));
     return true;
-  }
-
-  /** Every write goes through one queue per agent folder: two conversations
-   *  starting together used to interleave two half-written files. */
-  function queueAdvisorWrite(work: () => Promise<void>): Promise<void> {
-    const next = advisorFile.writing.then(work).catch(() => undefined);
-    advisorFile.writing = next;
-    return next;
   }
 
   if (advisorTools.length > 0) {
     // The keys this app owns, put right for whoever reads the file next. Not
     // the choice: whose advisor it is belongs to the conversation holding it.
-    await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, null, gates));
+    await advisorFile.write(() => keepAdvisorSettings(agentDir, null, gates));
     if (advises === null) {
       // Nothing asked for here. Said once, and only when the file another
       // conversation holds has a gate that can have the advisor speak up on its
@@ -3670,9 +3704,9 @@ const MOST_AFTER_SAYINGS = 3;
         // the one holding it: turning the advisor off here is not a way to turn
         // it off in somebody else's conversation.
         if (advisorFile.scope.owner === advisorWho) {
-          advisorFile.scope = letGoScope(advisorFile.scope, advisorWho);
+          advisorFile.release(advisorWho);
           const off: AdvisorChoice = { advises: null, does: inUse, thinks, gates };
-          await queueAdvisorWrite(() => keepAdvisorSettings(agentDir, off));
+          await advisorFile.write(() => keepAdvisorSettings(agentDir, off));
         }
       } else {
         advises = (await takeTheAdvisor({ advises: next, does: inUse, thinks, gates }))
@@ -3804,7 +3838,7 @@ const MOST_AFTER_SAYINGS = 3;
       // another conversation may take it, and the file it writes then is its
       // own. Nothing is written here — the last user of it is not necessarily
       // the last one to close.
-      advisorFile.scope = letGoScope(advisorFile.scope, advisorWho);
+      advisorFile.release(advisorWho);
       paused.hold(false);
       confirmations.abandonAll();
       asking.abandonAll();

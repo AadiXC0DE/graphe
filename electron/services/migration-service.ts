@@ -383,6 +383,10 @@ export type MigrationMarker = {
    *  conversation here is usually one a live record already holds. */
   unlinked: readonly string[];
   quarantined: readonly string[];
+  /** The copies this run kept of the files it was about to write over, as the
+   *  files they are copies of. Null in a record written before this run named
+   *  them, which is not the same as a run that kept none. */
+  backups: readonly string[] | null;
 };
 
 export type MigrationResult = {
@@ -416,8 +420,19 @@ export function readMarker(text: string): MigrationMarker | null {
   const counts = one['verdicts'];
   if (counts === null || typeof counts !== 'object' || Array.isArray(counts)) return null;
   const verdicts = counts as Record<string, unknown>;
+  /* Rows are counted whichever shape they were written in. The shell writes
+     these two lists out whole, so somebody recovering can see which chat and
+     why; a list of ids reads the same. */
   const named = (value: unknown): readonly string[] =>
-    Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : [];
+    Array.isArray(value)
+      ? value.flatMap((one) => {
+          if (typeof one === 'string') return [one];
+          if (one === null || typeof one !== 'object') return [];
+          const row = one as Record<string, unknown>;
+          const id = row['conversationId'] ?? row['address'];
+          return typeof id === 'string' ? [id] : [];
+        })
+      : [];
   return {
     version: MIGRATION_VERSION,
     completedAt,
@@ -432,6 +447,9 @@ export function readMarker(text: string): MigrationMarker | null {
     conversations: named(one['conversations']),
     unlinked: named(one['unlinked']),
     quarantined: named(one['quarantined']),
+    // Absent is not empty: an older record named no copies, which is a
+    // different claim from one that kept none.
+    backups: Array.isArray(one['backups']) ? named(one['backups']) : null,
   };
 }
 
@@ -719,6 +737,9 @@ export async function commit(manifest: Manifest, deps: CommitDeps): Promise<Migr
     conversations: [...attached].sort(),
     unlinked: [...new Set(unlinked.map((one) => one.conversationId))].sort(),
     quarantined: [...new Set(manifest.quarantined.map((one) => one.address))].sort(),
+    // The source paths, so a reader keeps the `-of-what` end of them and does
+    // not have to strip a suffix it guessed.
+    backups: backups.map((one) => one.path),
   };
 
   return {

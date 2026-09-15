@@ -392,6 +392,14 @@ export const ROWS: readonly Row[] = [
     also: ['trash', 'delete', 'deleted', 'restore', 'put back', 'recover', 'empty', 'bin'],
   },
   {
+    id: 'moved',
+    page: 'storage',
+    name: 'Older chats, moved across',
+    note: 'What happened to the chats this app brought over from an older version: where their folders are, where the copies of your old files are kept, and the check again.',
+    kind: 'choice',
+    also: ['migration', 'migrated', 'moved', 'backup', 'backups', 'rollback', 'older', 'upgrade', 'restore'],
+  },
+  {
     id: 'storage',
     page: 'storage',
     name: 'Clear finished work',

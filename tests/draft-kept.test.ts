@@ -109,8 +109,28 @@ describe('where a draft is kept', () => {
     expect(draftKey('/p/paper-street', 'a')).toContain('/p/paper-street');
   });
 
-  it('is one key for a project with no conversation named yet', () => {
-    expect(draftKey('/p/paper-street')).toBe(draftKey('/p/paper-street', null));
+  /* A chat nobody has sent in used to have no name of its own — its address was
+     null, and `draftKey` wrote that as the empty string — so two never-sent
+     chats in one project shared one key and one of them showed the other's
+     sentence. A conversation now has an id from the moment it is made, so the
+     two are two keys. */
+  it('is named by the conversation own id, so two never-sent chats are two keys', () => {
+    expect(draftKey('/p/paper-street', 'conversation-1')).not.toBe(
+      draftKey('/p/paper-street', 'conversation-2'),
+    );
+    expect(draftKey('/p/paper-street', 'conversation-1')).toContain('conversation-1');
+
+    // Which is the whole point: the sentence left in one is not the sentence
+    // the other opens with.
+    const first = draw({ project: '/p/paper-street', conversation: 'conversation-1' });
+    type(boxIn(first.host), 'the hero, in this chat');
+    first.close();
+    expect(localStorage.getItem(draftKey('/p/paper-street', 'conversation-1'))).toBe(
+      'the hero, in this chat',
+    );
+
+    const second = draw({ project: '/p/paper-street', conversation: 'conversation-2' });
+    expect(boxIn(second.host).value).toBe('');
   });
 });
 

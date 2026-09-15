@@ -99,6 +99,7 @@ import {
   type ReviewEntry,
   type ReviewOpened,
   type StorageNow,
+  type MigrationNow,
 } from './ipc';
 
 declare global {
@@ -116,6 +117,19 @@ export type Bridge = GrapheApi & {
 function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
+
+/** Nothing to say: no move has ever run against this window. */
+const nothingMoved: MigrationNow = {
+  completedAt: null,
+  sources: 0,
+  verdicts: { verified: 0, missing: 0, gone: 0, foreign: 0 },
+  connected: 0,
+  unlinked: 0,
+  unreadable: 0,
+  backups: null,
+  backupFolder: '',
+  newer: false,
+};
 
 /** A browser tab cannot make a checkout; say so the way every real reading does. */
 function previewFail<T>(): Result<T> {
@@ -2124,6 +2138,25 @@ let previewPlanMode = false;
       return Promise.resolve(done({ removed: 0, freed: 0, says: 'Nothing to clear.' }));
     },
 
+    /* A browser tab has no profile, so it has never been through a move of
+       older chats and there is nothing to check again or go back to. */
+    migration(): Promise<Result<MigrationNow>> {
+      return Promise.resolve(done(nothingMoved));
+    },
+
+    migrationCheck(): Promise<Result<MigrationNow>> {
+      return Promise.resolve(done(nothingMoved));
+    },
+
+    showBackups(): Promise<Result<null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is no folder underneath to show you. In the app this opens the copies of your older files in the Finder.',
+      });
+      return Promise.resolve(done(null));
+    },
+
     onAway(): () => void {
       return () => {};
     },
@@ -2419,6 +2452,9 @@ function connect(): Bridge {
     storage: () => api.storage(),
     clearFolder: (name) => api.clearFolder(name),
     clearFinishedWork: () => api.clearFinishedWork(),
+    migration: () => api.migration(),
+    migrationCheck: () => api.migrationCheck(),
+    showBackups: () => api.showBackups(),
   };
 }
 

@@ -84,6 +84,7 @@ import {
   type NewerVersion,
   type AppNotice,
   type StorageNow,
+  type MigrationNow,
   type SavedVersion,
   type ShowOutcome,
   type HowFar,
@@ -1461,6 +1462,18 @@ const api: GrapheApi = {
 
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>> {
     return ipcRenderer.invoke(CHANNEL.clearFinishedWork);
+  },
+
+  migration(): Promise<Result<MigrationNow>> {
+    return ipcRenderer.invoke(CHANNEL.migration) as Promise<Result<MigrationNow>>;
+  },
+
+  migrationCheck(): Promise<Result<MigrationNow>> {
+    return ipcRenderer.invoke(CHANNEL.migrationCheck) as Promise<Result<MigrationNow>>;
+  },
+
+  showBackups(): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.showBackups) as Promise<Result<null>>;
   },
 };
 

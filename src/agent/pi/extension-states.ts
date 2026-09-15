@@ -13,6 +13,7 @@
  * that adds up to, in the words the screen shows.
  */
 
+import { MOST_ROUNDS } from '../../work/carryon';
 import type { Policy } from './extension-policy';
 
 /** The states the screen draws. One per row, in the plan's own words. */
@@ -141,6 +142,10 @@ export type ExtensionReport = {
   policy: Policy | null;
   /** The `/` commands it registered here. */
   commands: readonly string[];
+  /** Its own card says it asks for turns by itself. Read here rather than from
+   *  the add-ons list, so a limit can be stated about the add-on that is
+   *  actually loaded instead of one that shares its name. */
+  startsTurns: boolean;
   /** Why it did not load, in one sentence, with what the loader said. */
   problem: { says: string; logs: readonly string[] } | null;
 };
@@ -160,6 +165,9 @@ export type ExtensionRow = {
   activeIn: readonly string[];
   /** The `/` commands it offers here. */
   commands: readonly string[];
+  /** The limit that applies to it here, one sentence each. Empty where there
+   *  is none to state — a limit nobody applies is worse than silence. */
+  limits: readonly string[];
   /** A concise error, and the raw text behind it. Both empty when nothing
    *  went wrong. */
   problem: string | null;
@@ -167,7 +175,9 @@ export type ExtensionRow = {
 };
 
 /** One add-on as the screen draws it, from everything known about it. */
-export function extensionRow(facts: ExtensionFacts & ExtensionReport): ExtensionRow {
+export function extensionRow(
+  facts: ExtensionFacts & ExtensionReport & { limit?: string | null | undefined },
+): ExtensionRow {
   const state = stateOf(facts);
   return {
     id: facts.id,
@@ -179,10 +189,32 @@ export function extensionRow(facts: ExtensionFacts & ExtensionReport): Extension
     says: stateSaid(facts, state),
     activeIn: facts.activeIn,
     commands: facts.commands,
+    // The shell's own statement first, then the limit every add-on that starts
+    // turns shares. Both are read, not assumed: an add-on whose card says it
+    // starts nothing gets neither.
+    limits: [
+      ...(facts.limit === null || facts.limit === undefined ? [] : [facts.limit]),
+      ...(facts.startsTurns ? [limitWords.startsTurns(MOST_ROUNDS)] : []),
+    ],
     problem: facts.problem?.says ?? null,
     logs: facts.problem?.logs ?? [],
   };
 }
+
+/**
+ * What an add-on cannot do here, in one sentence each.
+ *
+ * Both are limits of the host rather than of any one add-on, and both are worth
+ * saying before somebody relies on the thing: Pi has no hook that can refuse a
+ * turn an add-on starts inside itself, so the most Graphe can do is watch it and
+ * end it at the round budget — and the budget is shared with every other reason
+ * a run carries on, so an add-on that loops spends rounds the person's own
+ * carry-on would have had.
+ */
+export const limitWords = {
+  startsTurns: (most: number): string =>
+    `It can start turns of its own. Nothing can refuse one before it begins, because Pi has no hook for that, so it is watched, and a run it starts is ended past ${String(most)} rounds.`,
+} as const;
 
 /** The state's own sentence, with the failure the loader gave where there is
  *  one: "it did not load" without the reason is a shrug. */
@@ -201,6 +233,12 @@ function stateSaid(facts: ExtensionFacts, state: ExtensionState): string {
 export type SeenHere = Pick<ExtensionFacts, 'where' | 'cameFrom' | 'inThisProject' | 'needsTrust' | 'filesMissing'> & {
   id: string;
   version: string | null;
+  /** The one limit worth knowing before somebody relies on this add-on, in the
+   *  shell's own words, or null where there is none to state. A fact about the
+   *  add-on rather than about a conversation, so it is here rather than on a
+   *  session's report — the advisor's one-setting limit is the one this exists
+   *  for. */
+  limit?: string | null | undefined;
 };
 
 /** One open conversation in this project, named as the person reading the list
@@ -250,6 +288,8 @@ export function extensionRows(
       pending,
       activeIn: running.map((it) => it.session.name),
       commands: about.flatMap((it) => it.report.commands),
+      startsTurns: about.some((it) => it.report.startsTurns),
+      limit: one.limit ?? null,
       problem: trouble?.report.problem ?? null,
     });
   });

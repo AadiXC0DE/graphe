@@ -4,19 +4,21 @@
  * per-conversation choice from, so a conversation's choice only takes effect by
  * being written there. It used to be written on every turn, and the last
  * conversation to write won: a chat could be answered by a model nobody chose
- * in it. Now one conversation holds the file while it is open, and another
- * asking for a different advisor is left without a second opinion and told why,
- * rather than quietly being served the first one's model.
+ * in it.
  *
- *  Source text, not behaviour: where the adapter holds, refuses and lets go the advisor file; no behavioural test can reach it — the calls are closures inside createSession.
+ * The plan prefers a per-conversation setting and allows this serialization
+ * where Pi has no seam for one, as long as the limitation is labelled. Pi 0.85.1
+ * has no such seam: `CreateAgentSessionOptions` carries a model and a thinking
+ * level, not an extension's settings, and `ExtensionAPI` has no per-session
+ * settings object. So this is `AdvisorFile`, driven for real here rather than
+ * asserted from the adapter's source text: the second conversation must not
+ * reach the file, and must be told why in words.
  */
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  AdvisorFile,
   advisorScopeWords,
   holdScope,
   letGoScope,
@@ -93,29 +95,105 @@ describe('the machine’s one advisor file', () => {
   });
 });
 
-describe('the wiring', () => {
-  const ADAPTER = readFileSync(
-    fileURLToPath(new URL('../src/agent/pi/adapter.ts', import.meta.url)),
-    'utf8',
-  );
+/* The whole point of the plan's clause: one chat selecting an advisor must not
+   change another chat's provider/model. Driven through the same object the
+   adapter uses, with the write spied on, because "did not reach the file" is
+   only true if nothing was written. */
+describe('two conversations at once', () => {
+  it('writes once for the holder, and never for the one that was refused', async () => {
+    const file = new AdvisorFile();
+    const wrote = vi.fn(async () => undefined);
 
-  it('writes the file when a conversation takes it, and never on a turn', () => {
-    const turn = ADAPTER.slice(ADAPTER.indexOf('async prompt('), ADAPTER.indexOf('async useAdvisor('));
-    expect(turn).not.toContain('keepAdvisorSettings');
-    expect(ADAPTER).toContain('holdScope(');
-    expect(ADAPTER).toContain('letGoScope(');
+    const held = await file.take('a', chosen(opus), wrote);
+    expect(held.granted).toBe(true);
+    expect(wrote).toHaveBeenCalledTimes(1);
+
+    const refused = await file.take('b', chosen(gpt), wrote);
+    expect(refused.granted).toBe(false);
+    // The file still holds the first conversation's choice, and nothing wrote
+    // over it: this is the defect the plan names, gone.
+    expect(file.scope.holds?.advises).toEqual(opus);
+    expect(wrote).toHaveBeenCalledTimes(1);
   });
 
-  it('says out loud when another conversation holds it', () => {
-    expect(ADAPTER).toContain("options.onEvent({ type: 'notice', what: taken.because })");
+  it('tells the one that was refused what happened, in words naming both models', async () => {
+    const file = new AdvisorFile();
+    await file.take('a', chosen(opus), async () => undefined);
+
+    const refused = await file.take('b', chosen(gpt), async () => undefined);
+    expect(refused.because).toContain('another conversation is using it for anthropic/opus');
+    expect(refused.because).toContain('asked for openai/gpt-5');
   });
 
-  it('gives it back when the conversation is disposed of', () => {
-    const dispose = ADAPTER.slice(ADAPTER.indexOf('dispose(): void {'));
-    expect(dispose.slice(0, 900)).toContain('letGoScope(');
+  it('lets the second one through once the holder is finished', async () => {
+    const file = new AdvisorFile();
+    await file.take('a', chosen(opus), async () => undefined);
+    file.release('a');
+    expect(file.scope).toEqual(noScope());
+
+    const second = await file.take('b', chosen(gpt), async () => undefined);
+    expect(second.granted).toBe(true);
+    expect(file.scope.owner).toBe('b');
   });
 
-  it('takes it at the two moments a choice is made, not before every request', () => {
-    expect(ADAPTER.match(/takeTheAdvisor\(/g)?.length).toBe(3);
+  /* A conversation that was never the holder giving the file back is how one
+     chat would silently take another's choice away. */
+  it('is not given back by a conversation that does not hold it', async () => {
+    const file = new AdvisorFile();
+    await file.take('a', chosen(opus), async () => undefined);
+    file.release('b');
+    expect(file.scope.owner).toBe('a');
+    expect(file.scope.holds?.advises).toEqual(opus);
+  });
+
+  /* Two conversations starting together used to interleave two half-written
+     files, and the addition reads this file between the two. */
+  it('writes one at a time, in the order they were asked for', async () => {
+    const file = new AdvisorFile();
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const first = file.write(async () => {
+      order.push('first in');
+      await blocked;
+      order.push('first out');
+    });
+    const second = file.write(async () => {
+      order.push('second');
+    });
+
+    // The second write has not begun while the first is still inside.
+    await Promise.resolve();
+    expect(order).toEqual(['first in']);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first in', 'first out', 'second']);
+  });
+
+  it('carries on after a write that failed', async () => {
+    const file = new AdvisorFile();
+    await file.write(async () => {
+      throw new Error('the disk said no');
+    });
+    const after = vi.fn(async () => undefined);
+    await file.write(after);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* What the screen says, which is the plan's other half: the limitation has to
+   be somewhere a person reads, not only in a comment. */
+describe('the limitation, said on the advisor’s own row', () => {
+  it('names the one setting before anybody holds it', () => {
+    expect(advisorScopeWords.oneSetting).toContain('one advisor setting for this whole computer');
+    expect(advisorScopeWords.oneSetting).toContain('until that conversation closes');
+  });
+
+  it('says whether this conversation is the one holding it', () => {
+    expect(advisorScopeWords.ours('anthropic/opus')).toContain('This conversation holds');
+    expect(advisorScopeWords.inUse('anthropic/opus')).toContain('Another conversation holds');
   });
 });

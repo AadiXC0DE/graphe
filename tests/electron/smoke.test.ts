@@ -12,8 +12,11 @@
  * and the scripted server in `./scripted-model`, and that one answers from a
  * written script — it cannot be wrong, cannot need a second opinion and cannot
  * touch the network. So a turn can now be made to happen here: a tool call, a
- * file written, a reply arriving in pieces. What is still out of reach at this
- * layer is listed at the bottom of the file rather than implied by silence.
+ * file written, a reply arriving in pieces. Two things 9.4 asks for are driven
+ * here for real as well: the window reloading underneath a run that is still
+ * arriving, and the whole process being killed and launched again on the same
+ * profile. What is still out of reach at this layer is listed at the bottom of
+ * the file rather than implied by silence.
  *
  * Not part of `npm test`: it needs a built renderer and a built shell, so it
  * runs under `scripts/run-electron-smoke.mjs` (`npm run test:electron`), which
@@ -105,6 +108,15 @@ function freshProfile(): string {
   const root = mkdtempSync(join(tmpdir(), 'graphe-smoke-'));
   expect(readdirSync(root)).toEqual([]);
   return root;
+}
+
+/** The one transcript this profile has, as Pi writes it. A conversation is a
+ *  `.jsonl` per sitting, and a run of tests like these has exactly one. */
+function sessionFile(profile: string): string {
+  const folder = join(profile, 'sessions');
+  const files = readdirSync(folder).filter((one) => one.endsWith('.jsonl'));
+  expect(files).toHaveLength(1);
+  return join(folder, files[0] as string);
 }
 
 /** Something the shell writes on the way up, read once it is there. */
@@ -966,6 +978,201 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await stop();
     }
   });
+
+  it('comes back from a renderer reload with the run still going, and says none of it twice', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window: page } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // Forty pieces half a second apart, so the reload lands in the middle of a
+    // reply that cannot have finished by itself.
+    const pieces = Array.from({ length: 40 }, (_, at) => `piece ${String(at)} `);
+    model.replies([{ says: pieces }]);
+
+    const thrown: string[] = [];
+    page.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(page);
+      await page.locator('.composer__input').fill('say a lot of things');
+      await page.locator('.composer__send').first().click();
+
+      const arriving = page.locator('.message--graphe .message__body').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).not.toBe(''), {
+        timeout: 60_000,
+        interval: 25,
+      });
+      // Caught mid-arrival: the caret that marks a growing reply is on screen.
+      expect(await page.locator('.message__caret').count()).toBe(1);
+
+      /* The window goes and comes back. A renderer reload is a new renderer
+         over the same shell process, which is exactly what a renderer crash
+         leaves behind — and the run belongs to the shell, so what this proves
+         is that the reply is not lost with the window and not replayed when it
+         returns. */
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+      await page.locator('.pickerrow__open').first().click();
+      await page.locator('.composer__input').waitFor({ timeout: 60_000 });
+
+      // The conversation is the one that was there, by name.
+      expect(await page.locator('.tabs__title').allTextContents()).toEqual(['say a lot of things']);
+
+      // And the run carries on to the end: what the shell was streaming reaches
+      // the new window, in order, once.
+      const grown = page.locator('.message--graphe .message__body').last();
+      await vi.waitFor(
+        async () => expect((await grown.innerText()).trim()).toMatch(/piece 39\b/),
+        { timeout: 120_000 },
+      );
+      await vi.waitFor(async () => expect(await page.locator('.message__caret').count()).toBe(0), {
+        timeout: 30_000,
+      });
+
+      const shown = (await grown.innerText()).trim();
+      const said = [...shown.matchAll(/piece (\d+)\b/g)].map((one) => Number(one[1]));
+      // One reply turn, not two: what came back with the window and what the
+      // shell went on sending are the same reply.
+      expect(await page.locator('.message--graphe').count()).toBe(1);
+      // Nothing is said twice — a replay that folded the record back in would
+      // show an early piece a second time.
+      expect(new Set(said).size).toBe(said.length);
+      // In order, and the tail is the end of the script.
+      expect(said).toEqual([...said].sort((one, other) => one - other));
+      expect(said[said.length - 1]).toBe(39);
+
+      /* The piece that arrived before the reload is not in the live view, and
+         cannot be: a `message-delta` is a fact about a screen, not about the
+         record, and the screen it was sent to is gone. What holds it is Pi's
+         own transcript, written when the turn ends — so the loss is the top of
+         one reply on one screen, and the durable record is whole. Asserted
+         rather than passed over, because a check that quietly tolerated a
+         duplicate would also tolerate this. */
+      const whole = readFileSync(sessionFile(profile), 'utf8');
+      for (let at = 0; at < 40; at += 1) expect(whole).toContain(`piece ${String(at)}`);
+      expect(said[0]).toBeGreaterThan(0);
+
+      // Nothing is left saying it is still working.
+      expect(await page.locator('.activity--running').count()).toBe(0);
+      await vi.waitFor(async () => expect(await page.locator('.composer__send').first().getAttribute('aria-label')).toBe('Send'), {
+        timeout: 30_000,
+      });
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  }, 300_000);
+
+  it('comes back from a force quit with what the record held, and claims nothing is still running', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const first = await launchApp(profile, files.url, model.url);
+    const stopFirst = dispose(first.app, profile, project);
+    /* Two turns. The first finishes, so it is a fact on the disk by the time
+       anything is taken away. The second is still arriving when the machine
+       goes, and is what the next launch must not present as work in progress. */
+    model.replies([
+      { says: ['The first answer, ', 'all of it.'] },
+      { says: Array.from({ length: 90 }, (_, at) => `piece ${String(at)} `) },
+    ]);
+
+    try {
+      await openTheFolder(first.window);
+      await first.window.locator('.composer__input').fill('a question that gets an answer');
+      await first.window.locator('.composer__send').first().click();
+      await vi.waitFor(
+        async () =>
+          expect(
+            (await first.window.locator('.message--graphe .message__body').last().innerText()).trim(),
+          ).toContain('The first answer, all of it.'),
+        { timeout: 60_000 },
+      );
+      await vi.waitFor(
+        async () => expect(await first.window.locator('.message__caret').count()).toBe(0),
+        { timeout: 30_000 },
+      );
+
+      await first.window.locator('.composer__input').fill('and now something that will be cut short');
+      await first.window.locator('.composer__send').first().click();
+      const arriving = first.window.locator('.message--graphe .message__body').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).not.toBe(''), {
+        timeout: 60_000,
+        interval: 25,
+      });
+
+      /* The machine is taken away: SIGKILL, so `before-quit` never runs and
+         nothing gets a chance to write anything down on the way out. This is
+         the app force quit, and the power going off is the same event. */
+      first.app.process().kill('SIGKILL');
+      await new Promise((done) => first.app.process().once('exit', done));
+
+      // A new launch on the same profile, which is what somebody does next.
+      const second = await launchApp(profile, files.url);
+      const stopSecond = dispose(second.app, profile, project);
+      const thrown: string[] = [];
+      second.window.on('pageerror', (error) => thrown.push(String(error)));
+
+      try {
+        await second.window.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+        await second.window.locator('.pickerrow__open').first().click();
+        // A project with a conversation on disk opens onto the conversation, so
+        // the first screen's title is not what says the folder is open — the
+        // composer is.
+        await second.window.locator('.composer__input').waitFor({ timeout: 60_000 });
+
+        // The conversation is there, read back off the disk rather than
+        // remembered: this is a second process on the same profile.
+        expect(await second.window.locator('.tabs__title').allTextContents()).toEqual([
+          'a question that gets an answer',
+        ]);
+        // And the answer that finished is whole, which is the accepted write
+        // the force quit must not have cost. `toContain` because a long reply
+        // draws its own Show-all control under the words.
+        await vi.waitFor(
+          async () =>
+            expect(
+              (await second.window.locator('.message--graphe .message__body').last().innerText()).trim(),
+            ).toContain('The first answer, all of it.'),
+          { timeout: 60_000 },
+        );
+
+        /* And nothing claims to be running: the shell that held the second run
+           is gone, so a row still spinning would be a spinner that never stops
+           — which is the failure 9.4 is about. */
+        expect(await second.window.locator('.activity--running').count()).toBe(0);
+        expect(await second.window.locator('.message__caret').count()).toBe(0);
+        expect(
+          await second.window.locator('.composer__send').first().getAttribute('aria-label'),
+        ).toBe('Send');
+
+        // The registry's own reading of the same thing: nothing is left in a
+        // state that means work is happening.
+        const state = await second.window.evaluate(async () => {
+          const api = window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          const answer = await api.conversations();
+          return answer.ok ? answer.value.map((one) => one.state ?? 'unloaded') : ['refused'];
+        });
+        expect(state.filter((one) => one === 'running' || one === 'queued')).toEqual([]);
+        expect(state.filter((one) => one === 'stopping' || one === 'waiting-input')).toEqual([]);
+
+        expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+        expect(thrown).toEqual([]);
+      } finally {
+        await stopSecond();
+      }
+    } finally {
+      await model.stop();
+      await stopFirst();
+    }
+  }, 300_000);
 });
 
 /* What this layer does not reach, said here rather than left to silence:
@@ -976,9 +1183,16 @@ suite('the app in a real window, on a profile nothing else uses', () => {
  *   - the native preview page and a live page load; the window is what is
  *     driven here.
  *   - layout, focus and zoom at the minimum window size: somebody at a screen.
- *   - a second project and a resumed transcript; one project with two
- *     conversations, and one project with a copy of its own, is what this sets
- *     up.
+ *   - a second project; one project with two conversations, and one project
+ *     with a copy of its own, is what this sets up.
  *   - a background program the agent started, which is what the strip above
  *     the composer draws a Stop on: nothing here makes one.
+ *   - sleep and wake, and a monitor or a network change. These are real
+ *     operating-system events and nothing in this app listens for one — there
+ *     is no `powerMonitor` handler and no `online`/`offline` listener — so
+ *     there is nothing here to drive and a test would be asserting a handler
+ *     that does not exist. What a sleeping machine does to this app is suspend
+ *     and resume it, which from inside is the reload case above; a monitor or
+ *     network change that is not already handled is a gap in the product, not
+ *     a gap in this file.
  */

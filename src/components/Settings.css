@@ -946,6 +946,47 @@ button.settings__row {
   padding: 0 var(--space-2);
 }
 
+/* ---------------------------------------------------------------------------
+   Older chats, moved across
+   The counts the move wrote down, and the two presses anybody does with a
+   number they do not like. Closed by default: it is read on purpose, by
+   somebody who already suspects what happened to a chat.
+   --------------------------------------------------------------------------- */
+
+.settings__moved {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__movedhead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* The folder rows' fixed width is for one word. */
+.settings__folderdo--wide {
+  width: auto;
+  padding: 0 var(--space-2);
+}
+
+.settings__said {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.settings__moveddo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-3);
+}
+
 .settings__trashpicked {
   font-size: var(--text-2xs);
   color: var(--text-faint);

@@ -11,8 +11,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { extensionRows, type SeenHere, type SessionHere } from '../src/agent/pi/extension-states';
-import type { ExtensionReport } from '../src/agent/pi/extension-states';
+import {
+  extensionRows,
+  limitWords,
+  type SeenHere,
+  type SessionHere,
+  type ExtensionReport,
+} from '../src/agent/pi/extension-states';
+import { MOST_ROUNDS } from '../src/work/carryon';
 
 const HERE = '/Users/you/Sites/paper-street/.pi/extensions/storybook/index.ts';
 const ADDED = '/Users/you/.pi/agent/npm/node_modules/pi-lens/extensions/lens.ts';
@@ -39,6 +45,7 @@ function report(overrides: Partial<ExtensionReport> = {}): ExtensionReport {
     looked: true,
     policy: 'on',
     commands: [],
+    startsTurns: false,
     problem: null,
     ...overrides,
   };
@@ -180,5 +187,47 @@ describe('the two halves, joined', () => {
     const rows = extensionRows([seen()], [session({ reports: [report({ looked: false })] })]);
     expect(rows[0]?.problem).toBeNull();
     expect(rows[0]?.logs).toEqual([]);
+  });
+
+  /* Which conversations have it loaded, and which do not — the plan's "active
+     conversations per installation". A chat built before it was added is not
+     one of them, and saying it is would be the same lie as a bare count. */
+  it('names only the conversations the add-on is actually loaded into', () => {
+    const rows = extensionRows(
+      [seen()],
+      [
+        session({ name: 'the one about type', reports: [report({ loaded: true })] }),
+        session({ name: 'the second look', reports: [report({ loaded: false })] }),
+        session({ name: 'a chat built before it', reports: [report({ loaded: false })] }),
+      ],
+    );
+    expect(rows[0]?.activeIn).toEqual(['the one about type']);
+  });
+
+  /* The one limit the shell stated travels with the row, and an add-on with
+     none leaves the row's limits empty rather than inventing one. */
+  it('carries the limit the shell stated for an add-on', () => {
+    const said = 'It keeps one advisor setting for this whole computer.';
+    const stated = extensionRows([seen({ limit: said })], [session({ reports: [report()] })]);
+    expect(stated[0]?.limits).toEqual([said]);
+
+    const quiet = extensionRows([seen()], [session({ reports: [report()] })]);
+    expect(quiet[0]?.limits).toEqual([]);
+  });
+
+  /* The limit on turns an add-on starts is a fact about the host, not about any
+     one add-on, and it is only drawn where the add-on's own card says it starts
+     them. An add-on that starts nothing reading "it can start turns of its own"
+     would be the label lying. */
+  it('states the turn limit only for an add-on whose card says it starts turns', () => {
+    const starts = extensionRows(
+      [seen()],
+      [session({ reports: [report({ startsTurns: true })] })],
+    );
+    expect(starts[0]?.limits).toEqual([limitWords.startsTurns(MOST_ROUNDS)]);
+    expect(starts[0]?.limits[0]).toContain('Nothing can refuse one before it begins');
+
+    const quiet = extensionRows([seen()], [session({ reports: [report()] })]);
+    expect(quiet[0]?.limits).toEqual([]);
   });
 });

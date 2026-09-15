@@ -48,12 +48,12 @@ it.
 
 | # | Item | Phase | State |
 | --- | --- | --- | --- |
-| 1 | The person-only half of the visual matrix (8.5): a screen reader, an external monitor unplugged, the OS reduced-motion switch, the native file dialog, real contrast judgement — the machine half is green (38 rows, 225 checks, `npm run test:visual`) | 8 | open, needs somebody at the window |
-| 2 | Dependency majors: React 19.3, Electron 44, electron-builder 26, ESLint 10, jsdom 29, Playwright 1.63, Vite 8, Vitest 5, TypeScript 7, concurrently 10, `glob`, `unpdf` — each with its reason and reassessment date in `phase-2-upgrade.md` | 2 | open, reassessed 2026-10-13 |
-| 3 | The rest of phase 6: the bundled package-management route (E11), an install that can actually be cancelled, a terminal opened inside a packaged app, custom renderer fidelity, the fixture gaps. E12 is done: the advisor's one settings file is serialized and the limitation labelled, because Pi has no per-session seam for an extension's settings | 6 | open |
-| 4 | Agent runtimes out of the Electron main process (6.2) and terminal compatibility mode (6.5) | 6 | blocked on re-hosting the Guard and the trust filter |
-| 5 | The rest of phase 9 and 10: the runtime measurements are in (`npm run test:measure`: cold launch, tab switch, typing while streaming, stop, cancellation, idle CPU, open/close plateau — two budgets missed); what is left is the 9.4 lifecycle checks (sleep/wake, a renderer crash, the quit sequence), the 9.6 clean machine from Finder, a real model provider, the plan's remaining fixtures (100k files, 5 MiB output, 20 extensions, two previews), and something that reads the `launch-budget` artifact back | 9, 10 | open |
-| 6 | W09's rescue-root collision victims | 3 | open |
+| 1 | The person-only half of the visual matrix (8.5): what a screen reader *says aloud*, a monitor unplugged, the OS switches changed in System Settings, the native file dialog, overlay stacking over the native page view, a contrast judgement, the loading layout — the machine half is green (`npm run test:visual`: 49 rows, 290 checks, two findings fixed) | 8 | open, needs somebody at the window |
+| 2 | Dependency majors still on their old releases, each with its exact reason and reassessment date 2026-10-16 in `phase-2-upgrade.md`: vitest 5 (needs Node ≥22.12), jsdom 29, eslint 10 + react-hooks 7, TypeScript 7 (three compiler-API consumers unprobed), unpdf 1.8.1, mermaid 12, and electron/builder + `@types/node` (one packaging session on both arches) | 2 | open |
+| 3 | The rest of phase 6: a terminal opened inside a packaged app, custom renderer fidelity, the fixture gaps, and the narrow case where an install through Pi's wrapper route still cannot be cancelled | 6 | open |
+| 4 | 6.2's full migration and 6.5's terminal compatibility mode: the child-runtime spike landed and proves the seam (Guard judging in the shell, extension UI crossing, kill semantics, transcript replay) with the four gaps named in `phase-6-runtime-spike.md`; wiring it in is the remaining work | 6 | open, spike done |
+| 5 | The rest of phase 9 and 10: a real model provider, and the plan's remaining measurement scenarios on other hardware | 9, 10 | open |
+
 
 ## Done
 
@@ -63,7 +63,10 @@ except S05 and the normalised store, phase 6's E01/E03/E04/E05/E06/E07/E09/E10 a
 its fixtures, phase 7 except A03, 7.5's designer-specific instructions and A02's
 remainder, phase 8's retirements in full plus its tabs, phase 9's P02 to P06, the
 9.5 coverage, the packaged smoke and the CI artifact, phase 10's catalogue,
-real-window suite and rollback refusal. Phase 5.1's normalised store and its two
+real-window suite and rollback refusal. W09's rescue roots are hashed from the
+stable project id with the legacy roots still read, the add-on install runs as the
+app's own cancellable child, 9.6's clean-machine check passes on arm64 and
+x64-under-Rosetta, and the accessibility tree is checked by the matrix. Phase 5.1's normalised store and its two
 domain hooks landed, 8.3's second pane exists with the split press where the tabs
 are, the recovery surface opens a chat whose folder is gone read-only and offers
 relink, and U03's names are one set. The main-chunk gate is met **392.4 KB** against

@@ -14,6 +14,9 @@ ticked. Everything below was run on this tree on 2026-09-15.
 | `npx vitest run` | 347 files passed, 1 failed, 1 skipped (349); 6427 tests passed, 1 failed, 4 skipped. The failure is `tests/project-context.test.ts` "carries the project's items, named as the project's and not this chat's": the implementation writes `- the brief.pdf: what the site is for` and the test still expects the em dash that was there before the shipped-copy rule was applied to it. Both files are uncommitted work from another workstream, and it is a test pinning copy wording rather than a behaviour that changed |
 | `npm run test:electron` | green: 1 file, 4 tests, 20.2 s. A real window on a profile nothing else uses: boot and the profile, two conversations and the connect-a-model path, a file written by a real tool call that the conversation beside it also sees, and a reply arriving in pieces in the order it was sent |
 | `npm run test:packaged` | green on arm64: the installed app started with `PATH=/usr/bin:/bin`, a home and profile thrown away afterwards, and no global `pi`, npm or node. The window came up and was visible, the app reports it is packaged and on the disposable profile, the log records `started version=1.0.3 electron=43.4.1 node=24.18.1 runtime=0.85.1`, and Pi kept everything inside the profile. It says itself what it cannot prove: signing and notarization beyond the ad-hoc check, Finder and quarantine, a real provider, the terminal, and the x64 bundle on this machine |
+| `node scripts/clean-machine.mjs` | **green on arm64 and on x64 under Rosetta.** The launch a person makes rather than the executable started directly: `open -n -F -a` on the bundle from a login-less environment (`env -i` plus `open --env`), with a project already in the profile. Read through the app's own inspector and the remote debugger, not from disk alone: it reports `isPackaged`, an app path inside the bundle it came from, `userData` equal to the disposable profile, and one **visible** window; the project's row in the picker is pressed, the composer comes up, a draft typed into it is read back, and README.md is listed — so file and chat work carry on with no provider on the machine. It writes `logs/graphe.log`, `workspaces.json` and its compile cache under the profile and nowhere else, records the pinned `runtime=0.85.1` agreeing with the bundle's manifest and `package.json`, and logs no error line. `--without-git` (a `git` exiting 127 first on the PATH): the git band and its commit press are gone, the new-worktree press is gone with it (`src/lib/app-wide.ts:35` gating `src/App.tsx:5298`), the notice names the command line tools, and the composer, the draft and the files remain — the plan's missing-Git sentence, both halves, checked on arm64. On x64 under Rosetta the shell's git probe does not finish in time and nothing about git is asserted there. Full detail in the phase 9 handoff |
+| `node scripts/clean-machine.mjs --quarantine` | **recorded, not passed.** A copy with `com.apple.quarantine` set is translocated by macOS to `/private/var/folders/…/T/AppTranslocation/<uuid>/d/Graphe.app` and then refused: "Apple could not verify 'Graphe.app' is free of malware", the app never reaching its profile. `spctl -a -t exec` says `rejected`; the signature is `Signature=adhoc`. This is what RELEASING.md:180-194 already says an un-notarized build does, and it is the honest measurement of the quarantine half of the clean-machine check: the missing prerequisite is notarization, not the app |
+| `npm run budget:compare` | **the CI artifact read back.** Pulls the newest two runs carrying the `launch-budget` artifact and prints main chunk, launch set and on-demand set before/after. Run here against runs 34997397590 and 34984506978: main chunk **449.7 → 392.4 KB (−12.75%)**, launch set 639.0 → 581.7 KB, on demand 5221.6 → 5287.1 KB (+1.25%, inside the limit), exit 0. Exits 1 on a regression past the 1% tolerance, over the limit, or an on-demand library in the launch set; exits 2 and says why when `gh` is absent or there is no baseline |
 | `npx vite build` then `node scripts/perf-report.mjs --check` | build 62 s; **fails**: main 577.2 KB raw / 184.7 KB gzip against the 450 KB limit. Recorded, attributed and accepted as a narrow exception (phase 9 handoff) |
 | `npm run verify:package` | green on **both** bundles: each carries the pinned `@earendil-works/pi-coding-agent 0.85.1`, Pi's 83-package tree, node-pty with an executable helper and a verifying ad-hoc signature; every disk image opens onto `Graphe.app` |
 | `npm run licenses:check` | "THIRD-PARTY-LICENSES.md describes everything installed (471 of 471)" |
@@ -64,18 +67,29 @@ now holding it.
    20+ tabs; keyboard-only use; reduced motion; a screen reader. Not started. It
    covers T45, T46 (the zoom and narrow-window halves) and the plan's minimum-size
    gate.
-2. **A clean machine, properly** — from Finder, with quarantine and translocation
-   in play, both advertised architectures, a notarized build and no ad-hoc
-   signature standing in for one. The packaged smoke is most of the launch half
-   and none of the Finder half.
+2. **A clean machine, properly** — the launch half is now checked rather than
+   assumed: `scripts/clean-machine.mjs` asks LaunchServices to open the bundle
+   from a login-less environment, reads the app's own answers through its
+   inspector and the window through the remote debugger, and starts both
+   architectures (x64 under Rosetta). Quarantine and translocation were
+   *reproduced* on a flagged copy, and the ad-hoc build is refused by Gatekeeper
+   there — recorded, expected, and the reason is notarization. What no run here
+   can reach: a person's actual click in Finder, a notarized build and a
+   Developer ID signature (there is neither), and a second machine with nothing
+   installed.
 3. **A real provider** — every run on this branch uses a scripted model or no
    model. Provider retry, compaction, usage accounting against a live service and
    the paid-fallback question (T31's retry half, T32) have no live evidence.
 4. **The CI artifacts** — the Build job writes `launch-budget` (the table and the
-   JSON) and nothing reads it back: there is no comparison against the previous
-   run and no job that fails on a regression, by design, because the budget is
-   already over. `npm run test:packaged` is not in CI at all, so the packaged
-   launch is proven on this machine and nowhere else.
+   JSON) and it is now read back: `npm run budget:compare` compares the newest
+   two runs carrying it and reports a regression as a number (main chunk
+   449.7 → 392.4 KB against the 450 KB limit, on the runs it was tested with),
+   exiting non-zero past a 1% tolerance. It is deliberately not a CI step: the
+   Build job already blocks on the limit inside the same job, and a second gate
+   on one number only duplicates the failure. `npm run test:packaged` is still
+   not in CI, so the packaged *smoke* is proven on this machine and nowhere else;
+   the LaunchServices launch (`scripts/clean-machine.mjs`) needs a window and a
+   real desktop, so it is a local check by construction.
 
 ## What this branch is safe to merge
 

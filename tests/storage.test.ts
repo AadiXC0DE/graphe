@@ -5,9 +5,10 @@
  * the rest can be about sizes and sentences.
  */
 
+import { accessSync, constants } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -22,6 +23,7 @@ import {
   whatToSweep,
   type Sweepable,
 } from '../src/work/storage';
+import { searchPath } from '../src/share/run';
 
 const NOW = Date.UTC(2026, 8, 1);
 const DAY = 24 * 60 * 60 * 1000;
@@ -166,14 +168,50 @@ describe('measuring and clearing', () => {
 });
 
 describe('whether add-ons can be installed at all', () => {
-  it('answers without running anything, and says no when PATH is empty', async () => {
+  it('answers without running anything, against the path the child will get', async () => {
+    // A packaged app opened from the dock inherits almost no path, so this
+    // check must ask about the path `runHelper` searches rather than the one
+    // this process was handed. A check narrower than the child it guards
+    // refuses installs the app could have run.
     const was = process.env['PATH'];
     process.env['PATH'] = '';
     try {
-      expect(await npmOnPath()).toBe(false);
+      const expected = searchPath()
+        .split(delimiter)
+        .some((folder) => {
+          if (folder === '') return false;
+          try {
+            accessSync(join(folder, process.platform === 'win32' ? 'npm.cmd' : 'npm'), constants.X_OK);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+      expect(await npmOnPath()).toBe(expected);
     } finally {
       if (was === undefined) delete process.env['PATH'];
       else process.env['PATH'] = was;
+    }
+  });
+
+  it('finds npm in a home directory even with nothing on the path', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'graphe-home-'));
+    const bin = join(home, '.local', 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'npm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const wasPath = process.env['PATH'];
+    const wasHome = process.env['HOME'];
+    process.env['PATH'] = '';
+    process.env['HOME'] = home;
+    try {
+      expect(await npmOnPath()).toBe(true);
+    } finally {
+      if (wasPath === undefined) delete process.env['PATH'];
+      else process.env['PATH'] = wasPath;
+      if (wasHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = wasHome;
+      await rm(home, { recursive: true, force: true });
     }
   });
 });

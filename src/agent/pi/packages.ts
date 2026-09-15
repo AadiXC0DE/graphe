@@ -10,6 +10,7 @@
  */
 
 import { oneAtATime, type PackageChange, type PackageProgress } from './package-lifecycle';
+import { installPlanFor } from '../../projects/setup';
 import { REACHABLE, type Reach } from './reach';
 
 export {
@@ -699,8 +700,122 @@ function saysChanged(change: PackageChange): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* What installing needs from this computer                                    */
+/* The route that runs the install ourselves                                   */
 /* -------------------------------------------------------------------------- */
+
+/** One command and its arguments, as our own child process should be run. */
+export type PackageRoute = { command: string; args: readonly string[] };
+
+/**
+ * The argv for installing, updating or removing one add-on in `root`.
+ *
+ * Mirrors what Pi's own package manager runs, because the folder it writes to
+ * is the one Pi reads at the next session: `--prefix` for npm and pnpm,
+ * `--cwd` for bun, and yarn with neither (it installs into the working
+ * directory, which is the root this is given). Peer resolution is off, so an
+ * add-on's own pi peers do not drag a second copy of the runtime in.
+ */
+export function routeFor(
+  doing: PackageChange['doing'],
+  manager: string,
+  root: string,
+  id: string,
+): PackageRoute {
+  const spec = doing === 'update' ? `${id}@latest` : id;
+  const quiet = ['--no-audit', '--no-fund'];
+
+  if (doing === 'remove') {
+    if (manager === 'pnpm') return { command: 'pnpm', args: ['uninstall', id, '--prefix', root] };
+    if (manager === 'bun') return { command: 'bun', args: ['uninstall', id, '--cwd', root] };
+    if (manager === 'yarn') return { command: 'yarn', args: ['remove', id] };
+    return { command: 'npm', args: ['uninstall', id, '--prefix', root, '--legacy-peer-deps', ...quiet] };
+  }
+
+  if (manager === 'pnpm') {
+    return {
+      command: 'pnpm',
+      args: [
+        'install',
+        spec,
+        '--prefix',
+        root,
+        '--config.auto-install-peers=false',
+        '--config.strict-peer-dependencies=false',
+      ],
+    };
+  }
+  if (manager === 'bun') {
+    return { command: 'bun', args: ['install', spec, '--cwd', root, '--omit=peer'] };
+  }
+  if (manager === 'yarn') return { command: 'yarn', args: ['add', spec] };
+  return { command: 'npm', args: ['install', spec, '--prefix', root, '--legacy-peer-deps', ...quiet] };
+}
+
+/** How long an add-on install is given. Long, because its length is somebody
+ *  else's dependency tree; finite, because a wedged one must not hold the
+ *  add-ons screen for the rest of the afternoon. */
+export const INSTALL_PATIENCE = 20 * 60_000;
+
+/** What running one command came back as: the shape `runHelper` already has,
+ *  plus the signal that ends it. The signal is the whole reason this route
+ *  exists — Pi owns its own npm child and offers no way to stop it. */
+export type RunInstall = (
+  command: string,
+  args: readonly string[],
+  options: { folder: string; patience: number; signal: AbortSignal },
+) => Promise<{ code: number; said: string }>;
+
+/** Where an add-on's install root is, and what is already in it. */
+export type InstallRoot = { folder: string; present: readonly string[] };
+
+/** What came of one install. A stopped one is `ended` rather than a failure:
+ *  the installer that was killed mid-write is neither finished nor broken, and
+ *  the shelf reads the folder afterwards to say what it actually left. */
+export type Installed =
+  | { ok: true }
+  | { ok: false; because: string }
+  | { ok: false; ended: true };
+
+/**
+ * Run one add-on change as our own child process.
+ *
+ * Separated from `packageHost` so the decision it makes — which manager, from
+ * the lockfile in the install root — and the child it starts can be answered
+ * without Pi, a settings file or a network anywhere in sight. The caller owns
+ * the folder, the settings entry and the signal; this owns the process.
+ *
+ * `onCommand` says what is about to run, because this is minutes of somebody
+ * else's network and a screen with nothing on it reads as broken.
+ */
+export async function installAddon(
+  run: RunInstall,
+  doing: PackageChange['doing'],
+  root: InstallRoot,
+  id: string,
+  signal: AbortSignal,
+  onCommand?: (says: string) => void,
+): Promise<Installed> {
+  const manager = installPlanFor(root.present)?.manager ?? 'npm';
+  const { command, args } = routeFor(doing, manager, root.folder, id);
+  onCommand?.(`${command} ${args.join(' ')}`);
+
+  try {
+    const ran = await run(command, args, {
+      folder: root.folder,
+      patience: INSTALL_PATIENCE,
+      signal,
+    });
+    // A stopped child comes back as a code, not as a throw: execFile reports
+    // the abort itself. Somebody pressing Stop is not a failure of the work,
+    // and the shelf reads the folder afterwards to say what it left.
+    if (signal.aborted) return { ok: false, ended: true };
+    if (ran.code === 0) return { ok: true };
+    return { ok: false, because: ran.said.trim() };
+  } catch (cause) {
+    if (signal.aborted) return { ok: false, ended: true };
+    return { ok: false, because: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
 
 /** Where Node comes from for somebody who does not have it. The page rather
  *  than a download: it is the one address that is the same on every machine. */
@@ -713,9 +828,10 @@ export const BREW_NODE = 'brew install node';
  *  has. Nothing here reads a disk or runs anything: the caller hands over what
  *  it found.
  *
- * Pi installs packages by shelling out to npm, so on a Mac that has never had
- * Node nothing there can be added — and without this the first press ends in
- * the installer's own words. Said before the press, not after it. */
+ * An add-on is installed by npm, run as this app's own child so it can be
+ * ended and with the path a packaged app needs. A machine that has never had
+ * Node has no npm to run, and without this the first press ends in the
+ * installer's own words. Said before the press, not after it. */
 export type NpmSetup = {
   /** False when npm is here, and there is nothing to say. */
   needed: boolean;

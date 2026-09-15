@@ -147,6 +147,9 @@ import {
 } from './importers';
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { installAddon, type Installed } from './packages';
+import type { PackageChange } from './package-lifecycle';
 import { homedir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 
@@ -1697,14 +1700,31 @@ export async function readTranscript(
 /**
  * The things that can be added to Graphe, and the two verbs that change them.
  *
- * Pi's own package manager does the work; the catalogue comes from the npm
- * registry, because Pi has no search of its own. Nothing here throws — every
- * failure is a sentence.
+ * The install itself is run by us, through `runHelper`, rather than by Pi's
+ * package manager. Two reasons, and both are the plan's: Pi owns its npm child
+ * privately and exposes no abort seam, so an install begun there cannot be
+ * ended; and its child resolves `npm` from the environment it inherited, which
+ * a Mac with no Node on its path does not have. A child of ours can be killed
+ * (`stop`) and is looked for on the widened path everything else here uses.
+ *
+ * Pi's manager is still what reads, and writes, the settings file — that file
+ * is Pi's, and the next session loads from it. Only the process is ours. Where
+ * the machine has configured a wrapper command (`npmCommand`, e.g.
+ * `mise exec node@20 -- npm`), Pi's own path is used instead: it is the only
+ * one that honours the wrapper, and an install that cannot be cancelled is
+ * better than one run with the wrong npm.
  */
+
 export async function packageHost(agentDir: string, projectRoot: string) {
   const pi = await loadPi();
   const settings = pi.SettingsManager.create(projectRoot, agentDir);
   const manager = new pi.DefaultPackageManager({ cwd: projectRoot, agentDir, settingsManager: settings });
+  /** Where a user-scoped npm add-on lives, which is where Pi loads it from. */
+  const root = join(agentDir, 'npm');
+  /** The install running right now, if any, so a press can end it. */
+  let running: AbortController | null = null;
+  let progress: ((says: string) => void) | undefined;
+
   return {
     async search(term: string): Promise<unknown> {
       const asked = term.trim() === '' ? 'pi-' : term.trim();
@@ -1717,13 +1737,18 @@ export async function packageHost(agentDir: string, projectRoot: string) {
       return Promise.resolve(manager.listConfiguredPackages());
     },
     async add(id: string): Promise<void> {
-      await manager.installAndPersist(`npm:${id}`);
+      await change('install', `npm:${id}`);
     },
     async update(id: string): Promise<void> {
-      await manager.update(`npm:${id}`);
+      await change('update', `npm:${id}`);
     },
     async remove(id: string): Promise<void> {
-      await manager.removeAndPersist(`npm:${id}`);
+      await change('remove', `npm:${id}`);
+    },
+    /** End the child we started. Nothing is left running: `execFile`'s signal
+     *  kills the process, so a stopped install writes nothing further. */
+    async stop(): Promise<void> {
+      running?.abort();
     },
     /**
      * Which version is on disk now, out of the package's own manifest.
@@ -1749,18 +1774,68 @@ export async function packageHost(agentDir: string, projectRoot: string) {
       }
       return { version: null };
     },
-    /** Pi's own progress, put through to the shelf as it happens. */
+    /** What the change is doing, on its way past. Our child is read whole when
+     *  it ends, so this is the one line it can say while it runs; the
+     *  installer's own last lines are kept for a failure. */
     watching(handler: (says: string) => void): void {
-      try {
-        manager.setProgressCallback((event) => {
-          if (typeof event.message !== 'string' || event.message.trim() === '') return;
-          handler(event.message.trim());
-        });
-      } catch {
-        // An installer that cannot report still installs.
-      }
+      progress = handler;
     },
   };
+
+  /**
+   * One change, run as our own child where that is possible and through Pi
+   * where the machine has asked for something Pi alone honours.
+   *
+   * The settings entry is written only once the install has come back with
+   * nothing to complain about: a folder half populated by a killed npm is not
+   * a package the next session should be told to load.
+   */
+  async function change(doing: PackageChange['doing'], source: string): Promise<void> {
+    const configured = settings.getNpmCommand();
+    if (configured !== undefined && configured.length > 0) {
+      // Pi's own route, wrapper and all. Reached only where a wrapper is
+      // configured, because Pi is the only thing that knows how to run one.
+      if (doing === 'install') return manager.installAndPersist(source);
+      if (doing === 'update') return manager.update(source);
+      await manager.removeAndPersist(source);
+      return;
+    }
+
+    await mkdir(root, { recursive: true });
+    const manifest = join(root, 'package.json');
+    if (!existsSync(manifest)) {
+      // The same two lines Pi writes, so both routes leave one folder shape.
+      await writeFile(
+        manifest,
+        `${JSON.stringify({ name: 'pi-extensions', private: true }, null, 2)}\n`,
+        'utf8',
+      );
+    }
+
+    const controller = new AbortController();
+    running = controller;
+    let outcome: Installed;
+    try {
+      outcome = await installAddon(
+        (command, args, options) => runHelper(command, args, options),
+        doing,
+        { folder: root, present: await readdir(root).catch(() => [] as string[]) },
+        source.slice('npm:'.length),
+        controller.signal,
+        progress,
+      );
+    } finally {
+      running = null;
+    }
+
+    // Somebody pressed Stop. The shelf reads the folder once this returns and
+    // says what it left, so this only has to end.
+    if (outcome.ok === false && 'ended' in outcome) return;
+    if (outcome.ok === false) throw new Error(outcome.because === '' ? `${source} did not install` : outcome.because);
+
+    if (doing === 'remove') manager.removeSourceFromSettings(source);
+    else manager.addSourceToSettings(source);
+  }
 }
 
 /** Read defensively: a provider that quotes nothing gets null rather than a

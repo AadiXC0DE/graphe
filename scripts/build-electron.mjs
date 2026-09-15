@@ -28,7 +28,8 @@
 //             which is Electron's Node: it reads ESM fine, and the child needs
 //             to reach Pi exactly like the shell does.
 //
-// esbuild comes with Vite. Nothing new is installed to build the app.
+// esbuild is a direct devDependency: Vite 8 builds with Rolldown and no longer
+// brings one, and this script still bundles the shell by itself.
 
 import { build, context } from 'esbuild';
 import { rm } from 'node:fs/promises';
@@ -117,6 +118,18 @@ const builds = [
       ].join('\n'),
     },
   },
+  {
+    ...shared,
+    entryPoints: [`${root}src/agent/pi/runtime-child.ts`],
+    outfile: `${root}dist-electron/runtime-child.mjs`,
+    format: 'esm',
+    banner: {
+      js: [
+        "import { createRequire as __createRequire } from 'node:module';",
+        'const require = __createRequire(import.meta.url);',
+      ].join('\n'),
+    },
+  },
 ];
 
 await rm(`${root}dist-electron`, { recursive: true, force: true });
@@ -128,6 +141,6 @@ if (watch) {
 } else {
   await Promise.all(builds.map((options) => build(options)));
   console.log(
-    'built dist-electron/boot.mjs, dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs, dist-electron/subagent-runner.mjs and dist-electron/probe-runner.mjs',
+    'built dist-electron/boot.mjs, dist-electron/main.mjs, dist-electron/preload.cjs, dist-electron/pagepreload.cjs, dist-electron/subagent-runner.mjs, dist-electron/probe-runner.mjs and dist-electron/runtime-child.mjs',
   );
 }

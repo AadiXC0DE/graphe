@@ -22,7 +22,10 @@ display work area 1440×793 at scale 2, Node v22.21.1, Electron 43.4.1):
 | `results/2026-09-15T09-13-19-703Z/` | built, `dist/` over http (`--built`) | 38 | 262 | 96 |
 | `results/2026-09-15T09-56-22-759Z/` | built, after the nine findings were worked through | 38 | 228 | 9 |
 | `results/2026-09-15T10-14-43-504Z/` | built again, with every fix in the tree | 38 | 225 | 0 |
+| `results/2026-09-15T18-03-24-730Z/` | built, with the accessibility tree and the emulated media rows added | 49 | 292 | 11 |
+| `results/2026-09-15T18-26-47-451Z/`, `results/2026-09-15T18-34-12-299Z/` | built, the whole matrix with the accessibility and media rows in it, run twice | 49 | 290 | 7 |
 | `results/2026-09-15T09-58-50-102Z/`, `results/2026-09-15T09-59-38-536Z/` | packaged, `--only=tabs`, run twice | 2 | 27 | 9 |
+| `results/2026-09-15T18-59-26-626Z/`, `results/2026-09-15T19-00-08-577Z/` | built, the two accessibility rows alone after A1 and A3 were fixed (`--only=a11y-add-ons`, `--only=media-contrast`) | 1 each | 5 each | 0 |
 
 The first two rows are packaged runs, which measure the code *before* these
 findings were worked through — the packaged bundle is from 10:46 that morning and
@@ -83,7 +86,7 @@ is a gate nobody can skip by accident.
 | 20+ tabs | twenty-two open conversations in one project | **Fails** — the strip is 130px holding 2154px and the conversation in front is not inside it |
 | keyboard-only input | 40 Tab stops; Arrow/Home/End in the strip; return after closing | **Fails** — the conversation moves, the keyboard does not stay in the strip |
 | reduced motion | the renderer told `prefers-reduced-motion: reduce`, and the app's own Motion setting | Passes (the OS switch itself is a person's, below) |
-| a screen reader | — | **Not checked here**; a person's, below |
+| a screen reader (the tree) | the accessibility tree through CDP: roles, names, order, selected, disabled, and what a modal accounts for; on the opening screen, a conversation, the settings sheet and the add-ons screen | Passes — the add-ons screen's repeated "Add" ×4 and "Close" ×2 are fixed (A1) |
 | external monitor disconnect | a window remembered at 9000,9000 ×1000×700 | Passes (the unplug itself is a person's, below) |
 | overlay: Settings | inside the window, hittable, focus kept, Escape closes | Passes |
 | overlay: extension request | — | **Not reachable**; a person's, below |
@@ -92,6 +95,10 @@ is a gate nobody can skip by accident.
 | overlay: command palette | ⌘⇧P: inside the window, field hittable, keyboard taken, Escape closes | Passes |
 | stack with the native preview visible | — | **Not reachable without a project that serves**; a person's, below |
 | contrast | six pieces of text against what they sit on, light and dark | Passes (6.68:1 to 17.29:1; 4.5:1 needed) |
+| `prefers-reduced-motion: reduce` | emulated: every one of the 60 elements carrying a duration stops | Passes — 60 moving → 0 |
+| `prefers-contrast: more` | emulated: the whole screen measured against what it sits on | Passes — the sheet answers the query with the Contrast setting's own palette (A3) |
+| `forced-colors: active` | emulated: the tab in front and the Send control, with colour taken away | Passes — both keep a cue (the tab's weight, Send's colour) |
+| `prefers-color-scheme` (both) | emulated live, with the theme following the computer | Passes — light `#fcfaf7` ↔ dark `#151311` without a relaunch, and a hand-picked theme holds |
 | focus indicators | 408 elements marked at rest, then every Tab stop asked whether anything on screen says where the keyboard is | Passes — 40 of 40 stops, and the composer's container lights up for the box inside it |
 | tooltip access | every button's accessible name; every input's label; the `title` attributes | Passes, with the finding above about two names that read the same |
 | a disabled action | the Send control with nothing to send, against the same control with a sentence in the box | Passes — an outline in the same greys as the paperclip, against the accent fill |
@@ -102,6 +109,131 @@ is a gate nobody can skip by accident.
 | file-tree horizontal scroll | the tree scrolled to the bottom with long paths, no sideways scroll, no row past the panel | Passes |
 | terminal resize | the drawer opened, then the window resized | Passes — the screen follows (376×125 → 76×120) and stays inside |
 | layout persistence | size, theme, file panel after quit and relaunch; a window remembered off-screen | Passes |
+
+### The findings the accessibility rows brought in
+
+From `results/2026-09-15T18-26-47-451Z/` and `results/2026-09-15T18-34-12-299Z/`
+(the whole matrix run twice, both 49 rows / 290 checks / 7 failed) and
+`results/2026-09-15T18-33-31-010Z/` (the accessibility rows alone: 7 rows, 48
+checks, 3 failed). Four of the seven are the two harness rows below; the other
+three are A1 and A3. Each finding names what a person would experience, not only
+the selector. **Both A1 and A3 are fixed in the tree**, with the file:line and the
+re-measured row under each; the harness rows (A4) are left to `A11yChecks`.
+
+**A1. The add-ons screen repeats two words and gives a screen reader nothing to
+tell them apart.** Every row's button is announced as "Add" and nothing else, four
+times, and the screen carries two buttons announced as "Close" — the full-window
+backdrop and the × in the header. The row text ("Figma", "Pencil", "Another
+browser"…) is drawn beside each button but is not part of its name, and the row
+`div`s carry no role, so there is no listitem, no row, no group: the tree lists the
+four buttons as four identical siblings. A screen reader user hears "Add, button"
+four times with no way to know which add-on each one adds, and "Close, button"
+twice with no way to know which is which. `src/components/AddMore.tsx:500-526` (the
+row) and `:253-258` (the backdrop). Reachable by: opening Add more from the sidebar
+rail — the second most likely place a person goes looking for what the app can do.
+`a11y-add-ons.png`.
+
+**Fixed.** Each press is now announced with the words the eye already reads plus
+the name of the row it belongs to — "Add Figma", "Remove Pencil", "Add Another
+browser" — on both halves of the shelf (`src/components/AddMore.tsx:500-546` for
+an add-on's row, `:639-671` for a reach's), so no two presses on the screen share
+a name. The words a sighted person reads are unchanged; the label is the row's own
+visible name appended to the visible verb, not a sentence invented for the reader.
+The rows now carry `role="article"` (`:506`, `:577`, `:644`), which is where those
+names hang: the tree gives the four presses four rows of their own. And the dim
+behind the sheet — the full-window backdrop, a duplicate of the header's × as far
+as a reader was concerned — is `aria-hidden` (`:254-261`), leaving exactly one
+press announced "Close". Re-measured, `--built`:
+
+```
+▸ a11y-add-ons — the add-ons screen: every row and the button that adds it
+  ✓ the add-ons screen: every control has a role and a name (9 read, 0 with no name)
+  ✓ the add-ons screen: a name tells two controls apart where it has to
+  note: "Add Figma" is announced inside: generic "", generic ""
+  note: "Add Pencil" is announced inside: generic "", generic ""
+  note: "Add Another browser" is announced inside: generic "", generic ""
+  note: "Add A read of your code" is announced inside: generic "", generic ""
+1 rows, 5 checks, 0 failed.
+```
+
+(`results/2026-09-15T18-59-26-626Z/`; the row was red in the two 18-2x runs at the
+top of this file with "4 × button announced only as \"Add\" ... with no row around
+any of them".) `tests/addons-screen.test.ts` carries the regression: the four
+presses are named for their own rows, every row has a role, and the dim is out of
+the tree. Whether the speech reads well is still a person's (item 1).
+
+**A2. Nothing is a defect here, but the sheets rely on a hint a screen reader has
+to honour.** With Settings open, 42 controls behind it are still in the
+accessibility tree (`"New conversation"`, `"Split"`, `"Hide sidebar"`, the project
+row, the whole sidebar rail); the same with the add-ons screen. Both sheets carry
+`aria-modal` (`Settings.tsx:1149`, `AddMore.tsx:244-249`) and a Tab trap (which is
+why row `overlay-settings` passes "Tab stays inside the sheet for forty presses"),
+and nothing behind them is `inert` or `aria-hidden`. So the app is doing the
+standard thing — `aria-modal` is the signal that means "ignore everything outside
+me" — and whether the background is *actually* unreachable is VoiceOver's
+behaviour, which the tree cannot observe. That is left on the person-only list
+(item 1) with the fresh detail that the reader is being asked to honour the hint
+rather than being given a subtree that is gone. `a11y-settings-sheet.png`,
+`a11y-add-ons.png`.
+
+**A3. `prefers-contrast: more` reaches the renderer and the app does nothing with
+it.** `matchMedia('(prefers-contrast: more)')` matches, and there is no
+`prefers-contrast` rule anywhere in the stylesheet (`grep -rn prefers-contrast src/`
+returns nothing), so a person who turned on Increase Contrast in System Settings →
+Accessibility → Display gets the same palette as before: `--bg #151311`,
+`--text-faint` unchanged, on a dark computer. The app does have a mechanism for
+this — the Contrast setting in Appearance, which pushes every pair to 7:1
+(`--bg #151311` → `#0d0b09`, `--text-faint #968f86` → `#b0a9a0`) — but the OS
+switch is not wired to it. The same check does confirm nothing gets *harder* to
+read (faintest 5.8:1 → 5.8:1, 0 of 46 pieces of text under the ratio they need),
+so this is an unhonoured request rather than a regression. `media-contrast.png`.
+
+**Fixed.** The injected appearance sheet now carries the app's own answer under
+the media query: `cssFor` writes the same token block the Contrast setting writes,
+raised to `high`, inside `@media (prefers-contrast: more)`
+(`src/design/appearance.ts:308-323`). It is the sheet that has to answer, not
+`App.css`, because the palette is not in the stylesheet — `App.tsx:1003-1023`
+writes every colour token into a `<style>` in the head at
+`:root, :root[data-theme]`, which beats any stylesheet rule on specificity, so a
+`prefers-contrast` block in a `.css` file would lose the tie. The rule goes after
+the plain block so it wins on source order, and it is written only when it has
+something to say: not when the Contrast setting is already High (the block above
+is that palette already), and never into the Settings preview, which is one swatch
+wearing somebody's own choices rather than the app answering the OS.
+Re-measured, `--built`:
+
+```
+▸ media-contrast — prefers-contrast: more, measured against what the app already does with it
+  ✓ the renderer is told more contrast is wanted
+  ✓ the app answers the request (--bg #fcfaf7 → #fefbf8)
+  ✓ and asking for more contrast never makes anything harder to read (faintest 5.32:1 → 8.29:1)
+  ✓ with more contrast asked for, nothing on this screen is under the ratio it needs (0 of 51 below)
+  ✓ the app's own High contrast does move the palette (--bg #fcfaf7 → #fefbf8, --text-faint #6a625b → #4d4740)
+1 rows, 5 checks, 0 failed.
+```
+
+(`results/2026-09-15T19-00-08-577Z/`. Before: "--bg #151311", i.e. unchanged, the
+row's own failing check.) `tests/appearance.test.ts` pins it: the sheet carries the
+media query and every `high` token inside it, exactly once, and neither a sheet
+already at High nor a preview writes it. The OS switch itself — turning Increase
+Contrast on in System Settings and watching the window — is still a person's
+(item 3), since the harness emulates the signal rather than the setting.
+
+**A4. Two rows the harness already had were red in this run and are the harness's,
+not the app's.** `long-project-name` failed on its own counting ("coming back shows
+that project's own 1 conversations (the other project had 1)" — the row switched to
+the long-named project, which holds one conversation, and compared against a count
+taken in the other project); `620x520-zoom-200` reported `.topbar` scrolling
+sideways at 324px of content in 310px, which is the project name being ellipsised
+inside the bar rather than a control pushed off the edge — the same measurement
+that passes in the four size rows. Both are noted rather than left silent, and
+neither is a statement about this phase's work. They were red in the earlier
+18-03 run too, in the same way. **Left alone here, deliberately**: both are the
+matrix script's and belong to whoever owns `scripts/visual-matrix.mjs`, so they are
+reported rather than patched from the component side — the component has nothing to
+change for either (the ellipsised project name is the intended behaviour, and the
+count is the row comparing against the wrong project), and a fix in `AddMore` or the
+stylesheet would not touch them.
 
 ## What was found
 
@@ -331,29 +463,56 @@ means, not a visual defect, and the row still passes.
 
 ## What only a person can check
 
-Each of these needs something this harness cannot do. The first two are the two
-the plan named; the rest are the parts of the overlays that live outside the DOM.
+The list shrank. What a machine can honestly read of "a screen reader" it now
+reads: the accessibility tree through the DevTools protocol, which is where the
+announcement comes from, in rows `a11y-first-screen`, `a11y-conversation`,
+`a11y-two-titles`, `a11y-settings-sheet`, `a11y-add-ons`,
+`a11y-disabled-and-states` and `a11y-order-versus-drawing`; and the emulated media
+a person sets at the OS level in rows `media-reduced-motion`, `media-contrast`,
+`media-forced-colors` and `media-color-scheme-live`. What is left, and why each one
+is still a person's:
 
-1. **A screen reader.** VoiceOver on this machine: open the app on a profile with
-   two projects and a handful of conversations, then check that (a) VoiceOver
-   reads the tab strip as a tablist and names each tab, including the project
-   when two names collide, (b) the strip's state marks (working, waiting,
-   finished) are announced rather than silent, (c) the composer, its model chip
-   and its send control are reachable and named, (d) Settings reads as a dialog
-   and VoiceOver stays inside it, and (e) the error card is announced when a turn
-   cannot run. Turn on VoiceOver with ⌘F5 and use ⌃⌥←/→ to move by element.
-   Finding 5 is the one to watch: two names that differ after 39 characters.
+1. **What a screen reader says out loud.** The tree is read above: every control's
+   role and name on the opening screen, an open conversation, the composer, the
+   settings sheet and the add-ons screen; that names are unique where they have to
+   be (two conversations differing at character 97 are announced differently); that
+   exactly one tab is reported selected and it is the one drawn in front; that a
+   disabled Send is reported disabled and that it is really inert; that the tree
+   reads in the order the app is drawn; and that both sheets are reported modal.
+   What the tree cannot say is what the reader *does* with that: whether VoiceOver
+   stays inside a sheet that is `aria-modal` with the whole window still in the
+   tree behind it (finding A2 — the app uses the standard hint rather than a
+   subtree that is gone, and the 42 controls behind each sheet really are still in
+   the tree, so the answer depends on the reader honouring it); whether it reads a
+   mark whose name is "Working" as a status or as an image; whether the rotor's
+   element order matches the tree's; and whether a name that is correct but long
+   reads well. Turn on VoiceOver with ⌘F5, use ⌃⌥←/→ to move by element, and start
+   with the add-ons screen (A1: the four presses are now "Add Figma", "Add Pencil"
+   and so on, so what is left for a person is whether those read well between the
+   row they sit in and the next one) and A2.
 2. **A monitor being unplugged.** The machine half is done (a window remembered at
    9000,9000 comes back at 440,118, on screen). The half that needs hardware: open
    the window on an external display, unplug it, and check the window is still
    reachable — then plug it back in and check the window returns to the second
    display, with its size and place remembered.
-3. **The OS reduced-motion switch itself.** The harness tells the renderer
-   `prefers-reduced-motion: reduce` through CDP, which is the same signal the CSS
-   sees, and the stylesheet's kill switch answers it (transitions go from 0.2s to
-   1e-05s). What was not done is changing the setting in System Settings →
-   Accessibility → Display → Reduce motion and watching the app: animations of the
-   window itself (a sheet arriving, a modal), which CDP does not reach.
+3. **The OS switches themselves.** The harness sets `prefers-reduced-motion`,
+   `prefers-contrast`, `forced-colors` and `prefers-color-scheme` through
+   Playwright's emulation, which is the same signal the CSS and the renderer see —
+   the stylesheet's kill switch answers reduced motion (60 elements with a
+   duration → 0), and following the computer redraws without a relaunch
+   (`#fcfaf7` ↔ `#151311`). What was not done is changing the setting in System
+   Settings and watching the app: the animations of the window itself (a sheet
+   arriving, a modal) that CDP does not reach, and the platform's *own*
+   high-contrast palette. The app now answers the contrast request — row
+   `media-contrast` reads `--bg #fcfaf7 → #fefbf8` and the faintest text 5.32:1 →
+   8.29:1 under the emulation (A3) — but the emulation is the signal, not the
+   switch: turn Increase Contrast on in System Settings → Accessibility → Display
+   and confirm the window follows without a relaunch, and that it agrees with the
+   Contrast setting in Appearance rather than fighting it. Forced colours are
+   emulated, so what row
+   `media-forced-colors` measures is the renderer's answer to the emulation, not
+   what macOS itself draws; a person with Increase Contrast and a High Contrast
+   theme on will see a different picture from the one measured here.
 4. **The native file dialog.** "Open another folder…" opens the macOS dialog. A
    machine cannot drive it and a screenshot cannot see it. Open it over the
    conversation with the file panel on, and check it is not drawn under anything,
@@ -377,26 +536,36 @@ the plan named; the rest are the parts of the overlays that live outside the DOM
    to the overlay and not to the page. A screenshot cannot settle this — the
    preview is not in the renderer's picture at all, which is why none of the
    screenshots here would show it.
-7. **A contrast judgement.** The arithmetic passes (6.68:1 to 17.29:1 for the six
-   pieces of text measured, light and dark). What a machine cannot say is whether
-   a 320px project name ellipsised to "a-project-with-a-n…", a 39-character
-   conversation title and a "Connect a…" model chip read as clearly as they
-   should. That is the same material as findings 2 and 4, looked at rather than
-   measured.
-8. **The loading layout.** Nothing was caught: the app ships no skeleton, and the
-   only loading state is `.sheet.sheet--arriving` (`aria-busy`) behind a lazy
-   panel, which never lasted long enough to see on this machine. A person can
-   catch it by opening the app cold and pressing a control that loads a heavy
-   panel (Settings, Commands, the palette) — or this harness can be taught to look
-   from the first frame.
+7. **A contrast judgement.** The arithmetic passes: the six pieces of text the
+   `contrast` row measures read at 6.68:1 to 17.29:1 light and dark, and row
+   `media-contrast` measures all 46 pieces of text on the screen at once under
+   `prefers-contrast: more` (nothing under the ratio it needs, faintest 5.8:1).
+   What a machine cannot say is whether the *faintest* of them reads as clearly as
+   a person needs, or whether a 96px project name ellipsised to
+   "a-project-with-an…" and a conversation title cut at 120 characters still read
+   as what they are. That is the same material as findings 2 and 4, looked at
+   rather than measured.
+8. **The loading layout.** Still not caught. A fifth attempt confirms why: the
+   only loading state is `.sheet.sheet--arriving` (`aria-busy`, no text, no role,
+   no children) behind a lazy panel, and on this machine it is up for a few frames
+   at most — a cold start with the network emulated slow and the CPU throttled
+   never held it long enough to sample, while pressing Settings on a warm app
+   caught it 4 times out of ~300 samples at 5ms. A person catches it by opening
+   the app cold and pressing a heavy panel; making it a machine's check needs the
+   lazy chunk served deliberately slowly, which is a harness change rather than a
+   measurement. What the fleet of attempts did establish: the rectangle carries
+   `aria-busy="true"` and nothing else, so a screen reader is told "busy" with no
+   name for what is busy.
 
 ## Running it again
 
 - Re-run `--built` after the working tree settles: at the time of these runs the
-  tree had uncommitted work from other agents, so the packaged bundle (10:46) and
-  `dist/` (13:50) were not the same code. Both runs agreed, which is why the
+  tree had uncommitted work from other agents, so the packaged bundle (16:50) and
+  `dist/` (23:11) were not the same code. Both runs agreed, which is why the
   findings above are quoted from either.
 - `--conversations=6` keeps the rows short while working on something else; the
   plan's number is the default.
+- `--only=a11y` or `--only=media` runs just the rows added for this pass, which is
+  how they were developed.
 - The harness measures only what the renderer draws. A native view, a native
   dialog and the OS tooltip are outside every screenshot it takes.

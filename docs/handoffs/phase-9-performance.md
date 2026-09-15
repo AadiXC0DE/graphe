@@ -46,6 +46,39 @@ something to be compared against. The 450 KB gate is unchanged — the limit was
 never raised — and `tests/operations/build-budget.test.ts` asserts it with a plain
 `it` now that a fresh build comes in under it.
 
+That artifact is read back. A person runs:
+
+```
+npm run budget:compare
+```
+
+which asks `gh` for the newest two runs on the workflow that carry the artifact,
+downloads both `launch-budget.json` files into a temporary folder, and prints the
+main chunk, the launch set and the on-demand set, each raw and gzipped, side by
+side with the difference in KB and percent:
+
+| what | before | now | change | percent |
+| --- | --- | --- | --- | --- |
+| main chunk | 449.7 KB | 392.4 KB | −57.3 KB | −12.75% |
+| gzip | 143.9 KB | 125.9 KB | −18.1 KB | −12.55% |
+| launch set | 639.0 KB | 581.7 KB | −57.3 KB | −8.97% |
+| on demand | 5221.6 KB | 5287.1 KB | +65.5 KB | +1.25% |
+
+Options, all of them for the cases where the default is wrong: `--tolerance=1`
+sets the percent the main chunk may grow before this is a regression (1% by
+default — a build's size moves a little every time, and a gate that fires on 200
+bytes is a gate somebody turns off), `--branch=fix/ownership-stabilization`
+compares within one branch's runs rather than the newest two anywhere, and
+`--json=/tmp/now/launch-budget.json,/tmp/before/launch-budget.json` compares two
+files already on the machine, newest first, which is what somebody does after
+`gh run download <id> -n launch-budget -D /tmp/now`. It exits 1 on a regression —
+over the limit, grown past the tolerance, or something meant to be fetched on
+demand sitting in the launch set — and 2 when there is nothing to compare with
+(no `gh`, or fewer than two runs carrying the artifact), saying which. It is not
+wired into CI: the Build job already blocks on the limit, and a second gate on the
+same number inside the same job only duplicates the failure. It is the readout a
+person runs while a change is in flight.
+
 ## Done
 
 **P02, idle prefetch.** `warmViews()` imported all thirteen lazy views at idle and
@@ -75,27 +108,83 @@ resumes on return; the browser-frame poll stops when the window goes away; the f
 walk does not run while the panel is hidden, and a return does one walk rather than
 one per change. `tests/preview-live.test.ts`.
 
-**9.6, the packaged smoke, in part.** `npm run test:packaged` exists and was run
-here: it opens `release/mac-arm64/Graphe.app` with `PATH=/usr/bin:/bin`, a home and
-profile that are thrown away, and no global `pi`, npm or node. It passed — the
-window came up and was visible, the app reports it is packaged and on the
-disposable profile, the log records `started version=1.0.3 electron=43.4.1
-node=24.18.1 runtime=0.85.1`, the runtime it loaded is the pinned one, and Pi kept
-everything inside the profile. `npm run verify:package` passes on both bundles
-(x64 and arm64), each carrying the pinned Pi, its 83-package tree, node-pty with an
-executable helper, and a verifying ad-hoc signature. What this does *not* prove is
-in the script's own words: signing and notarization beyond the ad-hoc check,
-Finder and quarantine (the executable was started directly, so nothing was
-translocated), a real provider, the terminal, and the x64 bundle on this machine.
+**9.6, the packaged smoke.** `npm run test:packaged` exists and was run here: it
+opens `release/mac-arm64/Graphe.app` with `PATH=/usr/bin:/bin`, a home and profile
+that are thrown away, and no global `pi`, npm or node. It passed — the window came
+up and was visible, the app reports it is packaged and on the disposable profile,
+the log records `started version=1.0.3 electron=43.4.1 node=24.18.1
+runtime=0.85.1`, the runtime it loaded is the pinned one, and Pi kept everything
+inside the profile. `npm run verify:package` passes on both bundles (x64 and
+arm64), each carrying the pinned Pi, its 83-package tree, node-pty with an
+executable helper, and a verifying ad-hoc signature.
+
+**9.6, launched the way a person launches it.** `scripts/clean-machine.mjs` (new,
+`node scripts/clean-machine.mjs [--without-git] [--quarantine]`) is the half the
+smoke does not cover, because the smoke starts the executable directly and never
+asks LaunchServices to do it. This asks LaunchServices: `open -n -F -a` on the
+bundle, from `env -i` plus `open --env`, so the app inherits a login-less
+environment — `HOME`, `PATH=/usr/bin:/bin`, `SHELL` and the profile and nothing
+else of this machine's. One project is written into the profile first, so what the
+window offers with a folder open is part of what is read.
+
+Run on this tree, 2026-09-15, arm64:
+
+- **it comes up**: through the app's own inspector, it reports `isPackaged`, its
+  app path inside the bundle it was launched from, `userData` equal to the
+  disposable profile, and one visible window titled Graphe. The window is then
+  read through the remote debugger — the shipped renderer, the real preload.
+- **the project opens**: the row in the picker is pressed, the composer comes up,
+  a draft typed into it is read back unchanged, and README.md is listed. That is
+  ordinary file and chat work continuing, on the real input path rather than a
+  claim about a provider (no model exists on this machine).
+- **it writes its profile and log**: `logs/graphe.log`, `workspaces.json` and the
+  shell's own compile cache, under the profile it was handed and nowhere else.
+- **it records the pinned runtime**: `started version=1.0.3 electron=43.4.1
+  node=24.18.1 runtime=0.85.1`, agreeing with the manifest inside the bundle and
+  with the pin in `package.json`; no `pi`, `npm` or `node` on the PATH it was
+  given. The log has no error lines.
+- **the x64 bundle starts too**, under Rosetta (`--arch x86_64`), with the same
+  six assertions green. It is slower to put a window on screen — about 24 s
+  against about 8 s — which is the one thing Rosetta changes here.
+- **missing Git disables the Git actions and nothing else** (`--without-git`,
+  with a `git` that exits 127 first on the PATH). Green on arm64: the shell's own
+  log records `git here=false`, the window draws no git band and no commit press,
+  the new-worktree press is gone with it (`gitIsMissing` on the facts,
+  `src/lib/app-wide.ts:35`, gating `onNewWorktree` at `src/App.tsx:5298`), the
+  notice names the command line tools (`electron/appwide.ts:16`), and the
+  composer, the draft and the project's files are all still there. This is the
+  plan's sentence — missing Git disables Git actions while retaining ordinary
+  file/chat behavior — checked rather than inferred, and it is implemented.
+  On x64 under Rosetta the shell's git probe had not finished within 60 s (its
+  own patience is three seconds, and a helper behind the translation layer does
+  not answer in three), so **nothing about git is asserted on that
+  architecture**: the run records the gap instead of reading an unfinished probe
+  as a pass. The behaviour is arm64-verified; the x64 half is open.
+- **quarantine and translocation reproduce here, and the build is refused**
+  (`--quarantine`): a copy with `com.apple.quarantine` set is translocated to
+  `/private/var/folders/…/T/AppTranslocation/<uuid>/d/Graphe.app`, and macOS puts
+  up "Apple could not verify 'Graphe.app' is free of malware" — the app never
+  reaches its profile. `spctl -a -t exec` says `rejected`, and the signature is
+  `Signature=adhoc`. This is expected and is exactly what RELEASING.md:180-194
+  describes; the missing prerequisite is notarization, not the app. It is
+  recorded, not passed.
+
+What this still does not prove, and cannot on this machine: Finder's own click
+(LaunchServices is asked, which is what Finder asks, but no click is made), a
+*notarized* build and a Developer ID signature (there is none — the quarantine
+run above is the honest measurement), Gatekeeper's first-launch dialog being
+dismissed by a person, a real model provider, the terminal inside the packaged
+app, a second machine with nothing installed, and Windows or Linux packaging.
 
 ## Not done
 
 | Item | Note |
 | --- | --- |
 | ~~P01, the main chunk~~ | **DONE.** 446.3 KB against the 450 KB gate: the phase 8 retirements took the first 65 KB and splitting the press-reached views out of the shell took the rest. `node scripts/perf-report.mjs --check` exits 0, the assertion in `build-budget.test.ts` is a plain `it`, and the CI step blocks again |
+| ~~The launch budget being stored and not read~~ | **DONE.** `npm run budget:compare` (`scripts/budget-compare.mjs`) pulls the newest two runs that carry the `launch-budget` artifact and prints the difference for the main chunk, the launch set and the on-demand set, in KB and percent, exiting non-zero when the main chunk is over the limit, grew past the tolerance (`--tolerance=1` percent by default) or something meant to be on demand is in the launch set. Run here against runs 34997397590 and 34984506978: main chunk **449.7 → 392.4 KB (−57.3 KB, −12.75%)**, launch set 639.0 → 581.7 KB, on demand 5221.6 → 5287.1 KB (+1.25%, under the gate), exit 0. With `gh` unavailable or no baseline it says which, and `--json=a.json,b.json` compares two files already downloaded |
 | 9.1's scenario matrix, RSS/CPU/latency measurements, and the p50/p95 method | Not run: it needs the packaged app and a disposable profile. `tests/operations/budgets.test.ts` holds the fixtures at the size 9.1 names |
 | 9.4's lifecycle checks: sleep/wake, network change, a renderer crash, the ordering of the quit sequence | Not run here. What is held: the write that happens in the seconds before the app goes (`tests/operations/app-quit.test.ts`, 4), force-quit recovery (T55 in `tests/scenarios/recovery.test.ts`), a helper whose app went away (`tests/surviving.test.ts`), and the process ledger (`tests/processes.test.ts`, `tests/running-limits.test.ts`). Sleep/wake, a renderer crash and a real quit sequence need a real window |
-| 9.6's clean machine, properly | The packaged smoke starts the app with a minimal PATH and no global tooling, which is most of the plan's sentence, but it was not launched from Finder, nothing was translocated, the x64 bundle was not started, and a real provider and the terminal are not exercised |
+| 9.6's clean machine, the parts a machine cannot reach | LaunchServices is asked and the app answers; what is left is a *person's* click in Finder, a notarized build and a Developer ID signature (there is neither — see the quarantine result above), a second machine with nothing installed, both advertised architectures on their own hardware, and the terminal and a real provider inside the packaged app |
 
 ## 9.5 operational checks
 
@@ -305,5 +394,8 @@ omission.
   that can be measured without a window.
 - **Anything with a real provider in it.** Network and model time are excluded by
   the plan, and there is no account on this machine to include them with.
-- **One machine.** Every number above is one Apple M1; the x64 bundle has still
-  not been started.
+- **One machine, but both bundles.** Every number above is one Apple M1. The x64
+  bundle has now been *started* on it, under Rosetta, by
+  `scripts/clean-machine.mjs`: it comes up, opens a project and writes its
+  profile, at about 24 s to a visible window against about 8 s for arm64. It has
+  not been run on x64 hardware, so nothing here says what it costs there.

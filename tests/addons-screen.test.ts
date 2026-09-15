@@ -269,3 +269,53 @@ describe('what is here, in the state it is in', () => {
     expect(folded?.textContent).toContain('Require stack');
   });
 });
+
+/* Four buttons all announced "Add" are four identical buttons: the name has to
+   carry the add-on, and the row has to be a row for the name to hang off. */
+describe('what a screen reader hears on each row', () => {
+  const named = (): readonly string[] =>
+    [...(host?.querySelectorAll('.addmore__row button') ?? [])].map(
+      (one) => one.getAttribute('aria-label') ?? (one.textContent ?? ''),
+    );
+
+  it('names each add-on\u2019s press for that add-on', () => {
+    draw({
+      packs: [
+        PACK,
+        { ...PACK, id: 'pi-pencil', name: 'Pencil', installed: true },
+        { ...PACK, id: 'pi-browser', name: 'Another browser' },
+      ],
+    });
+    expect(named()).toEqual([`${SAYS.add} Lens`, `${SAYS.remove} Pencil`, `${SAYS.add} Another browser`]);
+  });
+
+  it('names each of a reach\u2019s presses for that reach', () => {
+    // `reaches` is the ids this project already has, so Pencil arrives added.
+    draw({ packs: [], reaches: ['pencil'], onConnect: NOTHING, onDisconnect: NOTHING });
+    const said = named();
+    expect(said).toContain(`${SAYS.add} Figma`);
+    expect(said).toContain(`${SAYS.remove} Pencil`);
+    // Whatever else the shelf offers, no two presses are announced the same.
+    expect(said.filter((one, at) => said.indexOf(one) === at)).toEqual(said);
+  });
+
+  /* A row with no role is an anonymous div, and a name inside one tells a
+     screen reader nothing about which row it belongs to. */
+  it('gives every row a role for those names to sit in', () => {
+    draw({ here: [] });
+    const rows = [...(host?.querySelectorAll('.addmore__row') ?? [])];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((one) => one.getAttribute('role') === 'article')).toBe(true);
+  });
+
+  it('keeps the dim behind the sheet out of the tree', () => {
+    draw({ reaches: [], packs: [PACK], onConnect: NOTHING });
+    const closes = [...(host?.querySelectorAll('button') ?? [])].filter(
+      (one) => one.getAttribute('aria-label') === SAYS.close,
+    );
+    // The × in the header is announced; the dim carries the same words for the
+    // hand only, so a reader hears "Close" once.
+    expect(closes.filter((one) => one.getAttribute('aria-hidden') !== 'true')).toHaveLength(1);
+    expect(host?.querySelector('.addmore__backdrop')?.getAttribute('aria-hidden')).toBe('true');
+  });
+});

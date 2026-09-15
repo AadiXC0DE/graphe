@@ -179,6 +179,29 @@ describe('AP-05 what gets injected', () => {
     expect(cssFor(defaultAppearance)).not.toContain('font-variant-ligatures');
     expect(cssFor(like({ ligatures: false }))).toContain('font-variant-ligatures: none');
   });
+
+  /* Increase Contrast in System Settings is the same request the Contrast
+     setting makes, and the setting is the only thing that answers it, so the
+     sheet has to carry that answer under the media query. */
+  it('answers the OS request for more contrast with the setting\u2019s own palette', () => {
+    const sheet = cssFor(defaultAppearance, 'light');
+    expect(sheet).toContain('@media (prefers-contrast: more)');
+    const high = tokensFor(like({ contrast: 'high' }), 'light');
+    for (const [name, value] of Object.entries(high)) {
+      expect(sheet, `${name} is not raised under prefers-contrast`).toContain(`${name}: ${value};`);
+    }
+  });
+
+  it('writes that block once, and never inside a preview', () => {
+    const asked = cssFor(defaultAppearance, 'light').split('@media (prefers-contrast: more)').length - 1;
+    expect(asked).toBe(1);
+    // Nobody asked the sheet to be high contrast already, so there is nothing
+    // to raise and the media query would only repeat the block above it.
+    expect(cssFor(like({ contrast: 'high' }), 'light')).not.toContain('prefers-contrast');
+    // A preview is one swatch wearing somebody's choices; the OS setting is
+    // about the app, not about what they are trying on.
+    expect(cssFor(defaultAppearance, 'light', '.appearance__preview')).not.toContain('prefers-contrast');
+  });
 });
 
 /* ========================================================================== */

@@ -19,8 +19,13 @@ import {
   packageShelf,
   readCatalog,
   reloadWords,
+  installAddon,
+  routeFor,
+  type Installed,
   type PackageHost,
+  type RunInstall,
 } from '../src/agent/pi/packages';
+import { installPlanFor } from '../src/projects/setup';
 import { cardFrom } from '../src/agent/pi/extension-probe';
 
 /* -------------------------------------------------------------------------- */
@@ -1002,5 +1007,171 @@ describe('whether a change can be ended', () => {
 
   it('says so for a host that cannot, so no press is offered', () => {
     expect(packageShelf(versionedHost({})).canStop).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The command we run ourselves                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('what an add-on is installed with', () => {
+  /** The install root's own files, as `readdir` hands them over. */
+  const at = (...names: readonly string[]): readonly string[] => names;
+
+  it('follows the lockfile in the install root, the same rule a checkout gets', () => {
+    const manager = (files: readonly string[]) => installPlanFor(files)?.manager ?? 'npm';
+    expect(manager(at('package.json'))).toBe('npm');
+    expect(manager(at('package.json', 'pnpm-lock.yaml'))).toBe('pnpm');
+    expect(manager(at('package.json', 'yarn.lock'))).toBe('yarn');
+    expect(manager(at('package.json', 'bun.lockb'))).toBe('bun');
+    // Nothing there at all: npm is what Pi writes and what a clean machine has.
+    expect(manager(at())).toBe('npm');
+  });
+
+  it('installs into the folder Pi loads from, not the project', () => {
+    // `--prefix` rather than cwd: the install root is where the next session
+    // reads add-ons from, and it is not the project folder.
+    expect(routeFor('install', 'npm', '/agent/npm', 'pi-lens')).toEqual({
+      command: 'npm',
+      args: ['install', 'pi-lens', '--prefix', '/agent/npm', '--legacy-peer-deps', '--no-audit', '--no-fund'],
+    });
+    expect(routeFor('install', 'pnpm', '/agent/npm', 'pi-lens').args).toContain('/agent/npm');
+    expect(routeFor('install', 'bun', '/agent/npm', 'pi-lens').args).toContain('/agent/npm');
+    // Yarn installs into the working directory, which is the root we hand it.
+    expect(routeFor('install', 'yarn', '/agent/npm', 'pi-lens')).toEqual({
+      command: 'yarn',
+      args: ['add', 'pi-lens'],
+    });
+  });
+
+  it('asks for the newest one on an update, and names it on a removal', () => {
+    expect(routeFor('update', 'npm', '/root', 'pi-lens').args).toContain('pi-lens@latest');
+    expect(routeFor('remove', 'npm', '/root', 'pi-lens').args).toEqual([
+      'uninstall',
+      'pi-lens',
+      '--prefix',
+      '/root',
+      '--legacy-peer-deps',
+      '--no-audit',
+      '--no-fund',
+    ]);
+    expect(routeFor('remove', 'bun', '/root', 'pi-lens').args).toEqual(['uninstall', 'pi-lens', '--cwd', '/root']);
+  });
+
+  it('keeps an add-on\u2019s own pi peers out of the install', () => {
+    // A second copy of the runtime beside an add-on is how a package that
+    // works in Pi fails here, so peer resolution is off on every manager.
+    expect(routeFor('install', 'npm', '/root', 'pi-lens').args).toContain('--legacy-peer-deps');
+    expect(routeFor('install', 'bun', '/root', 'pi-lens').args).toContain('--omit=peer');
+    expect(routeFor('install', 'pnpm', '/root', 'pi-lens').args).toContain(
+      '--config.auto-install-peers=false',
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Running the install ourselves: a clean machine, a stop, and what is left    */
+/* -------------------------------------------------------------------------- */
+
+/** A child that does not come back until somebody ends it, the way npm does
+ *  not. The signal is the whole point of running the install here rather than
+ *  through Pi, which owns its npm child privately and offers no way to stop it. */
+function childThatWaits(): { run: RunInstall; ended: () => boolean } {
+  let aborted = false;
+  const run: RunInstall = (_command, _args, options) =>
+    new Promise((_done, reject) => {
+      options.signal.addEventListener('abort', () => {
+        aborted = true;
+        reject(new Error('the install was ended'));
+      });
+    });
+  return { run, ended: () => aborted };
+}
+
+describe('installing an add-on as our own child', () => {
+  it('runs npm into the install root, on the lockfile that is there', async () => {
+    const seen: { command: string; args: readonly string[]; folder: string }[] = [];
+    const run: RunInstall = async (command, args, options) => {
+      seen.push({ command, args, folder: options.folder });
+      return { code: 0, said: '' };
+    };
+
+    const outcome = await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-lens',
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.command).toBe('npm');
+    // The install root, not the project: this is where the next session reads
+    // add-ons from.
+    expect(seen[0]?.args).toContain('/agent/npm');
+    expect(seen[0]?.folder).toBe('/agent/npm');
+  });
+
+  it('works on a machine whose npm is only found on the widened path', () => {
+    // The claim is about `runHelper`'s own path, and it is proved against a
+    // real npm in `tests/addon-install.test.ts`: what this holds is that the
+    // route hands the child the root it must install into and asks for
+    // nothing else from the machine.
+    const args = routeFor('install', 'npm', '/agent/npm', 'pi-lens').args;
+    expect(args).toEqual(['install', 'pi-lens', '--prefix', '/agent/npm', '--legacy-peer-deps', '--no-audit', '--no-fund']);
+  });
+
+  it('says which manager it is about to run, so the screen is not blank', async () => {
+    const said: string[] = [];
+    const run: RunInstall = async () => ({ code: 0, said: '' });
+
+    await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['pnpm-lock.yaml'] },
+      'pi-lens',
+      new AbortController().signal,
+      (line) => said.push(line),
+    );
+
+    expect(said).toEqual(['pnpm install pi-lens --prefix /agent/npm --config.auto-install-peers=false --config.strict-peer-dependencies=false']);
+  });
+
+  it('reports a stopped install as ended rather than as a failure', async () => {
+    const { run, ended } = childThatWaits();
+    const controller = new AbortController();
+
+    const installing = installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-lens',
+      controller.signal,
+    );
+    await Promise.resolve();
+    controller.abort();
+
+    const outcome: Installed = await installing;
+    expect(outcome).toEqual({ ok: false, ended: true });
+    expect(ended()).toBe(true);
+  });
+
+  it('hands a real failure up as what the installer said, not as a code', async () => {
+    const run: RunInstall = async () => ({ code: 1, said: 'npm error code E404\nnpm error 404 Not Found' });
+
+    const outcome = await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-nothing',
+      new AbortController().signal,
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect('ended' in outcome).toBe(false);
+    if ('ended' in outcome) return;
+    expect(outcome.because).toContain('E404');
   });
 });

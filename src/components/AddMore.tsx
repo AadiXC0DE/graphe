@@ -248,11 +248,15 @@ export default function AddMore({
       aria-label={SAYS.title}
       onKeyDown={(event) => trapTab(event, panel.current)}
     >
+      {/* Clicking the dim is a convenience for the hand. Escape and the × are
+          what a keyboard and a reader get, so this stays out of the tree: two
+          buttons announced "Close" said nothing about which was which. */}
       <button
         type="button"
         className="addmore__backdrop"
         onClick={onClose}
         aria-label={SAYS.close}
+        aria-hidden="true"
         tabIndex={-1}
       />
 
@@ -495,9 +499,12 @@ function Row({
   capability?: string;
 }) {
   const working = busy === pack.id;
+  // The words the eye reads, plus this row's own name: four presses all called
+  // "Add" are four identical buttons to a screen reader.
+  const forThis = (word: string): string => `${word} ${pack.name}`;
 
   return (
-    <div className="addmore__row">
+    <div className="addmore__row" role="article">
       <div className="addmore__rowtop">
         <div className="addmore__text">
           <span className="addmore__name">{pack.name}</span>
@@ -506,7 +513,12 @@ function Row({
         {/* Only while this row's own change is running, and only where this
             copy of the app can end one. */}
         {working && stopping?.canStop === true && onStop !== undefined ? (
-          <button type="button" className="addmore__action" onClick={onStop}>
+          <button
+            type="button"
+            className="addmore__action"
+            onClick={onStop}
+            aria-label={forThis(SAYS.stop)}
+          >
             {SAYS.stop}
           </button>
         ) : null}
@@ -515,6 +527,15 @@ function Row({
           className={`addmore__action ${pack.installed ? 'addmore__action--off' : ''}`}
           onClick={() => (pack.installed ? onRemove(pack.id) : onAdd(pack.id))}
           disabled={busy !== null}
+          aria-label={forThis(
+            working
+              ? pack.installed
+                ? SAYS.removing
+                : SAYS.adding
+              : pack.installed
+                ? SAYS.remove
+                : SAYS.add,
+          )}
         >
           {working
             ? pack.installed
@@ -554,7 +575,7 @@ function Row({
 function HereRow({ one }: { one: ExtensionHere }) {
   const state = one.state.charAt(0).toUpperCase() + one.state.slice(1);
   return (
-    <div className="addmore__row">
+    <div className="addmore__row" role="article">
       <div className="addmore__rowtop">
         <div className="addmore__text">
           <span className="addmore__name">
@@ -617,9 +638,11 @@ function ReachRow({
   onDisconnect: ((id: string) => void) | undefined;
 }) {
   const working = busy === reach.id;
+  // Same as an add-on row: the press is announced for the tool it acts on.
+  const forThis = (word: string): string => `${word} ${reach.name}`;
 
   return (
-    <div className="addmore__row">
+    <div className="addmore__row" role="article">
       <div className="addmore__rowtop">
         <div className="addmore__text">
           <span className="addmore__name">{reach.name}</span>
@@ -630,6 +653,15 @@ function ReachRow({
           className={`addmore__action ${reach.added ? 'addmore__action--off' : ''}`}
           onClick={() => (reach.added ? onDisconnect?.(reach.id) : onConnect(reach.id))}
           disabled={busy !== null || (reach.added && onDisconnect === undefined)}
+          aria-label={forThis(
+            working
+              ? reach.added
+                ? SAYS.removing
+                : SAYS.adding
+              : reach.added
+                ? SAYS.remove
+                : SAYS.add,
+          )}
         >
           {working
             ? reach.added

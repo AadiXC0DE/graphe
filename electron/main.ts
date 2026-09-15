@@ -355,6 +355,7 @@ import { readAppearance } from '../src/design/appearance';
 import { batcher } from '../src/lib/batching';
 import { drainQueued, drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
+import { rescuedCopies, rescueWords, writesAside, type Rescued } from '../src/work/rescue';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
   canClear,
@@ -3410,31 +3411,40 @@ function worktreesFolder(project: string): string {
   return copiesFolder(app.getPath('userData'), 'worktrees', project);
 }
 
-/** Where writing carried out of a copy is kept. Somewhere ordinary and findable
- *  — whoever wrote it is going to come looking. */
-function keptAsideFolder(project: string): string {
-  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  return join(app.getPath('userData'), 'kept-aside', key);
+/**
+ * The project id a folder is filed under, minting the record when this is the
+ * first time anybody has asked.
+ *
+ * Rescued writing is filed under a digest of this rather than the folder's
+ * path, because two projects can carry the same name and a shared root is one
+ * project's copy written over another's. A project that moves keeps its id, so
+ * what somebody has not come back for is still found from where it is now.
+ */
+async function projectIdFor(path: string): Promise<string> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, path);
+  if (ensured.made) {
+    workspaceIndex = ensured.index;
+    await saveWorkspaceIndex();
+  }
+  return ensured.project.projectId;
 }
 
-/** Copy a conversation's own writing out before its copy is given back. Those
- *  files are in no save and no version, so this is the only copy of them. */
-function keepAside(project: string, whose: string): Rescue {
+/** Carry a copy's own writing out before the copy is given back, and say where
+ *  it went.
+ *
+ * Those files are in no save and no version, so this is the only copy of them —
+ * and the folders holding them are named out loud, because the new root is not
+ * where an earlier version put them and a path is the only way to the files.
+ */
+function keepAside(project: string, projectId: string, whose: string): Rescue {
+  const where: Rescued = { base: app.getPath('userData'), project, projectId };
+  const rescue = writesAside(where, whose);
   return async (folder, files) => {
-    for (const one of files) {
-      const to = join(keptAsideFolder(project), whose, one);
-      try {
-        await mkdir(dirname(to), { recursive: true });
-        // Cloned where the filesystem can: on APFS the bytes are shared until
-        // one side is written to, so rescuing a large file costs nothing.
-        await copyFile(join(folder, one), to, constants.COPYFILE_FICLONE);
-      } catch {
-        // One that could not be carried is enough to keep the copy. Saying it
-        // went and then deleting the only copy is the whole failure this was
-        // written to prevent.
-        return false;
-      }
-    }
+    if (!(await rescue(folder, files))) return false;
+    const kept = await rescuedCopies(where, whose);
+    log.line('info', 'writing set aside', { project, whose, files: files.length, kept });
+    send(project, { type: 'notice', what: rescueWords.setAside(kept) });
     return true;
   };
 }
@@ -4125,8 +4135,9 @@ async function sweepStrayCheckouts(): Promise<number> {
     const found = await readdir(root, { withFileTypes: true }).catch(() => []);
     const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
     if (folders.length === 0) continue;
+    const projectId = await projectIdFor(project.path);
     const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
-      rescue: (folder, files) => keepAside(project.path, basename(folder))(folder, files),
+      rescue: (folder, files) => keepAside(project.path, projectId, basename(folder))(folder, files),
       /* A copy whose branch already landed and that nothing has touched in a
          fortnight is what a gigabyte of `node_modules` is sitting in. Never
          one holding work, which `sweepCheckouts` checks first. */
@@ -4178,7 +4189,7 @@ async function putAwayCheckoutAt(project: string, held: Held, address: string): 
   const one = held.checkouts.get(address);
   if (one === undefined || !existsSync(one.folder)) return;
   const away = await putAwayWorktree(gitRunHereFor(), project, one.folder, {
-    rescue: keepAside(project, basename(one.folder)),
+    rescue: keepAside(project, await projectIdFor(project), basename(one.folder)),
   }).catch(() => ({ put: false }));
   if (!away.put) return;
   await saveCheckouts(project, held).catch(() => undefined);
@@ -9522,8 +9533,9 @@ function register(): void {
   handle<readonly Pack[]>(CHANNEL.addPackage, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
-    /* Add-ons install through Pi's package manager, which shells out to npm.
-       Saying so beats letting the press fail with the shell's own words. */
+    /* The install is ours now, so the only thing that still has to be here
+       first is npm itself: no manager means no install, and saying so before
+       the press beats the installer's own words after it. */
     npmIsHere ??= await npmOnPath();
     if (!npmIsHere) {
       return fail({

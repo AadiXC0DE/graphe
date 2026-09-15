@@ -290,8 +290,8 @@ describe('the child itself', () => {
 
 describe('the program the app actually ships', () => {
   /** The runner as `scripts/build-electron.mjs` makes it: one file, bundled,
-   *  ESM for Node, started by path. esbuild comes with Vite, which is how the
-   *  app is built — and the options here are the ones that build uses for it. */
+   *  ESM for Node, started by path. The same esbuild devDependency builds the
+   *  app — and the options here are the ones that build uses for it. */
   async function builtRunner(): Promise<string> {
     const out = join(await scratch(), 'probe-runner.mjs');
     await build({

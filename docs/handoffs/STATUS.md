@@ -71,9 +71,12 @@ relink, and U03's names are one set. The main-chunk gate is met **392.4 KB** aga
 `phase-1-contract.md` through
 `phase-10-scenarios.md`.
 
-Verified on this tree, 2026-09-15: `npm run typecheck`, `npm run lint` and
-`npm run copy:check` clean; `npm test` **362 files passed, 1 skipped (363),
-6565 tests passed, 13 skipped**; `npm run test:electron` green (13 tests);
+Verified on this tree, 2026-09-16: `npm run typecheck`, `npm run lint` and
+`npm run copy:check` clean; `npm test` **365 files passed, 1 skipped (366),
+6607 tests passed, 13 skipped**; `npm run test:electron` green (13 tests);
+`npm run test:measure` against the plan's budgets; `npm run budget:compare` reads
+the CI artifact back (449.7 → 392.4 KB); `node scripts/clean-machine.mjs` green on
+arm64 and x64-under-Rosetta;
 `npm run test:packaged` green on arm64; `npm run verify:package` green on both
 bundles; `npm run licenses:check` 471 of 471; `npm run test:visual` green (38 rows,
 225 checks) after nine findings were fixed; `npm run test:measure` measured against

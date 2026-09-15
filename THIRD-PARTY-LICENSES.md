@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-471 packages, generated 2026-09-14 from package-lock.json 35539a6ff7b7cfa6.
+471 packages, generated 2026-09-15 from package-lock.json f3f37c90d97d8e7a.
 
 ## Summary
 
@@ -395,8 +395,8 @@ not modified their source. Their names and marks belong to their respective owne
 | [qs](https://github.com/ljharb/qs) | 6.15.3 | BSD-3-Clause |
 | [range-parser](https://github.com/jshttp/range-parser) | 1.3.0 | MIT |
 | [raw-body](https://github.com/stream-utils/raw-body) | 3.0.2 | MIT |
-| [react](https://react.dev/) | 19.2.8 | MIT |
-| [react-dom](https://react.dev/) | 19.2.8 | MIT |
+| [react](https://react.dev/) | 19.3.0 | MIT |
+| [react-dom](https://react.dev/) | 19.3.0 | MIT |
 | [react-icons](https://github.com/react-icons/react-icons#readme) | 5.7.0 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 3.6.2 | MIT |
 | [regex](https://github.com/slevithan/regex) | 6.1.0 | MIT |
@@ -413,7 +413,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [rw](https://github.com/mbostock/rw) | 1.3.3 | BSD-3-Clause |
 | [safe-buffer](https://github.com/feross/safe-buffer) | 5.2.1 | MIT |
 | [safer-buffer](https://github.com/ChALkeR/safer-buffer) | 2.1.2 | MIT |
-| [scheduler](https://react.dev/) | 0.27.0 | MIT |
+| [scheduler](https://react.dev/) | 0.28.0 | MIT |
 | [semver](https://github.com/npm/node-semver) | 6.3.1 | ISC |
 | [semver](https://github.com/npm/node-semver) | 7.8.0 | ISC |
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
@@ -456,7 +456,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD |
 | [type-fest](https://github.com/sindresorhus/type-fest) | 0.13.1 | (MIT OR CC0-1.0) |
 | [type-is](https://github.com/jshttp/type-is) | 2.1.0 | MIT |
-| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.30 | MIT |
+| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.31 | MIT |
 | [typebox](https://github.com/sinclairzx81/typebox) | 1.3.7 | MIT |
 | [undici](https://undici.nodejs.org) | 8.9.0 | MIT |
 | [undici-types](https://undici.nodejs.org) | 6.21.0 | MIT |
@@ -4325,7 +4325,7 @@ Licence: MIT
 [object Object]
 ```
 
-### react 19.2.8
+### react 19.3.0
 
 <https://react.dev/>
 
@@ -4335,7 +4335,7 @@ Licence: MIT
 [object Object]
 ```
 
-### react-dom 19.2.8
+### react-dom 19.3.0
 
 <https://react.dev/>
 
@@ -4503,7 +4503,7 @@ Licence: MIT
 [object Object]
 ```
 
-### scheduler 0.27.0
+### scheduler 0.28.0
 
 <https://react.dev/>
 
@@ -4930,7 +4930,7 @@ Licence: MIT
 [object Object]
 ```
 
-### typebox 1.3.30
+### typebox 1.3.31
 
 <https://github.com/sinclairzx81/typebox>
 

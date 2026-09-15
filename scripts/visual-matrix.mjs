@@ -14,10 +14,13 @@
 // composer has to be hittable, the tab in front has to be inside the strip, and
 // nothing that should not scroll sideways may.
 //
-// What a machine cannot do is named at the end of the run rather than guessed
-// at: a screen reader, a monitor being unplugged, the OS reduced-motion switch
-// itself, the native file dialog, and whether a contrast ratio that passes the
-// arithmetic actually reads well.
+// The half of a screen reader that is a machine's is read too: the
+// accessibility tree through the DevTools protocol, which is where the
+// announcement comes from, and the media a person sets at the OS level
+// (reduced motion, more contrast, forced colours, both colour schemes) through
+// Playwright's emulation. What is left for a person is named at the end of the
+// run rather than guessed at: the speech itself, a monitor being unplugged, the
+// native file dialog, and whether a ratio that passes the arithmetic reads well.
 //
 // Nothing here is a substitute for a person at a screen. It is the half of the
 // matrix that can be re-run on any commit.
@@ -443,6 +446,281 @@ const standing = (window_) =>
       })(),
     };
   });
+
+/* -------------------------------------------------------------------------- */
+/* What a screen reader is told                                                */
+/* -------------------------------------------------------------------------- */
+
+/** The things a person is meant to act on. A control the tree gives no name is
+ *  one a screen reader reads as its role alone: "button". */
+const ACTABLE = new Set([
+  'button',
+  'textbox',
+  'searchbox',
+  'combobox',
+  'link',
+  'checkbox',
+  'radio',
+  'switch',
+  'tab',
+  'option',
+  'menuitem',
+  'slider',
+  'spinbutton',
+]);
+
+/** Roles that carry the row a control belongs to. Four "Add" buttons inside
+ *  four listitems read as four rows; four under one anonymous div do not. */
+const ROW_ROLES = new Set(['listitem', 'row', 'article', 'treeitem', 'option', 'menuitem']);
+
+/** The protocol session behind the tree. A relaunched app is a new window and
+ *  node ids do not survive a reload, so the session is taken again whenever the
+ *  window is not the one it was taken from. */
+let axClient = null;
+let axOn = null;
+
+async function axSession() {
+  if (axClient !== null && axOn === window_) return axClient;
+  const client = await window_.context().newCDPSession(window_);
+  await client.send('Accessibility.enable');
+  await client.send('DOM.enable');
+  axClient = client;
+  axOn = window_;
+  return client;
+}
+
+async function axBox(client, backend) {
+  if (typeof backend !== 'number') return null;
+  try {
+    const { model } = await client.send('DOM.getBoxModel', { backendNodeId: backend });
+    const b = model.border;
+    const box = { x: b[0], y: b[1], w: b[2] - b[0], h: b[7] - b[1] };
+    return box.w < 0.5 || box.h < 0.5 ? null : box;
+  } catch {
+    // A node with nothing drawn for it has no box, which is not a finding here.
+    return null;
+  }
+}
+
+/** One surface as the browser hands it to a screen reader, with the box each
+ *  control is drawn in. Read through the protocol rather than off attributes,
+ *  because the tree is what the screen reader is given: a `title` is a name
+ *  here, and a state the tree drops is a state nothing announces. */
+async function axSurface(selector) {
+  const client = await axSession();
+  const { root } = await client.send('DOM.getDocument', { depth: 1 });
+  const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+  if (nodeId === 0) return null;
+  const { node } = await client.send('DOM.describeNode', { nodeId });
+  const { nodes } = await client.send('Accessibility.queryAXTree', { backendNodeId: node.backendNodeId });
+  const by = new Map(nodes.map((one) => [one.nodeId, one]));
+  const items = [];
+  for (const one of nodes) {
+    const role = String(one.role?.value ?? '');
+    const box = ACTABLE.has(role) ? await axBox(client, one.backendDOMNodeId) : null;
+    items.push({
+      id: one.nodeId,
+      parent: one.parentId ?? null,
+      role,
+      name: String(one.name?.value ?? ''),
+      ignored: one.ignored === true,
+      props: Object.fromEntries((one.properties ?? []).map((p) => [p.name, p.value?.value])),
+      box,
+    });
+  }
+  const surface = items.find((one) => one.id === nodes[0]?.nodeId);
+  const whole =
+    surface === undefined ? null : await axBox(client, await client.send('DOM.describeNode', { nodeId }).then((one) => one.node.backendNodeId));
+  return { items, by, root: surface, whole };
+}
+
+/** The whole tree, for the one question a single surface cannot answer: what
+ *  else a screen reader can still reach while a modal sheet is up. */
+async function axWhole() {
+  const client = await axSession();
+  const { nodes } = await client.send('Accessibility.getFullAXTree');
+  const by = new Map(nodes.map((one) => [one.nodeId, one]));
+  const inside = new Set();
+  const walk = (node) => {
+    if (node === undefined || inside.has(node.nodeId)) return;
+    inside.add(node.nodeId);
+    for (const child of node.childIds ?? []) walk(by.get(child));
+  };
+  return { nodes, by, inside, walk };
+}
+
+/** Whether the tree lists what shares a parent in the order the app draws it:
+ *  down the page, or across it. A group of one says nothing either way. */
+function readingOrder(items) {
+  const groups = new Map();
+  for (const one of items) {
+    if (!ACTABLE.has(one.role) || one.ignored || one.box === null) continue;
+    const key = one.parent ?? 'root';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(one);
+  }
+  const broken = [];
+  let roomy = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    roomy += group.length;
+    const down = group.every((one, at) => at === 0 || one.box.y >= group[at - 1].box.y - 4);
+    const across = group.every((one, at) => at === 0 || one.box.x >= group[at - 1].box.x - 4);
+    if (down || across) continue;
+    for (let at = 1; at < group.length; at += 1) {
+      const was = group[at - 1];
+      const now = group[at];
+      const back = now.box.y < was.box.y - 4 || (Math.abs(now.box.y - was.box.y) <= 4 && now.box.x < was.box.x - 4);
+      if (!back) continue;
+      broken.push({
+        was: `${was.role} "${was.name.slice(0, 28)}"`,
+        now: `${now.role} "${now.name.slice(0, 28)}"`,
+        where: `drawn ${String(Math.round(was.box.x))},${String(Math.round(was.box.y))} then ${String(Math.round(now.box.x))},${String(Math.round(now.box.y))}`,
+      });
+    }
+  }
+  return { broken, roomy, groups: groups.size };
+}
+
+/** The nearest ancestor that gives a control its row, so a name repeated once
+ *  per row is a name a screen reader can still tell apart. */
+function rowAncestor(one, by) {
+  for (let node = by.get(one.parent); node !== undefined; node = by.get(node.parentId)) {
+    const role = String(node.role?.value ?? '');
+    if (ROW_ROLES.has(role)) return node.nodeId;
+    if (role === 'RootWebArea' || role === 'WebArea') return null;
+  }
+  return null;
+}
+
+/** Names that repeat with no row to tell them apart. A screen reader hears the
+ *  name and nothing else, so four buttons called "Add" are one button repeated
+ *  four times unless each sits in a row of its own. */
+function repeatedNames(items, by) {
+  const groups = new Map();
+  for (const one of items) {
+    if (one.ignored || one.name.trim() === '') continue;
+    const key = `${one.role}\u0000${one.name}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(one);
+  }
+  const found = [];
+  for (const [key, group] of groups) {
+    if (group.length < 2) continue;
+    const rows = group.map((one) => rowAncestor(one, by));
+    const toldApart = rows.every((row) => row !== null) && new Set(rows).size === rows.length;
+    if (toldApart) continue;
+    found.push({
+      role: key.split('\u0000')[0],
+      name: key.split('\u0000')[1],
+      n: group.length,
+      rowed: rows.filter((row) => row !== null).length,
+      where: group
+        .map((one) => (one.box === null ? 'off screen' : `${String(Math.round(one.box.x))},${String(Math.round(one.box.y))}`))
+        .join(' '),
+    });
+  }
+  return found;
+}
+
+/** The three things every surface has to get right, so no row repeats them. */
+async function axHolds(what, selector) {
+  const surface = await axSurface(selector);
+  if (surface === null) {
+    bad(`${what} is not in the accessibility tree at all`);
+    return null;
+  }
+  const actable = surface.items.filter((one) => ACTABLE.has(one.role) && !one.ignored);
+  const unnamed = actable.filter((one) => one.name.trim() === '');
+  verdict(
+    `${what}: every control has a role and a name (${String(actable.length)} read, ${String(unnamed.length)} with no name)`,
+    unnamed.length === 0,
+  );
+  for (const one of unnamed.slice(0, 6)) {
+    bad(`${what}: a ${one.role} is announced as nothing but "${one.role}"`);
+  }
+  const repeats = repeatedNames(actable, surface.by);
+  verdict(`${what}: a name tells two controls apart where it has to`, repeats.length === 0);
+  for (const one of repeats) {
+    bad(
+      `${what}: ${String(one.n)} × ${one.role} announced only as "${one.name}" (drawn at ${one.where})` +
+        `${one.rowed === 0 ? ', with no row around any of them to say which is which' : ''} — a screen reader hears the same word ${String(one.n)} times`,
+    );
+  }
+  const order = readingOrder(surface.items);
+  verdict(
+    `${what}: the tree reads in the order the app is drawn (${String(order.roomy)} controls in ${String(order.groups)} groups of siblings)`,
+    order.broken.length === 0,
+  );
+  for (const one of order.broken.slice(0, 4)) {
+    bad(`${what}: the tree reads ${one.was} before ${one.now}, which are ${one.where}`);
+  }
+  return surface;
+}
+
+/** A few lines of the snapshot Playwright builds from the same tree, so an
+ *  evidence folder holds what the announcement looks like and not only a count. */
+async function saysYaml(selector, lines = 12) {
+  const text = await window_.locator(selector).first().ariaSnapshot().catch(() => '');
+  return text.split('\n').slice(0, lines).join('\n');
+}
+
+/** The emulated media a person sets at the OS level, cleared before and after
+ *  every row that uses it, so no row measures the one before it. */
+async function media(features) {
+  await window_.emulateMedia({ colorScheme: null, contrast: null, forcedColors: null, reducedMotion: null, ...features });
+  await pause(300);
+}
+
+/** What a modal sheet does about the window behind it. Kept the standard way:
+ *  `aria-modal` on the dialog, plus a Tab trap in the DOM. The controls behind
+ *  the sheet stay in the accessibility tree, so a reader that honours the hint
+ *  ignores them and one that does not walks the whole window underneath. The
+ *  tree can say which the app relies on; it cannot say what VoiceOver does with
+ *  it, so that part stays a person's check. */
+async function behindSheet(report) {
+  const whole = await axWhole();
+  const dialog = whole.nodes.find((one) => String(one.role?.value) === 'dialog');
+  if (dialog === undefined) return null;
+  whole.walk(dialog);
+  const outside = whole.nodes.filter(
+    (one) => !whole.inside.has(one.nodeId) && ACTABLE.has(String(one.role?.value)) && one.ignored !== true,
+  );
+  const props = Object.fromEntries((dialog.properties ?? []).map((one) => [one.name, one.value?.value]));
+  const modal = props.modal === true;
+  /* Whether the window behind is actually gone from the tree, rather than told
+     to be ignored: the sheet's own siblings, and the app root they hang off. */
+  const gone = await window_.evaluate((selector) => {
+    const sheet = document.querySelector(selector);
+    const app = document.querySelector('main.app');
+    const gone = [];
+    for (const el of [app, ...document.querySelectorAll('body > *')]) {
+      if (el === null || el === sheet || el.contains(sheet) || sheet?.contains(el) === true) continue;
+      if (el.getAttribute('aria-hidden') === 'true' || el.inert === true || el.hasAttribute('inert')) {
+        gone.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0] ?? ''}`);
+      }
+    }
+    return { gone, appInert: app === null ? null : app.inert === true || app.getAttribute('aria-hidden') === 'true' };
+  }, report);
+  const accounted = modal || gone.appInert === true || gone.gone.length > 0;
+  verdict(
+    `what is behind the sheet is accounted for (${String(outside.length)} controls still in the tree; ${modal ? 'the dialog says it is modal' : 'it does not'})`,
+    accounted,
+  );
+  if (!accounted) {
+    bad(
+      `the sheet is a dialog with neither aria-modal nor a subtree taken out of the tree, so ${String(outside.length)} controls behind it (${outside
+        .slice(0, 4)
+        .map((one) => `"${String(one.name?.value ?? '').slice(0, 22)}"`)
+        .join(', ')}) are exposed to a screen reader with nothing telling it to ignore them`,
+    );
+  } else if (outside.length > 0) {
+    note(
+      `those ${String(outside.length)} controls stay in the accessibility tree and are meant to be ignored because the dialog says it is modal (nothing behind it is inert or hidden); whether a screen reader honours that is a person's check (below)`,
+    );
+  }
+  return { outside, gone, modal, dialog };
+}
 
 /* -------------------------------------------------------------------------- */
 /* The fixture: one folder, a long name, and enough in it to overflow          */
@@ -1885,6 +2163,695 @@ await row('overlay-connect', 'what the app says when nothing can answer', async 
 });
 
 /* -------------------------------------------------------------------------- */
+/* 8b. What the accessibility tree actually says                               */
+/* -------------------------------------------------------------------------- */
+
+/** A person with a screen reader is answered by the tree and by nothing else:
+ *  not the drawn text, not the tooltip, not the class. These rows read that
+ *  tree through the DevTools protocol, which is where the announcement comes
+ *  from, rather than reading attributes by hand. What is still a person's — the
+ *  speech itself — is named at the end of the run. */
+
+await row('a11y-first-screen', 'the tree a screen reader is given on the opening screen', async () => {
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  if ((await window_.locator('.picker').count()) === 0) {
+    // Back to the opening screen the way the app offers: the project menu's own
+    // way out is a reload into the picker.
+    await tell(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.reload();
+      return true;
+    });
+    await window_.waitForLoadState('domcontentloaded');
+    await until(async () => (await window_.locator('.picker .pickerrow__open').count()) > 0, 60_000);
+  }
+  await shot('a11y-first-screen');
+  const surface = await axHolds('the opening screen', '.picker');
+  if (surface === null) return;
+  const row = surface.items.find((one) => one.role === 'listitem');
+  note(`the first row is announced as: ${JSON.stringify(surface.items.filter((one) => ACTABLE.has(one.role)).map((one) => `${one.role} "${one.name}"`).slice(0, 4))}`);
+  verdict('the folder list is announced as a list somebody can walk', row !== undefined);
+  const list = surface.items.find((one) => one.role === 'list');
+  verdict(
+    `and it is named (${JSON.stringify(list?.name ?? 'no list name')})`,
+    list !== undefined && String(list.name).trim() !== '',
+  );
+  note(`what the surface reads as:\n${await saysYaml('.picker', 10)}`);
+});
+
+await row('a11y-conversation', 'an open conversation: the transcript, the strip and the composer', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  if ((await window_.locator('.tabs__open').count()) === 0) {
+    bad('no conversation is open, so there is nothing to read');
+    return;
+  }
+  await shot('a11y-conversation');
+  await axHolds('the composer', '.composer');
+
+  /* The tab strip, read as a tablist: one selected tab, and a name for each
+     that tells two differs-apart-by-a-tail conversations apart. */
+  const strip = await axSurface('.tabs__strip');
+  if (strip === null) {
+    bad('the tab strip is not in the accessibility tree');
+    return;
+  }
+  const list = strip.items.find((one) => one.role === 'tablist');
+  verdict('the strip is announced as a tablist', list !== undefined);
+  if (list !== undefined) {
+    verdict(
+      `the tablist is named (${JSON.stringify(list.name)})`,
+      String(list.name).trim() !== '',
+    );
+    note(`the tablist says: ${JSON.stringify(list.props)}`);
+  }
+  const tabs = strip.items.filter((one) => one.role === 'tab' && !one.ignored);
+  const chosen = tabs.filter((one) => one.props.selected === true);
+  verdict(
+    `exactly one of the ${String(tabs.length)} tabs is reported selected (${String(chosen.length)})`,
+    tabs.length > 0 && chosen.length === 1,
+  );
+  if (chosen.length !== 1) {
+    bad(`the strip reports ${String(chosen.length)} selected tabs, so a screen reader cannot say which conversation is in front`);
+  }
+  const front = await window_.evaluate(() => document.querySelector('.tabs__tab--here .tabs__open')?.getAttribute('aria-label') ?? '');
+  if (front !== '' && chosen.length === 1) {
+    verdict(
+      `the tab reported selected is the one drawn in front ("${chosen[0].name.slice(0, 40)}")`,
+      chosen[0].name === front,
+    );
+  }
+  const named = tabs.filter((one) => one.name.trim() === '');
+  verdict(`every tab carries its conversation's name (${String(tabs.length - named.length)} of ${String(tabs.length)})`, named.length === 0);
+  const same = tabs.filter((one) => one.name === tabs[0]?.name).length;
+  verdict(
+    `no two tabs are announced identically (${String(same)} of ${String(tabs.length)} share the first name)`,
+    tabs.length < 2 || same < tabs.length,
+  );
+  note(`the strip reads as:\n${await saysYaml('.tabs', 8)}`);
+});
+
+await row('a11y-two-titles', 'two conversations whose names differ only near the end', async () => {
+  await ensureProjectOpen();
+  const pair = [
+    'A conversation about the checkout flow, which will be redesigned in the spring and shipped in June',
+    'A conversation about the checkout flow, which will be redesigned in the spring and shipped in July',
+  ];
+  const open = () =>
+    window_.locator('.tabs__open').evaluateAll((all) => all.map((one) => one.getAttribute('aria-label') ?? ''));
+  const labels = await open();
+  const missing = pair.filter((title) => !labels.includes(title));
+  if (missing.length > 0) {
+    /* The app will not open a second conversation on top of an untouched one,
+       so the first ask of the run has to be made before another is started.
+       The pair is only made when this profile does not already hold it. */
+    if (!labels.some((one) => one !== '' && one !== 'New conversation')) {
+      await window_.locator('.composer__input').fill('a first conversation, so the next one can be started');
+      await window_.locator('.composer__send').first().click();
+      await until(async () => (await open()).some((one) => one !== '' && one !== 'New conversation'), 20_000);
+      await until(async () => (await window_.locator('.connectmodal').count()) > 0, 3_000);
+      await dismissConnect();
+    }
+    for (const title of missing) {
+      if (!(await newConversation())) {
+        bad(`a conversation could not be started, so the collision between two names that differ only at the end could not be made`);
+        return;
+      }
+      await window_.locator('.composer__input').fill(title);
+      await window_.locator('.composer__send').first().click();
+      await until(async () => (await open()).includes(title), 20_000);
+      await until(async () => (await window_.locator('.connectmodal').count()) > 0, 3_000);
+      await dismissConnect();
+    }
+  }
+  await shot('a11y-two-titles');
+  const strip = await axSurface('.tabs__strip');
+  if (strip === null) {
+    bad('the tab strip is not in the accessibility tree');
+    return;
+  }
+  const tabs = strip.items.filter((one) => one.role === 'tab' && !one.ignored);
+  const mine = tabs.filter((one) => one.name.includes('A conversation about the checkout flow'));
+  verdict(`both asks are in the strip (${String(mine.length)} found)`, mine.length >= 2);
+  if (mine.length >= 2) {
+    const names = new Set(mine.map((one) => one.name));
+    verdict(
+      `the tree gives them different names, so a screen reader can tell them apart after 80 characters`,
+      names.size === mine.length,
+    );
+    if (names.size !== mine.length) {
+      const one = mine[0].name;
+      bad(
+        `both are announced as "${one.slice(0, 60)}", which is the same words until the last word: a screen reader reads one conversation twice`,
+      );
+    }
+    note(`the two names differ at character ${String(Math.max(...mine.map((one) => {
+      const other = mine.find((each) => each !== one)?.name ?? '';
+      let at = 0;
+      while (at < one.name.length && one.name[at] === other[at]) at += 1;
+      return at + 1;
+    })))}`);
+  }
+  const chosen = tabs.filter((one) => one.props.selected === true);
+  verdict(`and the one in front is still reported selected (${String(chosen.length)})`, chosen.length === 1);
+});
+
+await row('a11y-settings-sheet', 'the settings sheet as a dialog, and what it hides', async () => {
+  await ensureProjectOpen();
+  await openSettings();
+  await pause(400);
+  await shot('a11y-settings-sheet');
+  const whole = await axWhole();
+  const dialog = whole.nodes.find((one) => String(one.role?.value) === 'dialog');
+  verdict('the sheet is announced as a dialog', dialog !== undefined);
+  if (dialog === undefined) {
+    bad('the settings sheet is drawn but is not a dialog in the tree');
+    await escapeFrom('.settings');
+    return;
+  }
+  verdict(
+    `it is named (${JSON.stringify(String(dialog.name?.value ?? ''))})`,
+    String(dialog.name?.value ?? '').trim() !== '',
+  );
+  verdict(
+    'it is reported modal',
+    (dialog.properties ?? []).some((one) => one.name === 'modal' && one.value?.value === true),
+  );
+  await behindSheet('.settings');
+  const found = await axHolds('the sheet', '.settings');
+  if (found !== null) {
+    const tablist = found.items.filter((one) => one.role === 'tab' || one.role === 'tablist');
+    note(`the sheet holds ${String(tablist.length)} tablist nodes; its pages are reached from the navigation: ${JSON.stringify(found.items.find((one) => one.role === 'navigation')?.name ?? 'unnamed')}`);
+  }
+  await escapeFrom('.settings');
+});
+
+await row('a11y-add-ons', 'the add-ons screen: every row and the button that adds it', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  const opener = window_.locator('.shelf__more', { hasText: /^Add more$/ }).first();
+  if ((await opener.count()) === 0) {
+    bad('the sidebar offers no way to the add-ons screen');
+    return;
+  }
+  await opener.click();
+  const arrived = await until(async () => (await window_.locator('.addmore').count()) > 0, 20_000);
+  if (!arrived) {
+    bad('pressing Add more did not draw the screen');
+    return;
+  }
+  await pause(700);
+  await shot('a11y-add-ons');
+  const whole = await axWhole();
+  const dialog = whole.nodes.find((one) => String(one.role?.value) === 'dialog' && /add more/i.test(String(one.name?.value ?? '')));
+  verdict('the screen is announced as a dialog with its own name', dialog !== undefined);
+  await behindSheet('.addmore');
+  const surface = await axHolds('the add-ons screen', '.addmore');
+  if (surface === null) return;
+  /* What a screen reader hears on each add button: the name, and the row it
+     sits in. Four "Add" buttons are four rows only if the tree says so. */
+  const adds = surface.items.filter((one) => one.role === 'button' && /^(Add|Remove)/.test(one.name));
+  for (const one of adds.slice(0, 6)) {
+    const row = rowAncestor(one, surface.by);
+    const beside = row === null ? [] : surface.items.filter((each) => each.parent === row);
+    const said = beside.map((each) => `${each.role} "${each.name.slice(0, 28)}"`).join(', ');
+    note(`"${one.name}" is announced inside: ${said === '' ? 'nothing — it has no row' : said}`);
+  }
+  note(`the screen reads as:\n${await saysYaml('.addmore', 14)}`);
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.addmore').count()) === 0, 10_000);
+});
+
+await row('a11y-disabled-and-states', 'a disabled control, and the state marks, as the tree reports them', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  const input = window_.locator('.composer__input');
+  await input.fill('');
+  await pause(400);
+  const client = await axSession();
+  const { root } = await client.send('DOM.getDocument', { depth: 1 });
+  const findSend = async () => {
+    const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.composer__send' });
+    if (nodeId === 0) return null;
+    const { node } = await client.send('DOM.describeNode', { nodeId });
+    const { nodes } = await client.send('Accessibility.getPartialAXTree', { backendNodeId: node.backendNodeId, fetchRelatives: false });
+    const one = nodes[0];
+    return {
+      role: String(one?.role?.value ?? ''),
+      name: String(one?.name?.value ?? ''),
+      disabled: (one?.properties ?? []).find((each) => each.name === 'disabled')?.value?.value,
+    };
+  };
+  const off = await findSend();
+  await shot('a11y-disabled');
+  if (off === null) {
+    bad('there is no send control to read');
+    return;
+  }
+  verdict(
+    `the Send control with nothing to send is reported disabled (${String(off.role)} "${off.name}", disabled=${String(off.disabled)})`,
+    off.disabled === true,
+  );
+  if (off.disabled !== true) {
+    bad('Send is inert and looks inert, and the tree does not say so: a screen reader announces an available button that does nothing');
+  }
+  const domOff = await window_.evaluate(() => document.querySelector('.composer__send')?.disabled === true);
+  verdict('and it is really inert, so the two agree', domOff === true);
+  await input.fill('a sentence that gives Send something to do');
+  await pause(300);
+  const on = await findSend();
+  verdict(
+    `with a sentence in the box it is reported available (disabled=${String(on?.disabled)})`,
+    on?.disabled !== true,
+  );
+  if (on?.disabled === true) {
+    bad('Send has something to send and the tree still calls it disabled, so a screen reader is told the button cannot be used');
+  }
+  await input.fill('');
+  await pause(300);
+
+  /* Every control the DOM has switched off anywhere on this screen, checked
+     against the tree one by one: a control that is inert but announced as
+     available is the same defect as one that is disabled and looks enabled. */
+  const marked = await window_.evaluate(() => {
+    const out = [];
+    let at = 0;
+    for (const el of document.querySelectorAll(
+      'button, input, select, textarea, [role="button"], [role="tab"], [role="option"], [role="radio"], [role="checkbox"], [role="switch"], [role="menuitem"]',
+    )) {
+      const off = el.disabled === true || el.getAttribute('aria-disabled') === 'true';
+      if (!off) continue;
+      el.setAttribute('data-vm-off', String(at));
+      out.push({ key: String(at), what: `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0] ?? ''}` });
+      at += 1;
+    }
+    return out;
+  });
+  let agreed = 0;
+  for (const one of marked) {
+    const { nodeId } = await client.send('DOM.querySelector', { nodeId: root.nodeId, selector: `[data-vm-off="${one.key}"]` });
+    if (nodeId === 0) continue;
+    const { node } = await client.send('DOM.describeNode', { nodeId });
+    const { nodes } = await client.send('Accessibility.getPartialAXTree', { backendNodeId: node.backendNodeId, fetchRelatives: false });
+    const said = (nodes[0]?.properties ?? []).find((each) => each.name === 'disabled')?.value?.value;
+    if (said === true) agreed += 1;
+    else bad(`${one.what} is switched off and the tree does not say so`);
+  }
+  await window_.evaluate(() => {
+    for (const el of document.querySelectorAll('[data-vm-off]')) el.removeAttribute('data-vm-off');
+  });
+  verdict(
+    `every control switched off on this screen is announced as such (${String(agreed)} of ${String(marked.length)})`,
+    agreed === marked.length,
+  );
+
+  /* The state marks on a tab. A conversation waiting on somebody is the one
+     state that cannot move on by itself, so it has to be more than a colour. */
+  const marks = await window_.evaluate(() =>
+    [...document.querySelectorAll('.tabs__mark')].map((one) => ({
+      label: one.getAttribute('aria-label') ?? '',
+      role: one.getAttribute('role') ?? '',
+      colour: getComputedStyle(one).backgroundColor,
+    })),
+  );
+  if (marks.length === 0) {
+    note('no tab carries a state mark on this screen, so none was read');
+  } else {
+    const silent = marks.filter((one) => one.label.trim() === '');
+    verdict(
+      `every state mark on a tab says what it means (${String(marks.length - silent.length)} of ${String(marks.length)})`,
+      silent.length === 0,
+    );
+    for (const one of silent) bad(`a tab's state is drawn in ${one.colour} and announced as nothing`);
+    note(`the marks read: ${marks.map((one) => `"${one.label}" as a ${one.role}`).join(', ')}`);
+  }
+});
+
+await row('a11y-order-versus-drawing', 'the order the tree reads against the order the window is drawn', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  // Nothing focused: a focus ring is a difference the eye sees, and this row is
+  // about the eye's order, so the comparison is made with the page at rest.
+  await window_.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  await pause(300);
+  await shot('a11y-order-versus-drawing');
+  await axHolds('the whole column', '.app__column');
+  await axHolds('the sidebar', '.shelf');
+  await axHolds('the file panel', '.filespanel');
+  const composer = await axHolds('the composer', '.composer');
+  if (composer !== null) {
+    /* Down the box, then across the row of controls: the reading order is the
+       box first, and only then what acts on it. */
+    const read = composer.items.filter((one) => ACTABLE.has(one.role) && !one.ignored);
+    const firstIsBox = read[0]?.role === 'textbox';
+    verdict(
+      `the box is read before the controls that act on it (first is ${String(read[0]?.role ?? 'nothing')})`,
+      firstIsBox,
+    );
+    if (!firstIsBox) {
+      bad(`a screen reader reaches ${String(read[0]?.role ?? 'nothing')} before the box somebody types in`);
+    }
+    note(`the composer reads: ${read.map((one) => `${one.role} "${one.name.slice(0, 22)}"`).join(' → ')}`);
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8c. The media a person sets at the OS level                                 */
+/* -------------------------------------------------------------------------- */
+
+await row('media-reduced-motion', 'prefers-reduced-motion: reduce, asked for the way the OS asks', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  const read = () =>
+    window_.evaluate(() => {
+      const moving = [];
+      for (const el of document.querySelectorAll('main.app, main.app *')) {
+        const s = getComputedStyle(el);
+        for (const value of [s.transitionDuration, s.animationDuration]) {
+          for (const piece of value.split(',')) {
+            const seconds = piece.trim().endsWith('ms') ? Number.parseFloat(piece) / 1000 : Number.parseFloat(piece);
+            if (Number.isFinite(seconds) && seconds > 0.001) {
+              moving.push(`${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0] ?? ''} ${piece}`);
+              break;
+            }
+          }
+        }
+      }
+      return {
+        matches: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+        moving: moving.length,
+        sample: moving.slice(0, 6),
+        tokens: getComputedStyle(document.documentElement).getPropertyValue('--dur-ui').trim(),
+      };
+    });
+  const before = await read();
+  verdict(`nothing asked for yet: the renderer is not told (${String(before.matches)})`, before.matches === false);
+  note(`${String(before.moving)} elements carry a duration of their own before the request`);
+  await media({ reducedMotion: 'reduce' });
+  const after = await read();
+  await shot('media-reduced-motion');
+  verdict('the renderer is told reduced motion is wanted', after.matches === true);
+  verdict(
+    `everything that was moving stops (${String(before.moving)} moving → ${String(after.moving)})`,
+    after.moving === 0,
+  );
+  if (after.moving > 0) {
+    bad(`${String(after.moving)} elements still animate under reduced motion: ${after.sample.join(', ')}`);
+  }
+  note(`the app's own timing tokens are untouched (--dur-ui ${after.tokens}); the switch is the media query, not the setting`);
+  await media({});
+});
+
+await row('media-contrast', 'prefers-contrast: more, measured against what the app already does with it', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  /* Every piece of text on screen at the ratio it actually reads at, against
+     the colour it actually sits on, including what has been drawn over
+     something translucent. The faintest one is the one this row is about. */
+  const faintest = () =>
+    window_.evaluate(() => {
+      const lum = (rgb) => {
+        const match = /rgba?\(([^)]+)\)/.exec(rgb);
+        if (match === null) return null;
+        const parts = match[1].split(',').map(Number);
+        const channel = (value) => {
+          const v = value / 255;
+          return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        };
+        return 0.2126 * channel(parts[0]) + 0.7152 * channel(parts[1]) + 0.0722 * channel(parts[2]);
+      };
+      const groundSeen = (el) => {
+        const layers = [];
+        for (let node = el; node !== null; node = node.parentElement) {
+          const match = /rgba?\(([^)]+)\)/.exec(getComputedStyle(node).backgroundColor);
+          if (match === null) continue;
+          const parts = match[1].split(',').map(Number);
+          const alpha = parts.length > 3 ? parts[3] : 1;
+          if (alpha > 0) layers.push({ r: parts[0], g: parts[1], b: parts[2], a: alpha });
+        }
+        let base = { r: 255, g: 255, b: 255 };
+        for (let at = layers.length - 1; at >= 0; at -= 1) {
+          const front = layers[at];
+          base = {
+            r: front.r * front.a + base.r * (1 - front.a),
+            g: front.g * front.a + base.g * (1 - front.a),
+            b: front.b * front.a + base.b * (1 - front.a),
+          };
+        }
+        return base;
+      };
+      const out = [];
+      for (const el of document.querySelectorAll('main.app *')) {
+        const text = (el.textContent ?? '').trim();
+        if (text === '' || el.children.length > 0) continue;
+        const s = getComputedStyle(el);
+        if (s.visibility === 'hidden' || s.display === 'none' || Number.parseFloat(s.opacity) < 0.1) continue;
+        const box = el.getBoundingClientRect();
+        if (box.width < 4 || box.height < 4) continue;
+        const ink = (() => {
+          const match = /rgba?\(([^)]+)\)/.exec(s.color);
+          if (match === null) return null;
+          const parts = match[1].split(',').map(Number);
+          return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+        })();
+        if (ink === null || ink.a < 0.05) continue;
+        const back = groundSeen(el);
+        const over = {
+          r: ink.r * ink.a + back.r * (1 - ink.a),
+          g: ink.g * ink.a + back.g * (1 - ink.a),
+          b: ink.b * ink.a + back.b * (1 - ink.a),
+        };
+        const a = lum(`rgb(${String(over.r)}, ${String(over.g)}, ${String(over.b)})`);
+        const b = lum(`rgb(${String(back.r)}, ${String(back.g)}, ${String(back.b)})`);
+        if (a === null || b === null) continue;
+        const size = Number.parseFloat(s.fontSize);
+        const weight = Number.parseInt(s.fontWeight, 10);
+        out.push({
+          what: `${el.tagName.toLowerCase()}.${String(el.className).split(' ')[0] ?? ''}`,
+          text: text.slice(0, 28),
+          ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
+          needs: size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5,
+          ink: s.color,
+        });
+      }
+      return out.sort((one, two) => one.ratio - two.ratio);
+    });
+
+  const plain = await faintest();
+  const worstPlain = plain[0];
+  const tokens = () =>
+    window_.evaluate(() => {
+      const s = getComputedStyle(document.documentElement);
+      return {
+        bg: s.getPropertyValue('--bg').trim(),
+        border: s.getPropertyValue('--border').trim(),
+        faint: s.getPropertyValue('--text-faint').trim(),
+      };
+    });
+  const before = await tokens();
+  await media({ contrast: 'more' });
+  const asking = await window_.evaluate(() => window.matchMedia('(prefers-contrast: more)').matches);
+  verdict('the renderer is told more contrast is wanted', asking === true);
+  await shot('media-contrast');
+  const more = await faintest();
+  const worstMore = more[0];
+  const answered = await tokens();
+  /* What the app does with the request: the media query reaches it and the
+     palette does not move. Its own Contrast setting is what pushes every pair
+     to 7:1, so a person who asked the OS for more contrast gets nothing. */
+  const unchanged =
+    answered.bg === before.bg && answered.border === before.border && answered.faint === before.faint;
+  verdict(
+    `the app answers the request (${unchanged ? 'it does not: --bg stays ' + before.bg : '--bg ' + before.bg + ' → ' + answered.bg})`,
+    !unchanged,
+  );
+  if (unchanged) {
+    bad(
+      `a person who turned on Increase Contrast in System Settings gets the same palette as before (--bg ${answered.bg}, --text-faint ${answered.faint}): nothing in the stylesheet answers prefers-contrast, so the app's own Contrast setting is the only way to ask`,
+    );
+  }
+  const harder = worstMore !== undefined && worstPlain !== undefined && worstMore.ratio < worstPlain.ratio - 0.01;
+  verdict(
+    `and asking for more contrast never makes anything harder to read (faintest ${String(worstPlain?.ratio)}:1 → ${String(worstMore?.ratio)}:1)`,
+    !harder,
+  );
+  if (harder) {
+    bad(
+      `the faintest text (${String(worstMore.what)} "${worstMore.text}") reads at ${String(worstMore.ratio)}:1 with more contrast asked for, against ${String(worstPlain.ratio)}:1 without it`,
+    );
+  }
+  const fails = more.filter((one) => one.ratio < one.needs);
+  verdict(
+    `with more contrast asked for, nothing on this screen is under the ratio it needs (${String(fails.length)} of ${String(more.length)} below)`,
+    fails.length === 0,
+  );
+  for (const one of fails.slice(0, 6)) {
+    bad(`${one.what} "${one.text}" reads at ${String(one.ratio)}:1 where ${String(one.needs)}:1 is needed, with more contrast asked for`);
+  }
+  /* The mechanism the app does have, so the gap above is a gap and not a
+     missing feature: its own Contrast setting does move the palette. */
+  await openSettings();
+  const high = window_.locator('[role="radio"]', { hasText: /^High$/ }).first();
+  if ((await high.count()) === 0) {
+    note('the appearance band offers no Contrast setting, so there is nothing to compare against');
+  } else {
+    await high.click();
+    await pause(300);
+    const raised = await tokens();
+    verdict(
+      `the app's own High contrast does move the palette (--bg ${before.bg} → ${raised.bg}, --text-faint ${before.faint} → ${raised.faint})`,
+      raised.bg !== before.bg || raised.faint !== before.faint,
+    );
+    const normal = window_.locator('[role="radio"]', { hasText: /^Normal$/ }).first();
+    if ((await normal.count()) > 0) await normal.click();
+    await pause(200);
+  }
+  await escapeFrom('.settings');
+  note(`the app's own answer to more contrast is the Contrast setting in Appearance (7:1 everywhere); ${String(more.length)} pieces of text were measured.`);
+  await media({});
+});
+
+await row('media-forced-colors', 'forced-colors: active, where a state that was a colour is taken away', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  const state = () =>
+    window_.evaluate(() => {
+      const groundSeen = (el) => {
+        for (let node = el; node !== null; node = node.parentElement) {
+          const match = /rgba?\(([^)]+)\)/.exec(getComputedStyle(node).backgroundColor);
+          if (match === null) continue;
+          const parts = match[1].split(',').map(Number);
+          if ((parts.length > 3 ? parts[3] : 1) > 0) return `${String(parts[0])},${String(parts[1])},${String(parts[2])}`;
+        }
+        return '255,255,255';
+      };
+      const read = (el) => {
+        if (el === null) return null;
+        const s = getComputedStyle(el);
+        // Appearance only: whether the attribute is there is what the tree row
+        // checks. This one is about what the eye gets.
+        return `${s.color} on ${groundSeen(el)}, border ${s.borderColor}, ${s.boxShadow === 'none' ? 'no shadow' : 'a shadow'}, weight ${s.fontWeight}, opacity ${s.opacity}`;
+      };
+      const here = document.querySelector('.tabs__tab--here .tabs__open');
+      const away = document.querySelector('.tabs__tab:not(.tabs__tab--here) .tabs__open');
+      return {
+        matches: window.matchMedia('(forced-colors: active)').matches,
+        tabs: document.querySelectorAll('.tabs__tab').length,
+        send: read(document.querySelector('.composer__send')),
+        tabHere: read(here),
+        tabAway: read(away),
+        tabHereBox: read(document.querySelector('.tabs__tab--here')),
+        tabAwayBox: read(document.querySelector('.tabs__tab:not(.tabs__tab--here)')),
+      };
+    });
+  /* Two conversations, because the strip can only say which one is in front if
+     there is another one to be behind it. */
+  await window_.locator('.composer__input').fill('');
+  const already = await window_.locator('.tabs__tab').count();
+  if (already < 2) {
+    await window_.locator('.composer__input').fill('a first conversation, so the strip has something to compare');
+    await window_.locator('.composer__send').first().click();
+    await until(async () => (await window_.locator('.tabs__tab').count()) > 0, 20_000);
+    await until(async () => (await window_.locator('.connectmodal').count()) > 0, 3_000);
+    await dismissConnect();
+    if (!(await newConversation())) {
+      bad('a second conversation could not be started, so the strip has nothing to say which tab is in front');
+      return;
+    }
+  }
+  await window_.locator('.composer__input').fill('');
+  await pause(400);
+  const plain = await state();
+  note(`with no colour forced: the tab in front reads ${String(plain.tabHereBox)} against ${String(plain.tabAwayBox)}`);
+  await media({ forcedColors: 'active' });
+  await window_.locator('.composer__input').fill('');
+  await pause(300);
+  const forced = await state();
+  await shot('media-forced-colors');
+  verdict('the renderer is told colour has been forced', forced.matches === true);
+  verdict(`the strip holds more than one conversation to compare (${String(forced.tabs)})`, forced.tabs > 1);
+
+  /* Two things have to survive a palette the app does not control: the control
+     in front in the strip, and the difference between a control that can be
+     used and one that cannot. */
+  verdict(
+    `the tab in front still reads differently from the rest (here ${String(forced.tabHere)}, away ${String(forced.tabAway)})`,
+    forced.tabHere !== forced.tabAway || forced.tabHereBox !== forced.tabAwayBox,
+  );
+  if (forced.tabHere === forced.tabAway && forced.tabHereBox === forced.tabAwayBox) {
+    bad('with colour forced, the conversation in front is drawn exactly like the others; nothing on screen says which one is open');
+  } else if (forced.tabHere.replace(/weight \d+/, '') === forced.tabAway.replace(/weight \d+/, '')) {
+    note('under forced colours the tab in front keeps no surface of its own: what tells it apart is the weight of its name and nothing else');
+  }
+  await window_.locator('.composer__input').fill('a sentence');
+  await pause(350);
+  const busy = await state();
+  await window_.locator('.composer__input').fill('');
+  await pause(350);
+  const idle = await state();
+  verdict(
+    `an available Send still reads differently from an inert one (available ${String(busy.send)}, inert ${String(idle.send)})`,
+    busy.send !== idle.send,
+  );
+  if (busy.send === idle.send) {
+    bad('with colour forced, Send with a sentence and Send with nothing are drawn identically: the disabled state is carried by colour alone');
+  }
+  note(`under forced colours the app's own tokens are unchanged (--bg is the palette's), and the platform paints the surfaces: what is measured here is the renderer's answer to the emulation, not what macOS itself draws.`);
+  await media({});
+});
+
+await row('media-color-scheme-live', 'the computer changing its mind while the window is open', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  await chooseTheme('System');
+  const palette = () =>
+    window_.evaluate(() => ({
+      asked: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+      bg: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(),
+      painted: getComputedStyle(document.body).backgroundColor,
+      mark: document.documentElement.getAttribute('data-theme'),
+    }));
+  await media({ colorScheme: 'light' });
+  const light = await palette();
+  await media({ colorScheme: 'dark' });
+  const dark = await palette();
+  await shot('media-color-scheme-live');
+  verdict('following the computer: nothing is stamped on the document', dark.mark === null && light.mark === null);
+  verdict(`a light computer draws the light palette (${light.bg})`, light.bg !== dark.bg);
+  verdict(
+    `and a dark computer draws the dark one, without a relaunch (${dark.bg})`,
+    dark.bg !== light.bg && dark.asked === 'dark',
+  );
+  if (dark.bg === light.bg) {
+    bad(`the computer was told dark and the palette is still ${dark.bg}, so a change at the OS level needs a relaunch to be seen`);
+  }
+  /* And a choice somebody made is not overridden by the computer. */
+  await chooseTheme('Light');
+  await media({ colorScheme: 'dark' });
+  const kept = await palette();
+  verdict(
+    `a palette somebody chose holds against a dark computer (marked ${String(kept.mark)}, --bg ${kept.bg})`,
+    kept.mark === 'light' && kept.bg === light.bg,
+  );
+  if (kept.mark !== 'light') {
+    bad(`the computer was told dark and a hand-picked Light became ${String(kept.mark)}: the choice was not kept`);
+  }
+  await chooseTheme('System');
+  await media({});
+  await escapeFrom('.settings');
+});
+
+/* -------------------------------------------------------------------------- */
 /* 9. The file tree, the terminal, named things                                */
 /* -------------------------------------------------------------------------- */
 
@@ -2294,10 +3261,15 @@ if (broken.length > 0) {
 console.log(`Screenshots and results: ${scratch.slice(root.length)}`);
 console.log(
   '\nA machine cannot check, and this run does not claim:\n' +
-    '  · a screen reader — VoiceOver reading the window, the tab strip and the overlays.\n' +
+    '  · what a screen reader says out loud. The tree is read above — roles, names, order, selected,\n' +
+    '    disabled, and what a modal accounts for — but the speech, the verbosity and the rotor are\n' +
+    "    VoiceOver's, and a name that reads badly is a person's judgement.\n" +
     '  · a monitor being unplugged while the window is open (the off-screen restore is above).\n' +
-    '  · the OS reduced-motion switch itself; the renderer was told instead.\n' +
+    '  · the OS switches themselves: the settings in System Settings are emulated through the protocol,\n' +
+    '    which is the same signal the CSS and the renderer see, but not the act of changing them.\n' +
     '  · the native file dialog, and a native page view under an overlay.\n' +
-    '  · whether a ratio that passes the arithmetic reads well to an eye.\n',
+    '  · whether a ratio that passes the arithmetic reads well to an eye.\n' +
+    '  · the platform\'s own high-contrast palette: forced-colors is emulated, so what is measured is the\n' +
+    '    renderer\'s answer to it, not what macOS draws.\n',
 );
 process.exit(failed === 0 ? 0 : 1);

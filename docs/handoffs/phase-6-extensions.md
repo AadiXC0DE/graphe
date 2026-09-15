@@ -1,8 +1,9 @@
 # Phase 6 handoff: a complete, honest extension host
 
-Findings: E01 done (dialogs), E03 done (phase 1), E04 done, E05 done, E06
-open, E07 open, E08 done (phase 7), E09 done (tool names; custom renderers and
-commands open), E10 done, E11 open, E12 open.
+Findings: E01 done (dialogs), E02 open by one step, E03 done (phase 1), E04 done,
+E05 done, E06 done (phase 7), E07 done (phase 7), E08 done (phase 7), E09 done
+(tool names; custom renderers open), E10 done, E11 open (the bundled route), E12
+open. Read again on this tree on 2026-09-15.
 
 ## Done
 
@@ -138,7 +139,7 @@ attached to while every row of the transcript still read as Graphe's.
   with its sentence.
 - The name itself never changes, so an old transcript still reads as the tool
   that ran.
-- Evidence: `tests/tool-conflicts.test.ts` (10). The rule first: an add-on's
+- Evidence: `tests/tool-conflicts.test.ts` (14, run here). The rule first: an add-on's
   `task` wins and Graphe's is left out; `bash` and `read` stay ours and come off
   the add-on; a name nobody wants twice is kept in silence; Graphe naming one
   twice keeps it once; the first add-on to ask wins. Then the registry, with the
@@ -184,12 +185,52 @@ loaded.
   `Installed; reload this chat to activate` after one; and a session built again
   at the same address comes back with the same transcript, the same model and the
   same permission rung — the test shows the rung has to be carried across,
-  because a fresh session starts at `asking`. `tests/packages.test.ts` (50) holds
+  because a fresh session starts at `asking`. `tests/packages.test.ts` (65) holds
   the shelf: the version before and after, an install told from an update by the
   words, one at a time in the order asked for, a failed install not stopping the
   next, a watcher taken off, the installer's own progress through the same
   channel, and the change reported to a conversation in the words that say what
   to do about it.
+
+## The commands, the eight states, and the install that cannot be stopped
+
+**An add-on's commands are in the composer's picker, and they run as commands.**
+`rowsForThePicker` (`electron/main.ts:579`, called at `:9396`) reads them live from
+the session in front and lists them beside the ways of working, each row saying
+where it came from; a typed `/name` goes to the add-on when only the add-on
+answers to it, to a workflow when only one does, and to the one in front when both
+do, and words that match nothing are not sent to a model at all. A command whose
+add-on is not loaded here is forgotten, and one that left during a queued wait is
+answered — `/${name} is not here any more` (`:10956`) — rather than sent as prose.
+`tests/extension-commands.test.ts` (13) holds all of it, including a real chat
+where a registered command runs in Pi's command context.
+
+**The eight states are computed from facts, not from a screen's guess.**
+`src/agent/pi/extension-states.ts:19` is the whole vocabulary — `discovered`,
+`needs trust`, `installed`, `active here`, `activation pending`, `disabled`,
+`incompatible`, `failed` — and `stateOf` (`:65`) decides one per row in one
+order: a file the package's own manifest names and this disk does not have
+(`incompatible`), then a load failure (`failed`), then a trust decision nobody
+has made (`needs trust`), then a policy that says off (`disabled`), then the
+truth that it is loaded here (`active here`), then a change that landed while a
+chat was open (`activation pending`), then where it came from (`installed`, or
+`discovered` for a file loose on this computer). Those facts come from this
+computer's files, the project's own trust store, where Pi puts an npm package,
+what an open conversation's loader actually did with it, and the ids a change
+landed on. With no conversation open nothing is loaded anywhere, so a row shows
+its install state and its own sentence says so.
+`tests/extension-states.test.ts` (13) and `tests/addons-screen.test.ts` (10) are
+the evidence.
+
+**Installing add-ons without host npm (E11) is one step short.** The press asks
+`npmOnPath()` first and says "Adding an add-on needs npm, and this Mac does not
+have it on the path." in its own words rather than npm's, and the screen says so
+before anybody presses anything: one line, the page that installs Node, and
+`brew install node` offered only where there is a Homebrew to run it with
+(`npmSetup`, `NODE_DOWNLOAD`, `BREW_NODE` in `src/agent/pi/packages.ts:707`;
+`brewOnPath` in `src/work/storage.ts`; drawn at `src/components/AddMore.tsx:274`).
+What it still does not do is the bundled route: add-ons are installed by host npm,
+which is also why an install cannot be cancelled (see 6.6 above).
 
 ## 6.2 and 6.5, and why they are not here
 
@@ -219,30 +260,38 @@ loaded.
 
 | Finding | Status |
 | --- | --- |
-| E02, a real terminal surface | Open, one step. The terminal is built and tested (`tests/terminal.test.ts`), and the packaging that was missing is written: `electron-builder.js` unpacks node-pty and runs `scripts/adhoc-sign.mjs` as `afterPack`, which sets the execute bit on `prebuilds/<arch>/spawn-helper`, and `scripts/verify-package.mjs` faults when it is missing. `npm run verify:package` passes against `release/mac-arm64/Graphe.app`. What is missing is the run itself: nothing opens a terminal inside a packaged app, the x64 bundle in `release/mac` predates node-pty and ships without the terminal |
+| E02, a real terminal surface | Open, one step. The terminal is built and tested (`tests/terminal.test.ts`, 7 against a real pty and a real shell), and the packaging is done and verified: `electron-builder.js` unpacks node-pty and runs `scripts/adhoc-sign.mjs` as `afterPack`, which sets the execute bit on `prebuilds/<arch>/spawn-helper`. `npm run verify:package` (2026-09-15) passes on **both** bundles in `release/` — x64 and arm64 each report "node-pty is in the bundle with an executable helper", the pinned `@earendil-works/pi-coding-agent 0.85.1`, Pi's 83-package tree, and a verifying ad-hoc signature. What is still missing is the run inside a packaged app: nothing opens a terminal there, and `npm run test:packaged` says outright that the terminal is one of the things it does not prove |
 | ~~E04, probe timeouts~~ | Done, see above. A spinning factory is a killed child and a missing card rather than a frozen app |
-| ~~E05, card cache~~ | Done after the first draft of this handoff. The cache is keyed on a SHA-256 fingerprint of the extension's own files (the whole folder, not just the entry file, since a local add-on is usually a directory of modules) plus the installed Pi version, and written through the atomic writer so two sessions probing at once cannot leave half a file. Corrupt rows are dropped one at a time, and a cache that cannot be parsed is empty rather than fatal. Two new tests: a file the entry does not name changing invalidates the card, and a truncated cache re-probes and rewrites. `tests/extension-probe.test.ts` (11) passes |
-| E06, tools-only policy | Open. `policyFor` still returns 'on' for a conversation, so no hooks are deleted there, but the plan's coherent enable/disable story is not built |
-| E07, admission before a turn starts | Open. `forwardTo` still accounts after a turn has begun |
+| ~~E05, card cache~~ | Done after the first draft of this handoff. The cache is keyed on a SHA-256 fingerprint of the extension's own files (the whole folder, not just the entry file, since a local add-on is usually a directory of modules) plus the installed Pi version, and written through the atomic writer so two sessions probing at once cannot leave half a file. Corrupt rows are dropped one at a time, and a cache that cannot be parsed is empty rather than fatal. Two new tests: a file the entry does not name changing invalidates the card, and a truncated cache re-probes and rewrites. `tests/extension-probe.test.ts` (13) passes |
+| ~~E06, tools-only policy~~ | Done in phase 7. Hooks run whole or not at all: a conversation loads the add-on complete, `tools-only` is honoured only where the add-on itself declares it (`grapheToolsOnly`), the choice that cannot be honoured says why once, and where Graphe is driving an add-on that starts turns of its own is `off` and listed. See the phase 7 handoff |
+| ~~E07, admission before a turn starts~~ | Done in phase 7. One typed request against the facts the asking seam can see, asked first by the adapter's `prompt`/`steer` and by the continuation owner before it sends; Stop moves the epoch so a late child result starts nothing; an add-on's own turn is watched and interrupted at the budget, with the limit stated rather than covered. See the phase 7 handoff |
 | ~~E09, tool collisions~~ | Done, see above, for names. The name itself never changes, so an old transcript still reads as the tool that ran |
 | ~~E10, package lifecycle~~ | Done, see above. A change under an open conversation marks it activation pending, says so in one sentence, and the conversation is built again when it is opened |
-| 6.6, the rest of that section | Open. Nothing reads a custom renderer an add-on registers: a custom tool call has no renderer of its own here. An add-on's commands are counted on its card and never registered in the composer's command picker, and a command removed during a queued interaction is not handled. An install that has started cannot be cancelled: `watching` returns a way to stop watching, not a way to stop the install |
-| E11, installing add-ons without host npm | Open. `CHANNEL.addPackage` now asks `npmOnPath()` before it hands the press to the installer and says "Adding an add-on needs npm, and this Mac does not have it on the path." rather than npm's own words. There is no bundled package-management route and no setup action, which is what the finding asks for |
+| 6.6, the rest of that section | Open. Nothing reads a custom renderer an add-on registers: a custom tool call has no renderer of its own here. An add-on's commands do reach the composer's picker now, read live from the session in front (`electron/main.ts:9396`, `rowsForThePicker`), and a command that left during a queued wait is answered rather than sent as prose (`electron/main.ts:10956`, `/${name} is not here any more`); `tests/extension-commands.test.ts` (13) is the proof, including a command an add-on registered running in Pi's command context in a real chat rather than being sent as prose. An install that has started still cannot be cancelled, and the reason is the host rather than the screen. The shelf's half is whole and tested: `PackageHost.stop?`, `Shelf.stop()` answered with `StopOutcome { stopped, says }`, a bounded record of what the installer said on the way, `CANNOT_STOP` for a host that cannot reach the installer, and one channel carrying all of it (`CHANNEL.stopPackage`, `electron/main.ts:9249`), with `tests/packages.test.ts` and `tests/package-stop.test.ts` (5) on the route. **What is missing is the host, and this is the plain statement of it:** Pi's `DefaultPackageManager` (0.85.1) owns its npm child privately and has no `stop`, cancel or abort member at all — `packageHost` in `src/agent/pi/adapter.ts:1665` returns `search`, `list`, `add`, `update`, `remove`, `installed` and `watching`, and nothing else — so `canStop` is false and the screen prints the shelf's own sentence rather than drawing a Stop that could only ever fail (`AddonReport.stopping`, `src/components/AddMore.tsx:525`). The route that would make it real is hosting the install ourselves — npm run by the shell, which is also E11's bundled package-management route — after which the same channel ends installs with nothing else to change |
+| 6.1, the states Extensions shows | Done for the display. The eight words are decided in `src/agent/pi/extension-states.ts` (`stateOf`, `extensionRows`) from facts the shell and the open conversations already have, and drawn one row each on the add-ons screen with version, origin, scope, the conversations it is running in, the commands it offers and the loader's own reason behind a press (`electron/main.ts` `addonsHere`, `src/components/AddMore.tsx`). From real facts: `discovered` and `needs trust` from the files found on this computer and the project's own trust store; `installed` from where Pi puts an npm package; `active here`, `disabled` and `failed` from what an open conversation's loader did with it; `activation pending` from the ids a change landed on while a chat was open; `incompatible` from the files a package's own manifest names and this disk does not have. Defaulted, and honest about it: with no conversation open nothing is loaded anywhere, so a row shows its install state rather than a session's — which is what its own sentence then says. Evidence: `tests/extension-states.test.ts` (13), `tests/addons-screen.test.ts` (10) |
+| E11, installing add-ons without host npm | Open, one step. `CHANNEL.addPackage` asks `npmOnPath()` before it hands the press to the installer and says "Adding an add-on needs npm, and this Mac does not have it on the path." rather than npm's own words, and the add-ons screen now says so before anybody presses anything: one line, the page that installs Node, and `brew install node` offered only where there is a Homebrew to run it with (`npmSetup` in `src/agent/pi/packages.ts`, `brewOnPath` in `src/work/storage.ts`, drawn in `src/components/AddMore.tsx`; `tests/packages.test.ts` and `tests/addons-screen.test.ts`). What the finding still asks for, and this does not provide, is the bundled package-management route: add-ons are installed by host npm, which is also why an install cannot be cancelled |
 | E12, advisor settings | Open. The advisor choice is still a global file rewritten around turns |
 | 6.2, agent runtimes in a child process | Not started. Extension code still runs on Electron's main event loop, which is what makes a synchronous loop in a trusted add-on a hang for the whole app. This is the largest unbuilt piece of the plan |
 | 6.5, terminal compatibility mode | Not shipped, deliberately. See the section above: the boundary hooks (Guard, extension policy, transcript ownership) are the ones that do not cross a process boundary yet, so there is no version of it that preserves them |
-| Phase 6 fixtures | Partly. `tests/fixtures/extensions/` holds `plain`, `orchestrating`, `throws`, `spins` and `marker`. The plan's custom TUI, duplicate-tool, provider, slash-command, shortcut-conflict, install-failure and transitive-trust fixtures are not there, and neither is a second independently authored add-on |
+| Phase 6 fixtures | Done for the plan's list. `tests/fixtures/extensions/` holds `plain`, `orchestrating`, `throws`, `spins`, `marker` and the rest of the register: unknown tool names, custom messages, streamed output, image/resource results, notifications/status, the four dialogs, abortable questions, custom TUI, provider registration, slash commands, shortcut conflicts, asynchronous result delivery, a throwing hook, an unresolved async hook, installation failure, a transitive-file trust change, removal during a running tool, and two independently authored helpers with different schemas. What each one is and what proves it: `docs/handoffs/extension-compatibility.md` |
 
 Exit criteria: "no executable code before the trust decision" is met and tested
-(`tests/extension-trust.test.ts`, 2: an add-on nobody has said yes to is not
+(`tests/extension-trust.test.ts`, 6: an add-on nobody has said yes to is not
 imported, not called and gets an unknown card, and is run once somebody does say
 yes); "a hung extension does not freeze the Electron shell" is met and tested
-(`tests/extension-probe-child.test.ts`, 13); "package install/update/remove/reload
+(`tests/extension-probe-child.test.ts`, 16); "package install/update/remove/reload
 states match what is actually active" is met for a change landing under an open
 conversation (`tests/package-activation.test.ts`, 3, and `tests/packages.test.ts`,
-50); "generic extension UI requests work in two concurrent conversations without
+65); "generic extension UI requests work in two concurrent conversations without
 cross-answering" is met by construction (each request carries the conversation
 that asked, and an answer settles exactly one request id) but is not exercised
-end to end in Electron; the terminal-mode criterion and the compatibility matrix
-are not met — there is no matrix, and terminal compatibility mode is not enabled
-(6.5).
+end to end in Electron; the compatibility matrix is met —
+`docs/handoffs/extension-compatibility.md` records every operation of the 6.3
+table and the rest of the fixture register as native GUI, terminal-only,
+unsupported or failed, each with the file and line and the test that proves it,
+including the eight gaps it finds (an abort signal that is not carried, no
+status line, a plain text widget refused with the component form, no duration on
+a tool record, commands that never reach the picker, shortcut conflicts nobody
+reports, a provider the window does not list, a notice with no add-on name and
+no durable home). The terminal-mode criterion is not met: terminal compatibility
+mode is not enabled (6.5).

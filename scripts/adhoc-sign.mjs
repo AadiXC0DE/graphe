@@ -25,6 +25,7 @@
 // never sets quarantine — launches clean. That is the alpha's distribution
 // route, and this is the one line that makes it work.
 
+import { chmod, readdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -36,10 +37,33 @@ const run = promisify(execFile);
  *  frameworks ourselves. It is deprecated for real distribution signing, where
  *  each nested component needs its own identity and entitlements. For an ad-hoc
  *  signature there is nothing to get wrong. */
+/** Every file that has to be executable to work, made executable. Called for
+ *  the pty helper before the bundle is signed, because the signature covers the
+ *  permission bits. */
+async function restoreHelperBits(app) {
+  const helpers = [
+    join(app, 'Contents', 'Resources', 'app.asar.unpacked', 'node_modules', 'node-pty', 'prebuilds'),
+  ];
+  for (const root of helpers) {
+    const found = await readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const one of found) {
+      if (!one.isDirectory()) continue;
+      const helper = join(root, one.name, 'spawn-helper');
+      await chmod(helper, 0o755).catch(() => undefined);
+    }
+  }
+}
+
 export default async function adhocSign(context) {
   if (context.electronPlatformName !== 'darwin') return;
 
   const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+
+  // A pty helper has to be executable, and npm does not always keep that bit on
+  // a prebuilt binary. Without it `spawn` fails with `posix_spawnp failed` —
+  // measured, in Node and in Electron alike — so the terminal would be missing
+  // from the packaged app for no visible reason.
+  await restoreHelperBits(app);
 
   await run('codesign', ['--force', '--deep', '--sign', '-', '--timestamp=none', app]);
   // Verifying costs a second and turns "it did not launch on somebody's laptop"

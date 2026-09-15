@@ -124,16 +124,20 @@ describe('a run with no board of its own', () => {
     expect(said).toMatch(/inside this call/i);
   });
 
-  it('offers the board tools only alongside the board itself', () => {
+  it('leaves the fan-out tools off the list, with or without a board', () => {
+    // Work reaches the board only through `task` with mode: 'background', which
+    // is a choice the model has to make. The tools that filled it on their own
+    // are gone.
     const { put } = board();
     const without = grapheTools('/tmp/agent').map((tool) => tool.name);
     const with_ = grapheTools('/tmp/agent', null, null, undefined, undefined, put).map(
       (tool) => tool.name,
     );
-    expect(without).toContain('task');
-    expect(without).not.toContain('set_going');
-    expect(with_).toContain('task');
-    expect(with_).toContain('set_going');
+    for (const names of [without, with_]) {
+      expect(names).toContain('task');
+      expect(names).not.toContain('set_going');
+      expect(names).not.toContain('try_ways');
+    }
   });
 });
 

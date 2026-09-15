@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -8,7 +10,9 @@ import {
 } from 'react';
 import { offerFor, withMention, type Mentionable } from '../lib/mentions';
 import { createPortal } from 'react-dom';
-import Annotate from './Annotate';
+/* Drawing on a picture is a press away and never on the first screen, and the
+   canvas it brings is the heaviest thing in this file. */
+const Annotate = lazy(() => import('./Annotate'));
 import Attachments, { type Attachment } from './Attachments';
 import LinkFigma from './LinkFigma';
 import { LINK_FIGMA } from '../lib/linkfigma';
@@ -16,7 +20,6 @@ import Asking from './Asking';
 import type { HowFar } from '../agent/guard/policy';
 import HowToWork, { type Plans } from './HowToWork';
 import Room from './Room';
-import type { Turn } from '../lib/thread';
 import ThinkingWith from './ThinkingWith';
 import type { ConnectionState, ModelChoice, Room as RoomState, Skill, ThinkingLevel, Workflow } from '../lib/ipc';
 import {
@@ -26,6 +29,7 @@ import {
   dragging,
   extensionOf,
   figmaLink,
+  letGo,
   readDropped,
   readableSize,
   shallower,
@@ -86,6 +90,15 @@ type Props = {
    * have.
    */
   draft?: string;
+  /**
+   * The box's own words on their way back to the conversation they belong to.
+   *
+   * Called when the box moves to another conversation, with what was in it,
+   * and when a send takes the sentence out. The caller binds the conversation
+   * at render, so a write that lands after a switch still goes to the chat the
+   * sentence was written in rather than to whichever one is on screen.
+   */
+  onDraftChange?: (text: string) => void;
   /** The project this box belongs to. A half-written message is kept against
    *  it, so a reload, a crash or a switch to another conversation and back
    *  leaves the sentence where it was. Absent in the gallery, and then nothing
@@ -121,8 +134,6 @@ type Props = {
   /** How full this conversation is, for the ring in the row. Null before the
    *  model has answered once. */
   room?: RoomState | null;
-  /** The conversation, for the split behind the ring. */
-  turns?: readonly Turn[];
   /** True while it is being shortened. */
   tidying?: boolean;
   /** Shorten it now, by hand. */
@@ -141,6 +152,15 @@ type Props = {
   /** The project's files, so `@` can name one. Empty is fine — the list then
    *  offers skills alone, exactly as it did before. */
   tree?: readonly { path: string; folder: boolean }[];
+  /**
+   * Why nothing may be sent from this box, or absent when something can.
+   *
+   * Set for a conversation whose folder is gone: the transcript above is
+   * readable, and there is no working directory for a sentence to be carried
+   * out in. The box says so rather than accepting a message that could only
+   * come back as a failure.
+   */
+  readOnly?: string;
 };
 
 /** What the file picker offers, in the same order a designer would think of
@@ -148,11 +168,13 @@ type Props = {
  *  — see src/lib/attachments.ts. */
 const ACCEPT = 'image/*,application/pdf';
 
-/** Where a half-written message is kept. Per project and per conversation:
- *  one key for both would hand somebody the sentence they were writing
- *  somewhere else. */
-export function draftKey(project: string, conversation?: string | null): string {
-  return `graphe:draft:${project}\u0000${conversation ?? ''}`;
+/** Where a half-written message is kept. Per project and per conversation: one
+ *  key for both would hand somebody the sentence they were writing somewhere
+ *  else, and one key for every chat with no name yet would hand them the
+ *  sentence they left in another one. Both are required for that reason — the
+ *  caller keeps nothing rather than keeping it in the wrong place. */
+export function draftKey(project: string, conversation: string): string {
+  return `graphe:draft:${project}\u0000${conversation}`;
 }
 
 /** How long the typing has to stop before the box is written down. */
@@ -200,6 +222,14 @@ const MAX_HEIGHT = 220;
  *  absorbs rounding; more than this and somebody is genuinely scrolled up. */
 const PINNED_SLACK = 48;
 
+/** Where a command came from: the project, this computer, or the add-on that
+ *  registered it. The third is why an add-on's command is not just another way
+ *  of working — it runs in Pi's command context, not as a prompt. */
+function saysOrigin(one: Workflow): string {
+  if (one.source === 'extension') return one.from ?? 'An add-on';
+  return one.source === 'project' ? 'This project' : 'Your computer';
+}
+
 function resize(el: HTMLTextAreaElement | null): void {
   if (el === null) return;
   const before = el.offsetHeight;
@@ -241,6 +271,7 @@ export default function Composer({
   attachments = [],
   onAttachmentsChange,
   draft,
+  onDraftChange,
   project,
   conversation,
   connection,
@@ -258,7 +289,6 @@ export default function Composer({
   anywhere = true,
   outLoud = true,
   room,
-  turns,
   tidying,
   onTidy,
   howFar,
@@ -268,6 +298,7 @@ export default function Composer({
   tree = [],
   workflows,
   waiting,
+  readOnly,
   onWait,
 }: Props) {
   const [value, setValue] = useState('');
@@ -358,6 +389,12 @@ export default function Composer({
         .filter((one) => `${one.name} ${one.description}`.toLowerCase().includes(command.query.toLowerCase()))
         .slice(0, 6);
 
+  /** The rows a press would actually run. A name something else already answers
+   *  to is still shown, with the reason on it, but it is not what Enter picks —
+   *  two providers for one word is the thing the list is here to make visible. */
+  const runnable = commands.filter((one) => one.shadowed == null);
+  const highlighted = runnable[mentionAt] ?? runnable[0];
+
   const chooseCommand = (workflow: Workflow): void => {
     const after = value.slice(areaRef.current?.selectionStart ?? value.length);
     const next = `${workflow.command} ${after}`;
@@ -395,8 +432,12 @@ export default function Composer({
     [onAttachmentsChange],
   );
 
-  /** Where this box's draft is kept, or null where nothing is kept. */
-  const keptAt = project === undefined || project === '' ? null : draftKey(project, conversation);
+  /** Where this box's draft is kept, or null where nothing is kept. A chat
+   *  with no id yet is not a place to keep one: two of them would share a key. */
+  const keptAt =
+    project === undefined || project === '' || conversation === undefined || conversation === null || conversation === ''
+      ? null
+      : draftKey(project, conversation);
 
   /* What is in the box this instant, for the write on the way out: an effect
      cleaning up cannot read state it closed over a render ago. */
@@ -404,31 +445,60 @@ export default function Composer({
   valueNow.current = value;
 
   /* Put back what was being written here, and hand it on when the box moves to
-     another conversation or the window goes away. */
+     another conversation or the window goes away. The caller's `onDraftChange`
+     is the one bound to this conversation, so a write that lands after a
+     switch still goes to the chat the sentence was written in. */
   useEffect(() => {
     if (keptAt === null) return;
     const kept = keptDraft(keptAt);
     setValue(kept ?? '');
     requestAnimationFrame(() => resize(areaRef.current));
-    return () => keepDraft(keptAt, valueNow.current);
+    return () => {
+      keepDraft(keptAt, valueNow.current);
+      onDraftChange?.(valueNow.current);
+    };
+    // The callback is the one bound when the box arrived here, which is the
+    // conversation being left. Depending on it would re-seed the box on every
+    // render the window makes, and take the cursor with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptAt]);
 
-  /* Written down once the typing pauses rather than on every keystroke. */
+  /* Written down once the typing pauses rather than on every keystroke, and
+     reported to the conversation at the same moment: a send that comes back
+     refused is put back into the box the conversation holds, and the words
+     typed while the send was in flight have to be there for it to put back
+     behind them. The callback is the one bound to this conversation, so the
+     report goes to the chat the sentence was written in. */
   useEffect(() => {
     if (keptAt === null) return;
-    const timer = setTimeout(() => keepDraft(keptAt, value), KEEP_AFTER);
+    const timer = setTimeout(() => {
+      keepDraft(keptAt, value);
+      onDraftChange?.(value);
+    }, KEEP_AFTER);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptAt, value]);
 
   /* Seeded from outside, with the cursor left at the end of it so the next
-     keystroke continues the sentence rather than landing in the middle of it. */
+     keystroke continues the sentence rather than landing in the middle of it.
+     Nothing to do when the sentence handed in is the one already in the box:
+     that is the conversation reporting back what was just typed, and seeding it
+     would move the cursor out from under somebody writing.
+
+     The cursor is only moved for somebody already writing here. A tab that
+     hands in the other chat's draft is not a request for the keyboard, and
+     taking it there moved the hand out of the strip on the way to the tab
+     somebody had just chosen. */
   useEffect(() => {
-    if (draft === undefined || draft === '') return;
-    setValue(draft);
+    if (draft === undefined || draft === '' || draft === valueNow.current) return;
     const field = areaRef.current;
+    const writing = field !== null && document.activeElement === field;
+    setValue(draft);
     if (field === null) return;
-    field.focus();
-    field.setSelectionRange(draft.length, draft.length);
+    if (writing) {
+      field.focus();
+      field.setSelectionRange(draft.length, draft.length);
+    }
     resize(field);
   }, [draft]);
 
@@ -487,7 +557,10 @@ export default function Composer({
   const remove = useCallback(
     (id: string) => {
       const going = attachedRef.current.find((item) => item.id === id);
-      if (going?.preview !== undefined) URL.revokeObjectURL(going.preview);
+      // The address the chip was drawn from goes with the chip, and only here:
+      // one place gives up an object URL, so none is given up while it is still
+      // on screen.
+      if (going !== undefined) letGo(going);
       setRefused(null);
       change(attachedRef.current.filter((item) => item.id !== id));
     },
@@ -497,6 +570,13 @@ export default function Composer({
   const submit = (mode?: 'steer' | 'followUp') => {
     const text = value.trim();
     if (!text) return;
+    // A conversation whose folder is gone is open to be read, not written to.
+    // Said rather than sent, and the words stay in the box so pointing the chat
+    // at a folder and pressing again is the whole of the fix.
+    if (readOnly !== undefined) {
+      setRefused(readOnly);
+      return;
+    }
     // Said rather than sent. The picture stays in the box, so switching model
     // and pressing again is the whole of the fix.
     if (blindToPictures) {
@@ -514,25 +594,31 @@ export default function Composer({
     }
     setDrawn(null);
     setValue('');
+    // The conversation's own copy goes the same way, so a switch back does not
+    // find the sentence it has just sent waiting in the box.
+    onDraftChange?.('');
     setRefused(null);
     if (areaRef.current) areaRef.current.style.height = 'auto';
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (command !== null && commands.length > 0) {
+    // An Enter that ends an IME composition belongs to the composition, not to
+    // the box: Korean and Chinese input confirm with it, and sending there
+    // would submit a half-written sentence.
+    if (e.nativeEvent.isComposing) return;
+    if (command !== null && runnable.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         setMentionAt((was) =>
           e.key === 'ArrowDown'
-            ? (was + 1) % commands.length
-            : (was + commands.length - 1) % commands.length,
+            ? (was + 1) % runnable.length
+            : (was + runnable.length - 1) % runnable.length,
         );
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        const chosen = commands[mentionAt] ?? commands[0];
-        if (chosen !== undefined) chooseCommand(chosen);
+        if (highlighted !== undefined) chooseCommand(highlighted);
         return;
       }
       if (e.key === 'Escape') {
@@ -803,29 +889,31 @@ export default function Composer({
           came from, so the chip stays the same chip and the message still has
           exactly one of it. */}
       {open === null ? null : (
-        <Annotate
-          source={open.preview ?? ''}
-          name={open.name}
-          onClose={() => setDrawingOn(null)}
-          onDone={(marked) => {
-            change(
-              attachedRef.current.map((one) =>
-                one.id === open.id
-                  ? {
-                      ...one,
-                      name: marked.file.name,
-                      note: ['PNG', readableSize(marked.file.size)].join(' · '),
-                      preview: marked.dataUrl,
-                      file: marked.file,
-                    }
-                  : one,
-              ),
-            );
-            setDrawn(marked.said);
-            setDrawingOn(null);
-            areaRef.current?.focus();
-          }}
-        />
+        <Suspense fallback={null}>
+          <Annotate
+            source={open.preview ?? ''}
+            name={open.name}
+            onClose={() => setDrawingOn(null)}
+            onDone={(marked) => {
+              change(
+                attachedRef.current.map((one) =>
+                  one.id === open.id
+                    ? {
+                        ...one,
+                        name: marked.file.name,
+                        note: ['PNG', readableSize(marked.file.size)].join(' · '),
+                        preview: marked.dataUrl,
+                        file: marked.file,
+                      }
+                    : one,
+                ),
+              );
+              setDrawn(marked.said);
+              setDrawingOn(null);
+              areaRef.current?.focus();
+            }}
+          />
+        </Suspense>
       )}
 
       <textarea
@@ -858,23 +946,26 @@ export default function Composer({
       />
 
       {command === null || commands.length === 0 ? null : (
-        <div className="composer__skills" role="listbox" aria-label="Ways of working">
-          <p><span>/</span> A way of working this project has written down</p>
-          {commands.map((one, index) => (
+        <div className="composer__skills" role="listbox" aria-label="Commands">
+          <p><span>/</span> A way of working, or a command an add-on added</p>
+          {commands.map((one) => (
             <button
               key={one.command}
               type="button"
               role="option"
-              aria-selected={index === mentionAt}
-              className={index === mentionAt ? 'composer__skill--active' : ''}
+              aria-selected={one === highlighted}
+              className={one === highlighted ? 'composer__skill--active' : ''}
+              disabled={one.shadowed != null}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => chooseCommand(one)}
             >
               <span>
                 <strong>{one.command}</strong>
-                <small>{one.description}</small>
+                {/* What it does, or why it cannot run — never both, and never
+                    a row that looks pressable and is not. */}
+                <small>{one.shadowed ?? one.description}</small>
               </span>
-              <em>{one.source === 'project' ? 'This project' : 'Your computer'}</em>
+              <em>{saysOrigin(one)}</em>
             </button>
           ))}
         </div>
@@ -1002,7 +1093,6 @@ export default function Composer({
           room={room ?? null}
           tidying={tidying === true}
           busy={busy}
-          {...(turns === undefined ? {} : { turns })}
           {...(onTidy === undefined ? {} : { onTidy })}
         />
 
@@ -1047,7 +1137,7 @@ export default function Composer({
           <button
             className="composer__send"
             onClick={stopping ? onStop : () => submit()}
-            disabled={stopping ? false : !value.trim()}
+            disabled={stopping ? false : readOnly !== undefined ? true : !value.trim()}
             aria-label={stopping ? 'Stop' : busy ? 'Send when it is free' : 'Send'}
           >
             {stopping ? (
@@ -1090,9 +1180,12 @@ export default function Composer({
 
       {/* Always in the document, empty most of the time. A live region that is
           added at the same moment as its first sentence is a live region a
-          screen reader has no reason to be listening to yet. */}
+          screen reader has no reason to be listening to yet. The read-only
+          sentence is here rather than only after a press: the send button is
+          disabled, and a disabled control with no visible reason beside it is
+          indistinguishable from a broken one. */}
       <p className="composer__refused" role="status">
-        {refused ?? cannotRead}
+        {refused ?? readOnly ?? cannotRead}
       </p>
 
       <input

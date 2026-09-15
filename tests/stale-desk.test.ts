@@ -14,6 +14,8 @@
  * So it is checked here mechanically, on the source, the way the language sweep
  * is. `react-hooks/exhaustive-deps` reports this class as a warning among
  * thirty-odd others of a shape that is fine; it was ignored for that reason.
+ *
+ *  Source text, not behaviour: App.tsx's hook dependency lists; no behavioural test reaches it — a stale closure returns early, silently.
  */
 
 import { readFileSync } from 'node:fs';

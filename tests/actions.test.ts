@@ -6,6 +6,8 @@
  * matter are the ones about agreement — every action has a name and a place,
  * no two answer to the same key, and what the palette prints is what the
  * keyboard does.
+ *
+ *  Source text, not behaviour: App.tsx's palette chords and the handler for its `files` key; no behavioural test can reach it — no test renders App.tsx.
  */
 
 import { readFileSync } from 'node:fs';
@@ -69,17 +71,17 @@ describe('AC-02 clashes', () => {
   });
 
   it('finds one the moment somebody makes it', () => {
-    const found = clashesIn(readActions({ history: 'mod+d' }));
+    const found = clashesIn(readActions({ history: 'mod+k' }));
     expect(found).toHaveLength(1);
-    expect(found[0]?.chord).toBe('mod+d');
-    expect([...(found[0]?.ids ?? [])].sort()).toEqual(['design', 'history']);
+    expect(found[0]?.chord).toBe('mod+k');
+    expect([...(found[0]?.ids ?? [])].sort()).toEqual(['ask', 'history']);
   });
 
   /* A second key for one action is a habit, not a clash — but a second key that
      somebody else's action already answers to is. */
   it('counts an action’s other keys too', () => {
-    expect(clashesIn(readActions({ canvas: 'mod+shift+t' }))).toEqual([
-      { chord: 'mod+shift+t', ids: ['open', 'canvas'] },
+    expect(clashesIn(readActions({ history: 'mod+shift+t' }))).toEqual([
+      { chord: 'mod+shift+t', ids: ['open', 'history'] },
     ]);
     expect(clashesIn(readActions({ open: 'mod+shift+t' }))).toEqual([]);
   });
@@ -100,7 +102,7 @@ describe('AC-03 reach', () => {
     const conversation = actionsFor('in a conversation').map((one) => one.id);
 
     expect(anywhere).toContain('open');
-    expect(anywhere).not.toContain('design');
+    expect(anywhere).not.toContain('tidy');
     expect(project).toEqual(expect.arrayContaining(anywhere));
     expect(conversation).toEqual(expect.arrayContaining(project));
     expect(conversation).toContain('tidy');
@@ -108,10 +110,10 @@ describe('AC-03 reach', () => {
   });
 
   it('hands back the chord that is bound now, not the one that shipped', () => {
-    const bindings = readActions({ design: 'mod+shift+d' });
-    expect(actionsFor('in a project', bindings).find((one) => one.id === 'design')?.chord).toBe('mod+shift+d');
-    expect(chordFor('design', bindings)).toBe('mod+shift+d');
-    expect(chordFor('design')).toBe(DEFAULT_BINDINGS['design']);
+    const bindings = readActions({ history: 'mod+shift+h' });
+    expect(actionsFor('in a project', bindings).find((one) => one.id === 'history')?.chord).toBe('mod+shift+h');
+    expect(chordFor('history', bindings)).toBe('mod+shift+h');
+    expect(chordFor('history')).toBe(DEFAULT_BINDINGS['history']);
   });
 
   it('lets somebody turn a key off without losing the action', () => {
@@ -139,8 +141,9 @@ describe('AC-04 what a press does', () => {
   });
 
   it('is nothing when the action cannot be reached from here', () => {
-    expect(actionAt(press('d', { metaKey: true }), true, 'anywhere')).toBeNull();
-    expect(actionAt(press('d', { metaKey: true }), true, 'in a project')?.id).toBe('design');
+    expect(actionAt(press('k', { metaKey: true, shiftKey: true }), true, 'in a conversation')).toBeNull();
+    expect(actionAt(press('b', { metaKey: true }), true, 'in a project')?.id).toBe('shelf');
+    expect(actionAt(press('b', { metaKey: true }), true, 'anywhere')).toBeNull();
   });
 
   it('answers to an action’s other keys as well as its own', () => {
@@ -179,7 +182,6 @@ describe('AC-05 the search', () => {
   });
 
   it('puts what somebody half-remembers at the top', () => {
-    expect(matching('canvas', everything)[0]?.id).toBe('canvas');
     expect(matching('pull request', everything)[0]?.id).toBe('reviews');
   });
 
@@ -188,7 +190,7 @@ describe('AC-05 the search', () => {
   });
 
   it('only offers what can be reached from where you are', () => {
-    expect(matching('canvas', actionsFor('anywhere'))).toEqual([]);
+    expect(matching('history', actionsFor('anywhere'))).toEqual([]);
   });
 });
 

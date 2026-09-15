@@ -2,8 +2,10 @@
  *
  * Pi lets an extension send a message with `triggerTurn`, which begins a run
  * nobody typed. Nothing translated it, so it was never budgeted, never named
- * and never in "why did it stop". The authority had a path for it and no
+ * never in "why did it stop". The authority had a path for it and no
  * caller.
+ *
+ *  Source text, not behaviour: the adapter dropping an add-on's turn while a prompt is in flight, and the shell naming the add-on it hands one to; no behavioural test can reach it — the first needs a live Pi session, the second is electron/main.ts.
  */
 
 import { readFileSync } from 'node:fs';
@@ -12,12 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { extensionTurnOf } from '../src/agent/pi/events';
-import {
-  MOST_ROUNDS,
-  continuationWords,
-  extensionOverBudget,
-  freshContinuation,
-} from '../src/work/continuation';
+import { MOST_ROUNDS, continuationWords } from '../src/work/continuation';
+import { admit, type TurnState } from '../src/work/admission';
 import { continuationOwner, type OwnerHooks } from '../electron/continuation-owner';
 import { applyEvent } from '../src/lib/thread';
 
@@ -104,16 +102,29 @@ function owner(): {
   return { one: continuationOwner(hooks), said, halted };
 }
 
+const run = { epoch: 0, stopped: false };
+const withBudget = (rounds: number): TurnState => ({
+  run,
+  going: true,
+  budget: { rounds, most: MOST_ROUNDS },
+});
+
 describe('an add-on cannot loop past the budget', () => {
-  it('has nothing to say while there is budget left', () => {
-    expect(extensionOverBudget(freshContinuation())).toBeNull();
-    expect(extensionOverBudget({ ...freshContinuation(), rounds: MOST_ROUNDS - 1 })).toBeNull();
+  /* Watched, not refused beforehand: Pi begins the turn inside the add-on, so
+     the most the host has is this answer, and the owner ends the run on it. */
+  it('is watched while there is budget left', () => {
+    expect(admit({ origin: 'extension', epoch: 0 }, withBudget(0))).toEqual({ verdict: 'watched' });
+    expect(admit({ origin: 'extension', epoch: 0 }, withBudget(MOST_ROUNDS - 1))).toEqual({
+      verdict: 'watched',
+    });
   });
 
   it('stops at the budget, saying the same thing every other reason says', () => {
-    const over = extensionOverBudget({ ...freshContinuation(), rounds: MOST_ROUNDS });
-    expect(over?.said).toBe(continuationWords.spent(MOST_ROUNDS));
-    expect(over?.state.stopped).toBe(true);
+    expect(admit({ origin: 'extension', epoch: 0 }, withBudget(MOST_ROUNDS))).toEqual({
+      verdict: 'refused',
+      because: 'budget-spent',
+      said: continuationWords.spent(MOST_ROUNDS),
+    });
   });
 
   /* The turn has already begun by the time this hears about it, so refusing it

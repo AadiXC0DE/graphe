@@ -37,6 +37,27 @@ export function saysPolicy(policy: Policy): string {
 }
 
 /**
+ * Whether this add-on says its tools stand on their own.
+ *
+ * The only thing that can make `tools-only` safe, and the add-on is the only
+ * thing that can say it: a card read from the outside cannot tell a tool that
+ * finishes in the call that started it from one whose result arrives on a
+ * completion hook, and an add-on whose work does is launched and never heard
+ * from again. So the declaration is read off the add-on itself, and an add-on
+ * that says nothing keeps its hooks.
+ */
+export function saysToolsOnly(card: CapabilityCard | null): boolean {
+  return card !== null && card.toolsOnly;
+}
+
+/** What somebody sees when they asked for tools only and the add-on cannot do
+ *  it: it runs whole, and Off is the way to leave it out. */
+export function saysToolsOnlyRefused(card: CapabilityCard | null): string {
+  const who = card === null || card.id === '' ? 'That add-on' : `“${card.id}”`;
+  return `${who} finishes work of its own after a reply has ended, so tools only would leave that work unanswered. It runs whole; Off leaves it out instead.`;
+}
+
+/**
  * Whether the loader attaches this add-on's lifecycle handlers.
  *
  * True for `off` as well as `tools-only`: a caller that asks only this question
@@ -60,13 +81,22 @@ export function dropsEntirely(policy: Policy): boolean {
  * that does, or a card we could not read at all, stands down where Graphe is
  * driving and keeps its tools where a person is. What somebody chose for this
  * conversation beats both.
+ *
+ * Unless they chose tools only and the add-on cannot do it. Half an add-on is
+ * worse than none: one whose tool starts work and whose hook delivers the
+ * result is an add-on that starts and never answers, and no amount of reading
+ * its card from the outside establishes otherwise. So that choice is honoured
+ * only where the add-on itself says its tools stand on their own, and is
+ * otherwise the coherent whole — with the person told, once, why.
  */
 export function policyFor(
   card: CapabilityCard | null,
   session: SessionKind,
   chosen?: Policy,
 ): Policy {
-  if (chosen !== undefined && session === 'conversation') return chosen;
+  if (chosen !== undefined && session === 'conversation') {
+    return chosen === 'tools-only' && !saysToolsOnly(card) ? 'on' : chosen;
+  }
   if (card !== null && !card.orchestrating) return 'on';
   /*
    * A conversation gets the whole add-on, hooks and all.

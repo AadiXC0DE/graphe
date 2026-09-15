@@ -9,6 +9,8 @@
  * So the rule is one rule: write beside it, then move it into place. This is
  * the gate on that, because a rule nobody checks is a rule that lasted one
  * refactor.
+ *
+ *  Source text, not behaviour: that nothing writes a durable file in place, and that the one helper's scratch is a neighbour; no behavioural test can reach it — the first is a rule over every module, the second needs a second filesystem.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';

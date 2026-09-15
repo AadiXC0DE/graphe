@@ -38,6 +38,10 @@ export const RUNTIME = [
   // (src/agent/memory.ts), but esbuild must not try to bundle either one.
   '@huggingface/transformers',
   'onnxruntime-node',
+  // A native pty for the terminal pane, loaded lazily at runtime. Its prebuilt
+  // .node file and its spawn-helper cannot be read from inside an archive, so it
+  // travels unpacked.
+  'node-pty',
 ];
 
 /** In the tree, but never loaded, and large enough to be worth saying so.

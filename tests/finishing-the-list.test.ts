@@ -1,13 +1,8 @@
 /** "It does one step and stops."
  *
- * These used to read App.tsx as text, because the loops that decided whether to
- * carry on lived in the window where a unit test could not reach them. They do
- * not live there any more: one module decides, in the main process, and it is
- * pure — so these are the behaviour now, run rather than grepped.
+ * One module decides, in the main process, and it is pure — so these run the
+ * decision rather than reading a source file for it.
  */
-
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -21,11 +16,6 @@ import {
   type State,
 } from '../src/work/continuation';
 import { listForGoal } from '../src/work/goal';
-
-const read = (rel: string): string =>
-  readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
-
-const APP = read('../src/App.tsx');
 
 function facts(over: Partial<Facts> = {}): Facts {
   return {
@@ -139,13 +129,6 @@ describe('FL-03 a goal has a list to be measured against', () => {
     expect(listForGoal('make the tests pass')).toEqual(['Reach: make the tests pass']);
   });
 
-  it('no longer skips past a list belonging to another conversation', () => {
-    // Lists are the conversation's own now, so there is no baseline to get
-    // wrong — see RC-14.
-    expect(read('../src/work/goal.ts')).not.toContain('planBaselineN');
-    expect(APP).not.toContain('baselineFor');
-  });
-
   it('carries on toward an unmet goal, naming it', () => {
     const move = decide(
       freshContinuation(),
@@ -230,25 +213,5 @@ describe('FL-07 a run that failed is picked up once, never twice', () => {
   it('still tries after a round that ticked nothing off', () => {
     const stalled: State = { ...freshContinuation(), stuckRounds: 1 };
     expect(decide(stalled, facts({ endedHow: 'failed' })).kind).toBe('send');
-  });
-});
-
-describe('FL-08 the window no longer decides any of this', () => {
-  it('has no loop of its own left in it', () => {
-    for (const gone of [
-      'carryOnWith(',
-      'const carryOn = useRef',
-      'const stoppedByHand = useRef',
-      'goalRuns.current',
-      "buildAdvance({ kind: 'finish'",
-      "buildAdvance({ kind: 'start' }",
-    ]) {
-      expect(APP).not.toContain(gone);
-    }
-  });
-
-  it('never closes a step on the strength of how a reply read', () => {
-    expect(APP).not.toContain('settledWell(said)');
-    expect(read('../electron/main.ts')).not.toContain('tickedThisTurn');
   });
 });

@@ -18,12 +18,11 @@ const arriving = new IntersectionObserver(
 
 for (const item of document.querySelectorAll('[data-reveal]')) arriving.observe(item);
 
-/* ── the window: four real screens, one frame ────────────────────────── */
+/* ── the window: real screens, one frame ─────────────────────────────── */
 
 /** What the caption says under each screen, so the picture is never unlabelled. */
 const CAPTIONS = {
   work: ['graphe', 'the files, the work, and what is running'],
-  design: ['graphe: design', 'your own tokens, read as a spec'],
   history: ['graphe: history', '87 moments saved, drawn as lines'],
   skills: ['graphe: skills', 'craft you installed, ready to use'],
 };
@@ -116,7 +115,7 @@ if (steps.length > 0) {
 /* ── the window walks its own screens until somebody takes over ──────── */
 
 /* It used to nudge from the first tab to the second and back, which read as a
-   broken carousel rather than as a hint. It now walks all four, and the first
+   broken carousel rather than as a hint. It now walks every tab, and the first
    press stops it for good — a page that keeps moving the thing somebody is
    trying to look at is worse than one that never moved. */
 if (!quiet.matches && tabs.length > 1) {

@@ -16,7 +16,6 @@ import {
   type Verdict,
 } from '../work/reviewqueue';
 import DiffView from './DiffView';
-import Switch from './Switch';
 import './ReviewQueue.css';
 import './Sheet.css';
 
@@ -31,7 +30,6 @@ type Props = {
   onDecide: (id: string, verdict: Verdict) => void;
   onLand: (id: string, landing: HowItLands) => void;
   onOpenPr: (id: string, summary: string) => void;
-  onMirror: (id: string, on: boolean) => void;
   onRefresh: () => void;
   onClose: () => void;
   /** Ask the conversation about one piece, from inside the diff. */
@@ -113,7 +111,6 @@ export default function ReviewQueue({
   onDecide,
   onLand,
   onOpenPr,
-  onMirror,
   onRefresh,
   onClose,
   onExplain,
@@ -124,7 +121,6 @@ export default function ReviewQueue({
   /** Which of the four this entry is being given. Take it, because that is what
    *  somebody opened the screen to do. */
   const [chose, setChose] = useState<Verdict>('take it');
-  const [menuOpen, setMenuOpen] = useState(false);
   const [how, setHow] = useState<'squash' | 'every-version'>('squash');
   const [message, setMessage] = useState('');
   const [at, setAt] = useState<string | null>(null);
@@ -244,45 +240,18 @@ export default function ReviewQueue({
               </p>
             </div>
 
-            {/* The old behaviour, one row in a menu. It was a switch and a
-                sentence standing over the decision, which is not where a
-                once-a-project choice belongs. */}
-            <div className="reviewq__menuat">
-              <button
-                type="button"
-                className="reviewq__menubtn"
-                aria-expanded={menuOpen}
-                aria-haspopup="menu"
-                onClick={() => setMenuOpen((was) => !was)}
-                title={reviewWords.menu}
-              >
-                <span aria-hidden="true">···</span>
-              </button>
-              {menuOpen ? (
-                <div className="reviewq__menu" role="menu">
-                  <label className="reviewq__mirror">
-                    <Switch
-                      on={entry.mirror}
-                      onChange={(on) => {
-                        onMirror(entry.id, on);
-                        setMenuOpen(false);
-                      }}
-                      label={reviewWords.mirror}
-                      disabled={busy}
-                    />
-                    <span className="reviewq__mirrortext">
-                      <span className="reviewq__mirrorname">{reviewWords.mirror}</span>
-                      <span className="reviewq__mirrorwhy">{reviewWords.mirrorWhy}</span>
-                    </span>
-                  </label>
-                </div>
-              ) : null}
-            </div>
           </div>
 
           {/* One decision, then one press named by it. Seven verbs in a row,
               two of them meaning nearly the same thing, is a row nobody reads
-              twice. */}
+              twice.
+
+              Except for a row with no conversation behind it: there is no copy
+              to carry its files over from, so it is said plainly and nothing
+              here offers to take them. */}
+          {entry.unattributed === true ? (
+            <p className="reviewq__older">{reviewWords.olderWhy}</p>
+          ) : (
           <div className="reviewq__does">
             <div className="reviewq__verdicts" role="radiogroup" aria-label={SAYS.decide}>
               {([
@@ -354,6 +323,7 @@ export default function ReviewQueue({
               </button>
             ) : null}
           </div>
+          )}
 
           {chose === 'drop it' ? <p className="reviewq__note">{reviewWords.dropWhy}</p> : null}
 
@@ -391,6 +361,14 @@ export default function ReviewQueue({
             </div>
           ) : null}
 
+          {/* The file-by-file ticks are the same accept, one file at a time, so
+              a row with no copy behind it has none of them either — its files
+              are named, and nothing can be taken. */}
+          {entry.unattributed === true ? (
+            <p className="reviewq__prefix">
+              {SAYS.files} · {reviewWords.files(entry.files.length)}
+            </p>
+          ) : (
           <div className="reviewq__files">
             <p className="reviewq__prefix">
               {SAYS.files} · {reviewWords.files(entry.files.length)}
@@ -426,6 +404,7 @@ export default function ReviewQueue({
               })}
             </ul>
           </div>
+          )}
 
           <div className="reviewq__diff">
             {diff === null ? (

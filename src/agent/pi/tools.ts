@@ -50,7 +50,7 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 import { READABLE, documentSaid, readDocument } from './documents';
 
-import { lspRenameTool, lspTool } from './lsp';
+import { searchSymbolsTextTool } from './search-symbols-text';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
@@ -71,7 +71,6 @@ import {
   type CheckVerdict,
   type ProjectCheck,
 } from './checks';
-import { selectCorrect, type CandidateSignals } from './correctness';
 import { browserFolder, browserTools } from './computer';
 import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
@@ -1852,7 +1851,7 @@ export const readMapTool = (cwd: string): ToolDefinition => ({
     'How this project is put together: its folders, how many files are in each, which folders reach into which, where a change starts from, and where the styles are. Read it before breaking a big request into pieces, so the pieces touch different areas rather than colliding.',
   promptSnippet: 'read_map(): how the project is put together, by folder',
   promptGuidelines: [
-    'Read it before setting several pieces of work going, so each piece can be given an area of its own.',
+    'Read it before splitting a big request between helpers, so each one can be given an area of its own.',
     'It is the shape, not the contents. Open the files themselves for anything it does not answer.',
   ],
   parameters: Type.Object({}),
@@ -1864,262 +1863,16 @@ export const readMapTool = (cwd: string): ToolDefinition => ({
 });
 
 /* -------------------------------------------------------------------------- */
-/* Several pieces at once                                                     */
+/* Where a piece of work goes instead of running here                         */
 /* -------------------------------------------------------------------------- */
 
-/** How many pieces one request may put on the board. Past this it is not a
- *  plan, it is a machine, and nobody reads the results of a machine. */
-export const MOST_APART = 8;
-
+/** Hand one piece of work to the board rather than running it inside the call.
+ *  `ways` names a group the board can compare together. */
 export type PutOnBoard = (
   doing: string,
   after: string | null,
   ways?: string | null,
 ) => Promise<{ ok: true; id: string } | { ok: false; because: string }>;
-
-/** How many goes at one thing are worth comparing. Past three nobody looks at
- *  the fourth, and each one costs what the first one did. */
-export const MOST_WAYS = 3;
-
-export const WAYS_WORDS = {
-  none: 'Say what to make, and two or three different ways of going about it.',
-  one: 'Two ways at least, or it is not a choice. One way is ordinary work.',
-  tooMany: `Three ways at most. Past that nobody looks at the fourth, and each one costs what the first did.`,
-  went: (count: number): string =>
-    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away, so say what you set going and stop.`,
-} as const;
-
-export const APART_WORDS = {
-  none: 'Nothing to set going: say what each piece of work is.',
-  tooMany: `That is more than ${String(MOST_APART)} pieces at once. Put the biggest ${String(MOST_APART)} on and ask again when they are done.`,
-  /** What comes back to the model once the pieces are on the board. */
-  went: (count: number): string =>
-    count === 1
-      ? 'One piece of work is on the board, in its own copy of the project. It runs whether or not this conversation carries on.'
-      : `${String(count)} pieces of work are on the board, each in its own copy of the project. Four run at a time and the rest wait their turn; they carry on whether or not this conversation does.`,
-  /** Said alongside, so the model does not sit and wait for them. */
-  dontWait:
-    'Do not wait for them or ask about them again. The person watches them finish on the board and decides which to keep. Say what you set going and stop.',
-  /** When the piece it could not start without never went on itself. */
-  lostItsTurn: 'the piece it waits for did not go on, so this one did not either.',
-} as const;
-
-/**
- * Break one request into pieces that run at the same time, each in its own copy.
- *
- * The board already ran several pieces side by side, each isolated, with a way
- * to say one waits for another — but only a person could put anything on it, so
- * a big request was one agent walking a list alone. This is the same board,
- * asked for by the agent that just worked out what the list is.
- *
- * A piece may wait for one earlier piece in the same call, named by its place
- * in the list. Anything else is refused rather than guessed at.
- */
-export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
-  name: 'set_going',
-  label: 'Setting work going',
-  description:
-    'Put several pieces of work on the board at once. Each gets its own copy and its own agent, four run at a time, and they carry on without this conversation. Use it when a request breaks into pieces touching different files, one per area, rather than one list you walk yourself. A piece can wait for an earlier one.',
-  promptSnippet: 'set_going(pieces): put several pieces of work on the board, each in its own copy',
-  promptGuidelines: [
-    'Use it when a request breaks into pieces that touch different files. Two pieces changing one file will collide, and only one of them can be kept.',
-    'Say what each piece is in the words the person used, whole enough to be worked on by somebody who cannot see this conversation.',
-    'Give a piece `after` only when it genuinely cannot start until another has finished. A piece that waits is a piece not running.',
-    'Having set them going, say what you set going and stop. They are watched on the board, not here.',
-  ],
-  parameters: Type.Object({
-    pieces: Type.Array(
-      Type.Object({
-        doing: Type.String({ description: 'What this piece of work is, in plain words.', minLength: 1 }),
-        after: Type.Optional(
-          Type.Number({
-            description: 'The place in this list (1 for the first) of the piece this one waits for. Leave it out unless it truly cannot start first.',
-          }),
-        ),
-      }),
-      { description: 'The separate pieces of work, in the order they should be started.' },
-    ),
-  }),
-  executionMode: 'sequential',
-  execute: async (
-    _callId: string,
-    params: { pieces?: readonly { doing: string; after?: number }[] },
-  ): ToolResult => {
-    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
-    const asked = (params.pieces ?? []).filter((one) => one.doing.trim() !== '');
-    if (asked.length === 0) return say(APART_WORDS.none);
-    if (asked.length > MOST_APART) return say(APART_WORDS.tooMany);
-
-    // Names as the board gave them, by place in the list, so "after: 2" can be
-    // turned into the real name of the second piece.
-    const names: (string | null)[] = [];
-    const went: string[] = [];
-    const refused: string[] = [];
-    for (const [index, piece] of asked.entries()) {
-      const doing = piece.doing.trim();
-      const waitsFor = piece.after;
-      // Only ever an earlier one in this same list. A number pointing forwards,
-      // at itself, or at nothing is refused rather than turned into "waits for
-      // nothing in particular".
-      const wanted = waitsFor !== undefined && waitsFor >= 1 && waitsFor <= index ? waitsFor : null;
-      const after = wanted === null ? null : names[wanted - 1] ?? null;
-      // The one it was told it could not start without never went on. Starting
-      // it now is the opposite of what was asked for.
-      if (wanted !== null && after === null) {
-        names.push(null);
-        refused.push(`${doing}: ${APART_WORDS.lostItsTurn}`);
-        continue;
-      }
-      const answer = await put(doing, after);
-      names.push(answer.ok ? answer.id : null);
-      if (answer.ok) went.push(doing);
-      else refused.push(`${doing}: ${answer.because}`);
-    }
-
-    if (went.length === 0) {
-      return say(`Nothing went on the board.\n${refused.join('\n')}`);
-    }
-    const lines = [APART_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
-    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
-    lines.push(APART_WORDS.dontWait);
-    return say(lines.join('\n'));
-  },
-});
-
-/* -------------------------------------------------------------------------- */
-/* Correctness selection                                                       */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Select among completed candidates with objective signals.
- *
- * This is deliberately separate from `try_ways`: layouts and wording stay a
- * human choice; code with a right answer can be ranked by completed checks,
- * lint/type errors and diff size. It selects but never lands a copy, and it
- * refuses to name a winner while the best objective signal is still failing.
- */
-export const scoreCandidatesTool: ToolDefinition = {
-  name: 'score_candidates',
-  label: 'Selecting the correct candidate',
-  description:
-    'Select the best of N completed code candidates where there is a right answer. Completed project checks decide first, then lint/type errors, then smaller diff. Unknown is not clean; an unfinished or still-failing candidate cannot win. This ranks transparently and never lands a copy. Keep using try_ways for taste, where a person must choose.',
-  promptSnippet: 'score_candidates(candidates): rank N correct-answer candidates on measured evidence',
-  promptGuidelines: [
-    'Use only where there is a right answer. For layout, colour, wording or other taste, leave try_ways human-judged.',
-    'Run the same checks against every candidate and pass their real results. This ranks what you give it and cannot measure anything itself, so a number you did not actually take makes the answer confident rather than correct. Missing evidence is not a pass.',
-    'A null winner means stop: checks failed, did not finish, no objective signal exists, or the leaders tied.',
-    'This selects only. Never claim it landed or kept a working copy.',
-  ],
-  parameters: Type.Object({
-    candidates: Type.Array(
-      Type.Object({
-        id: Type.String({ minLength: 1 }),
-        ready: Type.Optional(Type.Boolean()),
-        checks: Type.Array(
-          Type.Object({
-            key: Type.String(),
-            name: Type.Optional(Type.String()),
-            ok: Type.Boolean(),
-            said: Type.String(),
-          }),
-        ),
-        lintErrors: Type.Optional(Type.Number({ minimum: 0 })),
-        typeErrors: Type.Optional(Type.Number({ minimum: 0 })),
-        diffLines: Type.Optional(Type.Number({ minimum: 0 })),
-      }),
-    ),
-  }),
-  executionMode: 'parallel',
-  execute: async (_callId, params: {
-    candidates: readonly {
-      id: string;
-      ready?: boolean;
-      checks: readonly { key: string; name?: string; ok: boolean; said: string }[];
-      lintErrors?: number;
-      typeErrors?: number;
-      diffLines?: number;
-    }[];
-  }): ToolResult => {
-    const candidates: CandidateSignals[] = params.candidates.map((one) => ({
-      id: one.id,
-      ...(one.ready === undefined ? {} : { ready: one.ready }),
-      checks: one.checks.map((check) => ({
-        check: { key: check.key, name: check.name ?? check.key, line: '' },
-        ok: check.ok,
-        said: check.said,
-      })),
-      ...(one.lintErrors === undefined ? {} : { lintErrors: one.lintErrors }),
-      ...(one.typeErrors === undefined ? {} : { typeErrors: one.typeErrors }),
-      ...(one.diffLines === undefined ? {} : { diffLines: one.diffLines }),
-    }));
-    const selection = selectCorrect(candidates);
-    const lines = [
-      selection.winner === null
-        ? `No winner: ${selection.reason}`
-        : `Winner: ${selection.winner}. ${selection.reason}`,
-      '',
-      'Ranking:',
-      ...selection.ranking.map(
-        (one) =>
-          `- ${one.id}${one.disqualified ? ' (disqualified)' : ''}: ${one.reasons.join('; ')}`,
-      ),
-    ];
-    return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-      details: { selection },
-    };
-  },
-};
-
-/**
- * Two or three goes at one thing, to be compared and chosen between.
- *
- * Not the same as several pieces of work: these are alternatives. They run at
- * the same time in their own copies, they finish as pictures beside each other,
- * and keeping one throws the rest away. On anything with taste in it the second
- * attempt is usually the good one, and this is the only way to have both.
- */
-export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
-  name: 'try_ways',
-  label: 'Trying it more than one way',
-  description:
-    'Make the same thing two or three ways, side by side, and keep one. Use it when the request has taste in it and no single right answer: a layout, a colour, a piece of writing, a page\'s shape. Not for a request with one correct result. Each way runs in its own copy; keeping one discards the rest.',
-  promptSnippet: 'try_ways(doing, ways): make the same thing two or three ways, and compare them',
-  promptGuidelines: [
-    'Use it where taste decides and there is no single right answer. Where there is one correct result, generate candidates separately and use score_candidates on the same objective checks.',
-    'Make the ways genuinely different from each other. Three versions of one idea is one idea, and the comparison is worthless.',
-    'Say what each way is in a sentence the person can tell apart from the others at a glance, because that is what they will read under the pictures.',
-  ],
-  parameters: Type.Object({
-    doing: Type.String({ description: 'What is being made, the same for every way.', minLength: 1 }),
-    ways: Type.Array(Type.String({ minLength: 1 }), {
-      description: 'How each go should differ: two or three genuinely different approaches.',
-    }),
-  }),
-  executionMode: 'sequential',
-  execute: async (callId: string, params: { doing?: string; ways?: readonly string[] }): ToolResult => {
-    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
-    const doing = (params.doing ?? '').trim();
-    const ways = (params.ways ?? []).map((one) => one.trim()).filter((one) => one !== '');
-    if (doing === '' || ways.length === 0) return say(WAYS_WORDS.none);
-    if (ways.length === 1) return say(WAYS_WORDS.one);
-    if (ways.length > MOST_WAYS) return say(WAYS_WORDS.tooMany);
-
-    const group = `ways-${callId}`;
-    const went: string[] = [];
-    const refused: string[] = [];
-    for (const way of ways) {
-      const answer = await put(`${doing}: ${way}`, null, group);
-      if (answer.ok) went.push(way);
-      else refused.push(`${way}: ${answer.because}`);
-    }
-
-    if (went.length === 0) return say(`Nothing went on the board.\n${refused.join('\n')}`);
-    const lines = [WAYS_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
-    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
-    return say(lines.join('\n'));
-  },
-});
 
 /* -------------------------------------------------------------------------- */
 /* The page beside the conversation                                           */
@@ -2659,7 +2412,6 @@ export const grapheTools = (
     webfetchTool,
     readDocumentTool,
     taskTool(agentDir, model, thinking, projectRoot, putOnBoard),
-    scoreCandidatesTool,
     // A browser of its own, on from the first turn. Every other agent ships one
     // and hides it behind a plugin; this one is simply there, and the program
     // behind it is fetched the first time somebody asks for a page rather than
@@ -2703,17 +2455,13 @@ export const grapheTools = (
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
-      lspTool(projectRoot),
-      lspRenameTool(projectRoot),
+      searchSymbolsTextTool(projectRoot),
     );
   } else {
-    tools.push(lspTool(process.cwd()), lspRenameTool(process.cwd()));
+    tools.push(searchSymbolsTextTool(process.cwd()));
   }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
-  // Only where there is a board to put work on. The runs on the board must not
-  // hold this tool: a piece that can fill the board it is running on is a loop.
-  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard), tryWaysTool(putOnBoard));
   // Only where a shell has said there is a page. Anywhere else — a helper in
   // its own process, a test — there is no page to work on and no tool for it.
   if (livePage !== null) tools.push(...pageTools(projectRoot));

@@ -15,6 +15,8 @@ import {
   policyFor,
   policyWords,
   saysPolicy,
+  saysToolsOnly,
+  saysToolsOnlyRefused,
   type Policy,
   type SessionKind,
 } from '../src/agent/pi/extension-policy';
@@ -26,6 +28,7 @@ function recorded(some: Partial<Recorded>): Recorded {
     tools: [],
     commands: [],
     sentTurns: false,
+    toolsOnly: false,
     source: '',
     ...some,
   };
@@ -39,6 +42,11 @@ const quiet: CapabilityCard = cardFrom(
 /** Takes the end of a turn and asks for another one. */
 const drives: CapabilityCard = cardFrom(
   recorded({ hooks: ['agent_end'], sentTurns: true, source: 'triggerTurn' }),
+);
+
+/** The same, and it says its tools stand on their own. */
+const answersAlone: CapabilityCard = cardFrom(
+  recorded({ hooks: ['agent_end'], sentTurns: true, toolsOnly: true, source: 'triggerTurn' }),
 );
 
 const SESSIONS: readonly SessionKind[] = ['conversation', 'board', 'helper', 'canvas'];
@@ -83,7 +91,7 @@ describe('what somebody chose for this conversation', () => {
      must not turn them on in four copies running overnight. */
   it('is honoured where they said it, and nowhere they did not', () => {
     for (const card of [quiet, drives, null]) {
-      for (const chosen of CHOICES) {
+      for (const chosen of ['on', 'off'] as const) {
         expect(policyFor(card, 'conversation', chosen)).toBe(chosen);
       }
       for (const session of SESSIONS.filter((one) => one !== 'conversation')) {
@@ -94,10 +102,50 @@ describe('what somebody chose for this conversation', () => {
     }
   });
 
+  /* Half an add-on is worse than none: it launches and never answers. So tools
+     only is honoured where the add-on itself says its tools stand on their
+     own, and is the coherent whole everywhere else — with the person told,
+     once, rather than being quietly handed the switch they did not set. */
+  it('takes tools only only from an add-on that says it can be run that way', () => {
+    expect(policyFor(answersAlone, 'conversation', 'tools-only')).toBe('tools-only');
+    for (const card of [quiet, drives, null]) {
+      expect(policyFor(card, 'conversation', 'tools-only')).toBe('on');
+      expect(saysToolsOnlyRefused(card)).toContain('runs whole');
+    }
+    expect(saysToolsOnlyRefused(null)).toContain('That add-on');
+    expect(saysToolsOnlyRefused(answersAlone)).toContain(answersAlone.id);
+  });
+
   it('leaves the default standing when nothing was chosen', () => {
     for (const card of [quiet, drives, null]) {
       for (const session of SESSIONS) {
         expect(policyFor(card, session, undefined)).toBe(policyFor(card, session));
+      }
+    }
+  });
+
+  /* Both directions of the hooks rule, as the loader meets it. A conversation
+     gets the whole add-on with its lifecycle handlers attached, because a hook
+     that delivers a tool's result is the difference between an add-on answering
+     and an add-on going quiet; and an add-on that cannot be run that way gets
+     the whole one too, with the person told, rather than the switch they set
+     being quietly ignored. */
+  it('keeps a conversation whole, and its hooks with it', () => {
+    for (const card of [quiet, drives, answersAlone, null]) {
+      for (const chosen of CHOICES) {
+        const verdict = policyFor(card, 'conversation', chosen);
+        const alone = saysToolsOnly(card);
+        // A conversation nobody has decided about runs the whole add-on, hooks
+        // and all: nothing is half-loaded there.
+        if (chosen === undefined) {
+          expect(verdict).toBe('on');
+          expect(dropsLifecycleHooks(verdict)).toBe(false);
+        }
+        // Tools only, and therefore the handlers let go of, only where the
+        // add-on itself says its tools stand on their own. Off is Off.
+        expect(verdict === 'tools-only').toBe(chosen === 'tools-only' && alone);
+        if (chosen === 'off') expect(verdict).toBe('off');
+        if (verdict === 'on') expect(dropsLifecycleHooks(verdict)).toBe(false);
       }
     }
   });
@@ -136,6 +184,8 @@ describe('the words', () => {
       policyWords.toolsOnly,
       policyWords.off,
       ...CHOICES.map((one) => saysPolicy(one)),
+      saysToolsOnlyRefused(drives),
+      saysToolsOnlyRefused(null),
     ];
     for (const line of everything) {
       expect(line).not.toMatch(/\b(hook|lifecycle|registers?|factory|extension|package|npm|API)\b/i);

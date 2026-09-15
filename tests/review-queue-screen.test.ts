@@ -42,7 +42,6 @@ const ENTRY: ReviewEntry = {
   title: 'Make the header sticky',
   address: 'a1',
   branch: 'graphe/conversation-2',
-  mirror: false,
   files: [
     { path: 'src/Header.tsx', added: 12, removed: 3 },
     { path: 'src/Header.css', added: 4, removed: 0 },
@@ -65,7 +64,6 @@ function draw(over: Partial<Props> = {}): { where: HTMLDivElement; props: Props 
     onDecide: vi.fn(),
     onLand: vi.fn(),
     onOpenPr: vi.fn(),
-    onMirror: vi.fn(),
     onRefresh: vi.fn(),
     onClose: vi.fn(),
     ...over,
@@ -215,20 +213,6 @@ describe('one entry', () => {
     const said = (onOpenPr.mock.calls[0] as [string, string])[1];
     expect(said).toContain('Make the header sticky');
     expect(said).toContain('src/Header.tsx');
-  });
-
-  /* A once-a-project choice, out of the way of the once-an-entry one. */
-  it('carries a live mirror switch per card, behind the entry’s own menu', () => {
-    const onMirror = vi.fn();
-    const { where } = draw({ onMirror });
-    expect(where.querySelector('[role="switch"]')).toBeNull();
-    act(() => where.querySelector<HTMLButtonElement>('.reviewq__menubtn')?.click());
-    const mirror = where.querySelector<HTMLButtonElement>('[role="switch"]');
-    expect(mirror?.getAttribute('aria-checked')).toBe('false');
-    // The sentence lives on the row in the menu and nowhere else.
-    expect(where.textContent).toContain(reviewWords.mirrorWhy);
-    act(() => mirror?.click());
-    expect(onMirror).toHaveBeenCalledWith('a1', true);
   });
 
   it('marks what nobody has opened yet, and counts it', () => {

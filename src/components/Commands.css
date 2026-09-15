@@ -72,6 +72,12 @@
 
 /* Both bodies scroll, and both are selectable: copying a command or a stack
    trace out of here is the reason somebody opened the drawer. */
+/* The drawer's own body, whether it is the record or somebody's shell. */
+.commands > .termpane {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .commands__pane,
 .commands__tail {
   flex: 1 1 auto;

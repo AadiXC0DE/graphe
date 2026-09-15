@@ -8,6 +8,8 @@
  * A method nobody calls is a passing test suite and a feature that does not
  * exist, so most of this is about the join: that the sitting is asked before
  * the session goes, and before the copy it learned from is taken away.
+ *
+ *  Source text, not behaviour: the shell asking a sitting to settle before its copy goes; no behavioural test can reach it — it needs a live sitting.
  */
 
 import { readFileSync } from 'node:fs';
@@ -31,10 +33,6 @@ describe('the sitting is asked before it goes', () => {
     const disposed = shell.indexOf('session?.dispose()', at);
     expect(at).toBeGreaterThan(-1);
     expect(disposed).toBeGreaterThan(at);
-  });
-
-  it('is asked when somebody closes a conversation themselves', () => {
-    expect(shell).toContain('found.held.settleUp()');
   });
 
   it('never lets a failed note-writing take the close down with it', () => {

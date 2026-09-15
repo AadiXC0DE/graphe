@@ -31,6 +31,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   Notification,
   screen,
   safeStorage,
@@ -43,7 +44,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { constants, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, join, resolve, sep } from 'node:path';
 import { dirname } from 'node:path';
@@ -57,14 +58,17 @@ import {
   createSession,
   warmUp,
   defaultAgentDir,
+  advisorScopeSaid,
   disconnectProvider,
   discoveredAccounts,
   importAccount,
   type Decision,
   type FoundAccount,
   type GrapheSession,
-  listConversations,
+  listAllConversations,
+  notePackagedApp,
   packageHost,
+  readTranscript,
   type Conversation,
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
@@ -73,13 +77,12 @@ import type { TokenUsageView } from '../src/lib/token-days';
 import { Running } from '../src/agent/running';
 import { fleet, readCeiling } from '../src/cost/fleet';
 import { getReady } from '../src/history/newcopy';
-import { watchWhileUsed, type Watching } from '../src/diff/capture';
 import { createLimit } from '../src/cost/limits';
 import { readTokenUsage } from './tokens';
 import { limitReached } from '../src/cost/phrasing';
 import { SpendRecorder } from '../src/cost/recorder';
 import { Timeline, type Version } from '../src/history/timeline';
-import { ProjectHistory, type LastChange } from '../src/history/repo';
+import { ProjectHistory } from '../src/history/repo';
 import {
   cannotOpen,
   everythingIn,
@@ -89,7 +92,7 @@ import {
   type Found,
 } from '../src/files/listing';
 import { changedAcross, childNamed, childRepos, SEVERAL_CHILDREN, type DetectedRepo } from './childRepos';
-import { browserFolder, browserFrame, forgetLogins } from '../src/agent/pi/computer';
+import { browserFolder, browserFrame, forgetLogins, sessionFor } from '../src/agent/pi/computer';
 import {
   ALWAYS_TEMPLATE,
   alwaysFile,
@@ -105,35 +108,36 @@ import { asComputerUse, type ComputerUse } from '../src/work/computeruse';
 import {
   CHANNEL,
   type Away,
-  type SideOfWork,
-  type AwayNotice,
   type ConnectedHealth,
   type ConnectedState,
   type AwayAfter,
   type AwayPiece,
-  type EveryKind,
-  type Repeating,
   type ComputerStatus,
   type ConnectOutcome,
   type ConnectStep,
   type ConnectionState,
-  type Decided,
   type Fetched,
-  type FileEntry,
+  type FilesRead,
   type GitBranch,
   type GitSnapshot,
-  type HandedOver,
   type Hatches,
-  type InStep,
-  type Landing,
   type ModelChoice,
   type OpenedProject,
-  type WentOnline,
+  type WorkspaceTrouble,
+  type SetupHere,
+  type SetupState,
+  type WorktreePlan,
+  type ExtensionAnswer,
+  type ExtensionAsk,
+  type TerminalKind,
+  type TextRead,
+  type TerminalSession,
   type Overview,
+  type Artifact,
   type RepoOverview,
-  type PointedAt,
   type Preferences,
   type PromptOptions,
+  type AppNotice,
   type PutBack,
   type RecentProject,
   type Result,
@@ -142,7 +146,13 @@ import {
   type RepoItem,
   type RepoLook,
   type AddonHere,
+  type ExtensionHere,
+  type StoppedAddition,
+  type AttachmentCopy,
+  type KeptAttachments,
+  type TrashView,
   type StorageNow,
+  type MigrationNow,
   type AddonReport,
   type CarriedExtension,
   type Room,
@@ -150,20 +160,14 @@ import {
   type AlwaysDoes,
   type Workflow,
   type SavedVersion,
-  type DesignChange,
   type ShowOutcome,
-  type VariationSpec,
-  type VariationsOutcome,
   type HowFar,
-  type Recording,
   type ShowProgress,
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
   modelKey,
   type Trouble,
-  type VisualChange,
-  type VisualFrames,
   type Where,
   type ReviewClash,
   type ReviewDecided,
@@ -172,22 +176,14 @@ import {
   setDownWords,
   whereIn,
 } from '../src/lib/ipc';
-import { saidFrom, type Said } from '../src/preview/tabs';
+import { asAddress, saidFrom, type Said } from '../src/preview/tabs';
 import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
 import { parseBranches } from '../src/lib/branches';
-import {
-  capture,
-  forget,
-  forgetEverything,
-  readPicture,
-  readShot,
-  whatMoved,
-} from '../src/diff/capture';
+import { capture, forgetEverything } from '../src/diff/capture';
+/** The board's own per-piece picture still comes from the capture pipeline's
+ *  camera, so this read of the turn stays: `looking.files` is what the artifacts
+ *  panel and the continue-conversation handoff are drawn from. */
 import { filesWrittenBy } from '../src/diff/changed';
-import { KEEP, landed, whatCouldBeSeen, type Shot } from '../src/diff/pairing';
-import type { Bitmap } from '../src/diff/regions';
-import { tellWhatHappened } from '../src/diff/summary';
-import { inDesignWords, readChanges, NOTHING_TO_SAY, type Edit } from '../src/design/words';
 import { isTrusted, trusting } from '../src/projects/carried';
 import { keeping, PreferenceFile } from '../src/projects/preferences';
 import { themeFrom } from '../src/lib/theme';
@@ -195,15 +191,35 @@ import { Recents } from '../src/projects/recents';
 import { addressed, Workspaces, type Workspace } from '../src/projects/workspaces';
 import { chosenFrom, findEditors, findTerminals, type Editor } from '../src/shell/editors';
 import { pagesIn, type Page } from '../src/preview/pages';
-import { packageShelf, type Pack } from '../src/agent/pi/packages';
+import { packageShelf, reloadWords, CANNOT_STOP, npmSetup, type Pack } from '../src/agent/pi/packages';
+import { extensionsIn } from '../src/agent/pi/extension-probe';
+import { extensionRows, type SeenHere, type SessionHere } from '../src/agent/pi/extension-states';
+import { ADVISOR_PACKAGE, fromPackage } from '../src/agent/advisor';
 import { availableSkills, selectedSkills, skillContents, skillNamed, skillsShippedWith } from '../src/agent/pi/skills';
 import { availableWorkflows, workflowNamed } from '../src/agent/pi/workflows';
-import { promptFor, workflowWords } from '../src/work/workflows';
+import { pickerCommands, routeFor, type AddonCommand } from '../src/agent/pi/commands';
+import { promptFor, workflowWords, type Workflow as WorkflowFile } from '../src/work/workflows';
 import { readCheckoutIndex, type Checkout } from '../src/history/checkouts';
-import { seedCheckout, seedWords } from '../src/history/seeding';
+import {
+  installDependencies,
+  installPlanAt,
+  chooseSetupFiles,
+  readSetupChoices,
+  seedFromChoices,
+  seedingCandidates,
+  seedingNotes,
+  seedWords,
+  type RunCommand,
+} from '../src/history/seeding';
 import { workspaceWords, type WorkspaceFacts } from '../src/work/workspaces';
+import {
+  dependenciesNotStarted,
+  setupFilesIn,
+  type Dependencies,
+} from '../src/projects/setup';
 import { renameTo } from '../src/history/naming';
 import {
+  blockingChanges,
   branchNames,
   beforeBringingWorkIn,
   bringBack,
@@ -212,12 +228,14 @@ import {
   landWorktree,
   landingWords,
   nextCheckoutName,
+  ownCopyWords,
   renameCheckoutBranch,
   dropWorktree,
   holdsWork,
   putAwayWorktree,
-  releaseWorktree,
   reopenWorktree,
+  repoKeyOf,
+  sameRepository,
   sharedBase,
   sweepCheckouts,
   worktreeWords,
@@ -233,11 +251,16 @@ import {
   markRead,
   queueFrom,
   reviewWords,
+  reviewedAgain,
+  staleDecision,
   withoutEntry,
   type Arriving,
   type Entry as ReviewQueued,
   type FileTally,
   type FileVerdict,
+  type ReviewSnapshot,
+  treeReading,
+  type TreeEntry,
   waiting as waitingToBeSeen,
   type Verdict as ReviewVerdict,
 } from '../src/work/reviewqueue';
@@ -250,6 +273,61 @@ import {
 } from '../src/work/notify';
 import { conflictWords, readConflict } from '../src/diff/conflict';
 import { preparePrWorktree } from './prWorktree';
+import { WorkspaceLocks } from './services/workspace-locks';
+import { writingIn, type Live, type LiveWriter } from './services/workspace-live';
+import { moveToTrash, TRASH_RULE, emptyTrash, listTrash, restoreFromTrash } from './services/trash';
+import { copyOf, keep, type Incoming } from './services/attachment-store';
+import { Terminals } from './services/terminal';
+import { interruptedWords, readRunNotes, tookRunNoteAway, wroteRunNote } from './services/run-record';
+import { readReviewIndex, reviewIndexText, type ReviewIndex } from './services/review-record';
+import {
+  diffKey,
+  fileKey,
+  fileRevision,
+  listRevision,
+  listingKey,
+  Readings,
+} from './services/readings';
+import { inFlight, movedByWork, reportedState, Sessions, type WorkEvent } from '../src/domain/conversations';
+import { asConversationId, newConversationId, type ConversationId } from '../src/domain/identity';
+import { Answered } from '../src/lib/answered';
+import { handoffMessage } from '../src/work/continuing';
+import {
+  isUnusable,
+  usableWhereRecorded,
+  unavailableFor,
+  whyNotRelink,
+  type FolderFacts,
+} from '../src/work/recovery';
+import {
+  MARKER_FILE,
+  LOCK_FILE,
+  commit,
+  discover,
+  readMarker,
+} from './services/migration-service';
+import { readoutOf } from './services/migration-readout';
+import {
+  addConversation,
+  addWorkspace,
+  conversationById,
+  conversationInFile,
+  attachConversation,
+  canonical,
+  emptyIndex,
+  ensureProject,
+  parseIndex,
+  projectAtPath,
+  serializeIndex,
+  setRepoKey,
+  updateConversation,
+  verdictOn,
+  workspaceAtPath,
+  workspaceById,
+  workspaceForConversation,
+  type WorkspaceIndex,
+  type WorkspaceRecord,
+} from './services/workspace-registry';
 import { RUNTIME_SCRATCH, keepOutOfCommits } from './excludes';
 import {
   addTasks,
@@ -276,11 +354,13 @@ import { GoalFile } from '../src/projects/goals';
 import { continuationOwner } from './continuation-owner';
 import { readAppearance } from '../src/design/appearance';
 import { batcher } from '../src/lib/batching';
-import { drainStarted, withoutOurs } from '../src/lib/queue';
+import { drainQueued, drainStarted, withoutOurs } from '../src/lib/queue';
 import { copiesFolder } from '../src/work/copies';
+import { rescuedCopies, rescueWords, writesAside, type Rescued } from '../src/work/rescue';
 import { checkoutWords, validateCheckouts } from '../src/history/checkouts';
 import {
   canClear,
+  brewOnPath,
   folderNamed,
   measureFolders,
   npmOnPath,
@@ -298,8 +378,8 @@ import { ended as noteEnded, started as noteStarted, watchWhatWeStart } from '..
 import { MENU_IDS, menuTemplate, type MenuItem } from './menu';
 import { gather, saysDiagnostics } from './diagnostics';
 import { MOST_ROWS, SKILL_BUDGET, standingBlock, standingWords, withinBudget } from '../src/agent/pi/standing';
-import { FlowFile } from '../src/projects/flows';
-import { readFlow, withFlow, withoutFlow, type Flow } from '../src/work/canvas';
+import { projectContextBlock, sharedFrom } from '../src/agent/pi/project-context';
+import { appWideFor } from './appwide';
 import { notHere, runHelper } from '../src/share/run';
 import {
   goalWords,
@@ -309,18 +389,9 @@ import {
   withElapsed,
   type Goal,
 } from '../src/work/goal';
-import { openingFor, type Opening } from '../src/agent/pi/conversations';
+import { openingFor, openingIn, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
-import { readTokens, steps, writeToken } from '../src/design/tokens';
-import { writeMotionAll } from '../src/motion/read';
-import { createReader, parseFigmaUrl } from '../src/design/figma';
-import { follow, throughFigma, type ReadDesign } from '../src/design/follow';
-import { findMoved, saysInStep, NOTHING_FOLLOWED, type Held as HeldDesign } from '../src/design/moved';
-import { FollowedFile } from '../src/projects/followed';
-import { lookAtEveryWidth } from '../src/diff/capture';
-import { readsWell, sizesFor, type Look } from '../src/design/widths';
-import { reviewPage, safeToShare, type Review, type Shown } from '../src/share/review';
-import { HeldWork, bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
+import { bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import {
   checkServer,
   forgetSignIn,
@@ -334,25 +405,10 @@ import {
 import { fetchHelper } from '../src/agent/pi/helper';
 import { REACHABLE } from '../src/agent/pi/reach';
 import { SecretFile, writeProviderAuth } from '../src/projects/secrets';
-import { holdsBack } from '../src/projects/heldback';
 import { keepsLogins } from '../src/projects/logins';
-import { AT_A_TIME, boardWords, saysCannotKeep, waysNumbering } from '../src/work/board';
-import { saysTook } from '../src/work/stack';
-import { formatMoney } from '../src/cost/money';
+import { AT_A_TIME, saysCannotKeep, waysNumbering } from '../src/work/board';
 import { awayWords, saysNotice, saysWhileAway, Unattended } from '../src/work/unattended';
 
-import {
-  addStanding,
-  dueNow,
-  ranStanding,
-  saysStanding,
-  standingFor,
-  switchStanding,
-  withoutProject,
-  withoutStanding,
-  type Standing,
-} from '../src/work/standing';
-import type { Repeat, TimeOfDay, Weekday } from '../src/work/schedule';
 import { keyFor, Notebook } from '../src/work/notebook';
 import { afterWords, Following } from '../src/work/after';
 import {
@@ -370,36 +426,20 @@ import {
   type Owner,
   type Written,
 } from '../src/work/written';
-import { StandingFile } from '../src/projects/standing';
-import { HandoverError, handToDeveloper, whatIsHere, type Change } from '../src/share/developer';
-import { handoverWords, worthTelling } from '../src/share/handover';
 import type {
   LivePage,
   PageAct,
   PageDone,
   PageReading,
   RunningPiece,
+  WaitingSend,
 } from '../src/agent/types';
 import { holdPage } from '../src/agent/pi/tools';
 import { attachedPaper, readPdfPages } from '../src/agent/pi/pdf';
-import { OnlineError, putOnline, whatIsHereForOnline } from '../src/share/publish';
-import { onlineWords } from '../src/share/online';
-import { canPutOnline, canSendItOn } from '../src/share/tools';
 
 import type { Serving } from '../src/preview/serve';
-import { lookAt, makeAndServe, ShowError, showSays } from '../src/preview/show';
-import { canBeShown, readTheFolder } from '../src/preview/detect';
+import { makeAndServe, ShowError, showSays } from '../src/preview/show';
 import { POINTER_SCRIPT, type Pointed } from '../src/preview/point';
-import {
-  read as readPointed,
-  saysReading,
-  type Material,
-  type Change as Touched,
-} from '../src/preview/inspect';
-import { readUsage } from '../src/design/usage';
-import { photographHeld, type Held as HeldPictures } from '../src/diff/holdshot';
-import { dropShots, holdCamera, keepShots } from '../src/diff/holdcamera';
-import { howMuchBy, nextAccepted } from '../src/design/gate';
 import { knownTrouble, plainMessage, plainTrouble } from './plainly';
 
 /**
@@ -520,6 +560,12 @@ const DEV_SERVER = process.env['GRAPHE_DEV_SERVER_URL'] ?? 'http://localhost:527
  *  `npm run build && GRAPHE_LOAD=build npx electron .` */
 const isDev = !app.isPackaged && process.env['GRAPHE_LOAD'] !== 'build';
 
+/* Only the shell knows how this copy was built, and the adapter needs it: the
+   scripted model a test run may ask for is refused in a shipped app. Said here
+   rather than read there, because importing Electron to ask would take the
+   adapter out of every test that loads it. */
+notePackagedApp(app.isPackaged);
+
 /* -------------------------------------------------------------------------- */
 /* What people are told when something does not work                          */
 /* -------------------------------------------------------------------------- */
@@ -546,6 +592,42 @@ function fail<T>(trouble: Trouble): Result<T> {
 
 function done<T>(value: T): Result<T> {
   return { ok: true, value };
+}
+
+/**
+ * The `/` picker's list, and what each row will actually do.
+ *
+ * A way of working is a prompt file; an add-on's command runs in Pi's command
+ * context. Both are rows, because somebody looking for a thing to do should not
+ * have to know which of the two wrote it — but the row carries the difference,
+ * since one of them is a sentence and the other is not.
+ */
+function rowsForThePicker(
+  workflows: readonly WorkflowFile[],
+  addons: readonly AddonCommand[],
+): readonly Workflow[] {
+  const byCommand = new Map(workflows.map((one) => [one.command, one]));
+  return pickerCommands(workflows, addons).map((row) => {
+    const workflow = byCommand.get(row.command);
+    if (row.runs === 'workflow') {
+      return {
+        command: row.command,
+        name: row.name,
+        description: row.description,
+        hint: workflow?.hint ?? null,
+        source: workflow?.source ?? 'global',
+      };
+    }
+    return {
+      command: row.command,
+      name: row.name,
+      description: row.description,
+      hint: null,
+      source: 'extension' as const,
+      from: row.from,
+      shadowed: row.shadowed,
+    };
+  });
 }
 
 /** A window-typed `FoundAccount` checked at the door: only a handful of
@@ -647,13 +729,6 @@ const SEVERAL_PROJECTS: Trouble = {
   actionLabel: 'Got it',
 };
 
-/** A set that could not be put in an order at all — a round trip, or something
- *  in it that has not finished. The sentence is stack.ts's; this only puts it
- *  where the window draws one. */
-function couldNotTakeSet(because: string): Trouble {
-  return { what: because, because: '', actionLabel: 'Got it' };
-}
-
 /**
  * The files moved under every conversation in this project.
  *
@@ -695,12 +770,6 @@ const COULD_NOT_TIDY: Trouble = {
   actionLabel: 'Got it',
 };
 
-/** A wait that could never come round. The sentence is src/work/after.ts's; all
- *  this does is put it where the window already knows to draw one. */
-function couldNotWait(because: string): Trouble {
-  return { what: 'I did not set that up.', because, actionLabel: 'Got it' };
-}
-
 /** The line stays where it is, and says so. */
 function couldNotTakeBack(because: string): Trouble {
   return {
@@ -723,12 +792,12 @@ const NOTHING_TO_SHOW: Trouble = {
   actionLabel: 'Got it',
 };
 
-/** The before-and-after has been cleared away — a long conversation keeps only
- *  the last dozen pictures. Nothing has gone wrong and nothing of theirs is
- *  missing, so it says what it is rather than apologising. */
-const NO_SUCH_PICTURE: Trouble = {
-  what: 'I do not have those pictures any more.',
-  because: 'I keep the last few before-and-afters and let the older ones go.',
+/** A call about the page that names a project the page does not belong to. The
+ *  page is one view for the whole window, so acting on it would reach somebody
+ *  else's page. */
+const NOT_THIS_PAGE: Trouble = {
+  what: 'That page is not the one on screen.',
+  because: 'The page beside the conversation belongs to another project, so I left it alone.',
   actionLabel: 'Got it',
 };
 
@@ -813,11 +882,6 @@ function send(project: string | null, event: AgentEvent, conversation?: string):
 function tell(progress: ShowProgress): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send(CHANNEL.showProgress, progress);
-}
-
-function showChange(project: string, change: VisualChange): void {
-  if (mainWindow === null || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send(CHANNEL.visualChange, { project, change });
 }
 
 /** Ours, or somebody else's? Everything not served by our own dev server or
@@ -954,7 +1018,6 @@ async function load(win: BrowserWindow): Promise<void> {
  * anything belonging to the app itself.
  */
 let pageView: WebContentsView | null = null;
-let pageWatching: Watching | null = null;
 /** Which project the page belongs to, so a click in it is read against the
  *  right folder. */
 let pageProject: string | null = null;
@@ -1047,13 +1110,36 @@ function dropPageView(): void {
   const view = pageView;
   pageView = null;
   pageProject = null;
-  void pageWatching?.stop().catch(() => undefined);
-  pageWatching = null;
   if (view === null) return;
   if (mainWindow !== null && !mainWindow.isDestroyed()) {
     mainWindow.contentView.removeChildView(view);
   }
   view.webContents.close();
+}
+
+/**
+ * The project a page command names, or null when the call is about a page this
+ * shell is not the one for.
+ *
+ * One view and one watcher are shared by the whole window, so a call that names
+ * a project other than the one the page belongs to — or names nothing at all —
+ * is a call about a page that is not this one: pointing, hiding or recording it
+ * would reach somebody else's page. Naming a project while no page is up is
+ * what starts one, and answers with that project's own path.
+ */
+function pageNamed(where: Where): string | null {
+  if (where.project === undefined) return null;
+  const open = projectAt(where);
+  if (open === null) return null;
+  if (pageProject !== null && pageProject !== open.path) {
+    /* The project the page belongs to may have been closed while its page was
+       up. A view nobody owns any more must not hold the page hostage: it goes,
+       and this call is then about a page that is not up yet. Nothing else would
+       ever drop it — the one call that could is the one being refused. */
+    if (!workspaces.open.some((one) => one.path === pageProject)) dropPageView();
+    else return null;
+  }
+  return open.path;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1520,7 +1606,7 @@ holdPage({
 ipcMain.on(CHANNEL.pagePointed, (event, pointed: Pointed) => {
   if (pageView === null || event.sender !== pageView.webContents) return;
   if (pageProject === null) return;
-  sayPointed(pageProject, pointed);
+  sayPointed(pointed);
 });
 
 /** Where the window was last, and how big. Always the same 1100×780 before
@@ -1637,7 +1723,7 @@ function createWindow(): void {
     if (mainWindow === win) mainWindow = null;
     // Only when there is nothing left going. A run holding a copy of somebody's
     // project open must not lose its session because a window was shut.
-    if (!mustStayUp()) closeSession();
+    if (!stillGoing()) closeSession();
   });
 
   void load(win);
@@ -1656,77 +1742,20 @@ function createWindow(): void {
  * another's afternoon the first time somebody switched.
  */
 /**
- * What this project's before-and-after needs to remember between turns.
+ * The files this project's turns have written.
  *
- * All of it per project, like everything else on a `Held` — a picture taken in
- * one folder must never be offered as the "before" of a change in another.
+ * Per project, like everything else on a `Held`: what one folder's agent
+ * touched says nothing about another's. Read by the artifacts panel and by the
+ * handoff a continued conversation starts from.
  */
 type Looking = {
-  /** Pictures taken here, oldest last. */
-  shots: Shot[];
-  /** The newest picture's pixels, held so the next comparison does not have to
-   *  read a megabyte back off the disk to find out that one button moved. */
-  pixels: Bitmap | null;
-  /** The newest picture, small, for the strip's "before" half. */
-  thumbnail: string | null;
-  /** What was asked for this turn, in their words. */
-  instruction: string | null;
-  /** Everything written since the last picture. A set, because an agent that
-   *  edits one file six times has changed one file. */
+  /** Everything written this sitting. A set, because an agent that edits one
+   *  file six times has changed one file. */
   files: Set<string>;
-  /** True once a picture has been attempted here, however it went.
-   *
-   *  Not "we have one" — "we have tried". The difference matters for a project
-   *  that cannot be built: without it, every single turn would keep trying for
-   *  a first picture, including the turns that only touched the notes file. */
-  tried: boolean;
-  /** True while a picture is being taken. Nothing waits on it. */
-  busy: boolean;
-  /** Something else changed while we were busy. Take another when this ends. */
-  again: boolean;
-  /** Change id → the two files behind it, for `visualFrames`. */
-  frames: Map<string, { before: string; after: string }>;
-  /** The same changes in the words already written beside them, kept so handing
-   *  the work to somebody else does not have to describe it a second time in a
-   *  second voice. */
-  told: Map<string, Change>;
-  /** Version id → what the project looked like at it, small, ready to draw.
-   *  Small pictures rather than paths so the rail never waits on a disk. */
-  pictures: Map<string, string>;
-  counter: number;
 };
 
 function nothingSeenYet(): Looking {
-  return {
-    shots: [],
-    pixels: null,
-    thumbnail: null,
-    instruction: null,
-    files: new Set(),
-    tried: false,
-    busy: false,
-    again: false,
-    frames: new Map(),
-    told: new Map(),
-    pictures: new Map(),
-    counter: 0,
-  };
-}
-
-/** As many changes as a person will read in one sitting before approving them.
- *  Past this it is an archive, and nobody approves an archive. */
-const TOLD = 12;
-
-/** File a picture under the version it shows, oldest let go once there are more
- *  than the folder itself keeps. Same ceiling as the pictures on disk, so the
- *  rail never claims to remember more than there is. */
-function rememberPicture(looking: Looking, versionId: string, picture: string): void {
-  looking.pictures.delete(versionId);
-  looking.pictures.set(versionId, picture);
-  for (const oldest of looking.pictures.keys()) {
-    if (looking.pictures.size <= KEEP) break;
-    looking.pictures.delete(oldest);
-  }
+  return { files: new Set() };
 }
 
 /**
@@ -1766,9 +1795,7 @@ type Held = {
   running: Running;
   /** The finished site being looked at, if "See it" has been pressed here. */
   serving: Serving | null;
-  /** Every variation in the set in front, each served on its own address. */
-  variations: readonly Serving[];
-  /** The before-and-after (BACKLOG F2). */
+  /** The files this project's turns have written. */
   looking: Looking;
   /** Conversations being explicitly landed or discarded. Their stop emits a
    *  synthetic settle, but that settle must not start the ordinary asynchronous
@@ -1789,31 +1816,15 @@ type Held = {
   /** Finished work waiting to be looked at, before any of it touches the
    *  person's folder. Newest first, as the queue keeps it. */
   review: readonly ReviewQueued[];
-  /** Conversations still carrying their work home on every settle, by address.
-   *  The per-card way back to how this behaved before the queue. */
-  mirroring: Set<string>;
+  /** Addresses that had live mirror on when this profile was last written by a
+   *  version that had it. Kept so an old setting is not lost, never applied:
+   *  a finished turn does not move files into anybody's folder any more. */
+  mirroringLegacy: readonly string[];
   /** A conversation's own checkout, by its address. Present only for the ones
    *  running isolated in a worktree — the primary conversation works directly
    *  on the project folder. The branch is the durable half: the folder is put
    *  away when nobody is in it and spread out again from the branch. */
   checkouts: Map<string, Checkout>;
-  /** Work being checked before it reaches the files, or null when none is.
-   *  Single slot for now; per-child (Map<repo, HeldWork>) is the follow-up
-   *  once worktreeLand/Drop prove stable in polyrepo. */
-  waiting: HeldWork | null;
-  /**
-   * The session running that check, while it runs.
-   *
-   * It works in a copy and is nobody's conversation, so nothing in the map of
-   * conversations can reach it — and it draws its cards into the person's own
-   * thread all the same. Without a way back to it, a question it asked was
-   * answered into a session that had never heard of it and the run waited
-   * forever, with Stop reaching the wrong session too.
-   */
-  checking: GrapheSession | null;
-  /** What that work would look like, photographed in the copy while the copy
-   *  still existed. Null until it has been, or when nothing came out. */
-  pictures: HeldPictures | null;
   /** True while something is being sent off this computer, so a second press
    *  cannot start a second one. */
   sending: boolean;
@@ -1881,30 +1892,101 @@ const workspaces = new Workspaces<Held>({
    * busy, `adopt` keeps them all rather than picking one to end.
    */
   mayEvict: (held) =>
-    // Everything a project can have going, not only its conversations. A check
-    // running in a copy is nobody's conversation and work waiting to be looked
-    // at is nobody's either — and closing a project ends all of it.
-    held.checking === null &&
-    held.waiting === null &&
+    // Everything a project can have going, not only its conversations.
     held.running.list().length === 0 &&
     held.sessions.open.every(
       (one) =>
         !one.held.working && !one.held.listening && one.held.awaitingAnswer.length === 0,
     ),
   close: (held) => {
-    held.sessions.closeAll();
+    for (const one of held.sessions.open) putDown(held, one.path);
     held.running.stopAll();
     void held.serving?.stop();
-    for (const served of held.variations) void served.stop();
-    // The copy goes; whatever it made stays reachable, so closing a project
-    // while something waits in it cannot be how somebody loses work.
-    void held.waiting?.release();
   },
 });
 
 /* -------------------------------------------------------------------------- */
 /* Which project, which conversation                                          */
 /* -------------------------------------------------------------------------- */
+
+/** The name a conversation's runtime answers to. The shell addresses one by the
+ *  transcript it is written in, or by the name it has until it has one; the
+ *  state of things is keyed by that same string, so a conversation cannot be
+ *  running under one name and idle under another. */
+function named(address: string): ConversationId {
+  return asConversationId(address);
+}
+
+/** The project folder a conversation belongs to, or null when nothing holds it.
+ *  An address is only meaningful inside a project, and the note a run leaves
+ *  has to say which one it was in. */
+function projectHolding(address: string): string | null {
+  for (const one of workspaces.open) {
+    if (one.held.sessions.find(address) !== null) return one.path;
+  }
+  return null;
+}
+
+/**
+ * Where every conversation's runtime is, and the note it leaves behind.
+ *
+ * The note goes on disk as it changes, so a launch after a crash reads back the
+ * runs that were still going. Nothing here starts anything: a note is answered
+ * by being read, never by being reissued.
+ */
+const states = new Sessions({
+  wrote: (facts) => {
+    const project = projectHolding(facts.conversationId);
+    if (project === null) return;
+    // Not awaited: nothing downstream waits on the file, and the note is
+    // answered by the next launch reading it rather than by this call.
+    void wroteRunNote(app.getPath('userData'), facts, project);
+  },
+});
+
+/**
+ * Runs a launch found unfinished, by conversation, until each is said once.
+ *
+ * Read at launch from the profile, and said the first time somebody looks at
+ * the conversation it belongs to. It is memory rather than a second file: what
+ * survives is the fact that the run was cut off, and one sentence is enough to
+ * carry that.
+ */
+const interruptedRuns = new Map<string, string>();
+
+/**
+ * Say what a restart found, and take the note away.
+ *
+ * Once per conversation per launch. What was interrupted is not restarted: the
+ * turn was somebody's, they are not waiting for it any more, and picking it up
+ * would spend their money on work they have not asked for.
+ */
+function tookInterruptedNote(address: string): string | null {
+  const said = interruptedRuns.get(address);
+  if (said === undefined) return null;
+  interruptedRuns.delete(address);
+  return said;
+}
+
+/** What the last launch was in the middle of, read before anything can open. */
+function readWhatWasRunning(): void {
+  const userData = app.getPath('userData');
+  const notes = readRunNotes(userData);
+  for (const note of notes) {
+    const conversation = note.conversationId;
+    // The facts as the process that died wrote them, then what a launch makes
+    // of them. Nothing is reissued: the turn was somebody's, they are not
+    // waiting for it any more, and starting it again would spend their money on
+    // work nobody asked for.
+    states.remembered(note);
+    states.recovered(conversation);
+    interruptedRuns.set(conversation, interruptedWords(note));
+    // Answered, so taken away: none of these are in flight any more, and a note
+    // left behind would say the same thing at every launch from here.
+    void tookRunNoteAway(userData, conversation);
+  }
+  if (notes.length > 0) log.line('info', 'runs interrupted by a stop', { count: notes.length });
+}
 
 /** The project named, or the one in front. Never the nearest one: a project that
  *  is not open is nothing, the same way `Workspaces.find` says it. */
@@ -1930,17 +2012,86 @@ function workingAt(open: Workspace<Held>, where: Where): GrapheSession | null {
   return found.held;
 }
 
-/** What a conversation answers to for as long as it is open. The file it is
- *  written down in, or a name of its own until there is one. */
-let unwritten = 0;
-function addressOf(session: GrapheSession): string {
-  return session.conversation ?? `new-${String(++unwritten)}`;
+/**
+ * The id a conversation is known by for the whole of its life.
+ *
+ * Minted when the chat is made and kept when it is written down, so a
+ * conversation nobody has sent in yet has an identity of its own rather than a
+ * name taken from how many chats the process had already made. A counter
+ * restarts with the process, so a draft kept under one could resurface in a
+ * later launch's new chat; a generated id cannot.
+ *
+ * The transcript is an attribute of the conversation, not the conversation, so
+ * the id does not change when Pi writes one.
+ */
+function newAddress(): string {
+  return newConversationId();
+}
+
+/**
+ * The id for the conversation a session is, reusing the one already written
+ * down for the transcript it holds.
+ *
+ * A conversation opened again is the conversation already recorded rather than
+ * a second row pointing at the same file, so the record is found by the file
+ * before an id is made.
+ */
+function addressFor(session: GrapheSession): string {
+  const file = session.conversation;
+  const known =
+    file === null || !workspaceIndexLoaded ? null : conversationInFile(workspaceIndex, file);
+  return known?.conversationId ?? newAddress();
+}
+
+/**
+ * A checkout row filed under the name a conversation used to be known by.
+ *
+ * Rows written by an older version are keyed by the Pi transcript, because that
+ * is what an address was then. They are moved onto the conversation's own id
+ * the first time it is opened, so the row is not orphaned by the change.
+ */
+function claimCheckout(held: Held, address: string, session: GrapheSession): void {
+  const file = session.conversation;
+  if (file === null || file === address) return;
+  const row = held.checkouts.get(file) ?? held.checkouts.get(address);
+  if (row === undefined) return;
+  held.checkouts.delete(file);
+  held.checkouts.set(address, row);
+}
+
+/**
+ * What a conversation is called, by the session holding it.
+ *
+ * Found rather than made: a call that is only asking the name of a live
+ * conversation must not mint a second identity for it. A session nobody has
+ * adopted has no name of its own yet, and its transcript is the honest answer.
+ */
+function addressOf(held: Held, session: GrapheSession): string {
+  return held.sessions.open.find((one) => one.held === session)?.path ?? session.conversation ?? '';
 }
 
 /** Put a conversation in front of its project. Whatever it is called on the
  *  shelf, so the sentence about one being put down names a thing, not an id. */
 function keepConversation(held: Held, address: string, session: GrapheSession): void {
   held.sessions.adopt({ path: address, name: session.name ?? address, held: session });
+}
+
+/**
+ * Put a conversation's runtime down.
+ *
+ * The state follows the runtime: nothing is holding the conversation any more,
+ * so it is `unloaded` rather than idle, and its note comes off the disk with it.
+ * A conversation with a run in flight is not one of these — ending a run is
+ * Stop's job, and a caller that has not stopped it must not put it down.
+ */
+function putDown(held: Held, address: string): void {
+  held.sessions.close(address);
+  const conversation = named(address);
+  // A runtime dropped with something in flight leaves an attempt that never
+  // finished, which is what `interrupted` means; `unloaded` is for one that was
+  // quiet when it was put down.
+  const was = states.stateOf(conversation);
+  states.move(conversation, inFlight(was) ? 'interrupted' : 'unloaded', Date.now());
 }
 
 /**
@@ -2164,6 +2315,43 @@ function imageCards(value: unknown): readonly ImageCard[] | undefined {
 }
 
 /**
+ * What arrived over the wire, as the store takes it.
+ *
+ * The same shape `imageCards` and `paperWords` read, normalised once more for
+ * the profile: name, kind, type, and the bytes decoded out of base64. Entries
+ * that do not look like an attachment are let go rather than refused, so one
+ * odd entry costs the message nothing.
+ */
+function whatWasAttached(value: unknown): readonly Incoming[] {
+  if (!Array.isArray(value)) return [];
+  const files: Incoming[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const attached = entry as Record<string, unknown>;
+    const kind = attached['kind'];
+    const name = attached['name'];
+    const mimeType = attached['mimeType'];
+    const bytes = attached['bytes'];
+    if (
+      (kind !== 'image' && kind !== 'document') ||
+      typeof mimeType !== 'string' ||
+      mimeType === '' ||
+      typeof bytes !== 'string' ||
+      bytes === ''
+    ) {
+      continue;
+    }
+    files.push({
+      name: typeof name === 'string' && name !== '' ? name : 'attachment',
+      kind,
+      mimeType,
+      bytes: Buffer.from(bytes, 'base64'),
+    });
+  }
+  return files;
+}
+
+/**
  * What arrived as documents, read into the words that go with the message.
  *
  * A PDF cannot travel to the model as a PDF — the session carries text and
@@ -2221,6 +2409,12 @@ async function gitRun(cwd: string, args: string[]): Promise<{ code: number; out?
 /** A mistake to hold the window by, in the shape a reading makes. */
 function worktreeTrouble(because: string): Trouble {
   return { what: 'This conversation needs its own checkout.', because, actionLabel: 'Got it' };
+}
+
+/** A refused merge, with both sides named. The two workspaces are the whole
+ *  point of the action, and neither was ever said out loud. */
+function mergeTrouble(copy: string, target: string, because: string): Trouble {
+  return { what: `I could not merge ${copy} into ${target}.`, because, actionLabel: 'Got it' };
 }
 
 function readGitStatus(cwd: string): Promise<GitSnapshot | null> {
@@ -2293,6 +2487,45 @@ async function readRepoOverview(one: DetectedRepo): Promise<RepoOverview | null>
   const git = await readGitStatus(one.path);
   if (git === null) return null;
   return { name: one.rel, path: one.path, git: { ...git, branches: await readBranches(one.path) } };
+}
+
+/**
+ * The things a turn made that are in this folder.
+ *
+ * A relative path is spelled from the folder the agent was working in, so it is
+ * read from the folder this answer is about. A file that is not there — one
+ * written in another conversation's copy, or in the project while this chat
+ * works in its own checkout — is not this panel's to show, and is left out
+ * rather than offered as something it never wrote.
+ */
+async function artifactsIn(folder: string, files: Iterable<string>): Promise<readonly Artifact[]> {
+  const made = artifactsAmong([...files]);
+  const there = await Promise.all(
+    made.map(async (one) => {
+      const found = await stat(resolve(folder, one.path)).catch(() => null);
+      return found !== null && found.isFile() ? one : null;
+    }),
+  );
+  return there.filter((one): one is Artifact => one !== null);
+}
+
+/**
+ * The preview address a panel may show for the folder it is about.
+ *
+ * Nothing served there is nothing to show: a preview of another conversation's
+ * own copy, or of some other project, is not this panel's page to open. A folder
+ * that holds several projects is the one case where the answer is not the
+ * folder's own: the repositories it names below are where a preview of it can be
+ * served from, and each of those is identified by name.
+ */
+function previewForPanel(
+  serving: Serving | null,
+  folder: string,
+  named: readonly RepoOverview[] | undefined,
+): string | null {
+  if (serving === null) return null;
+  if (serving.folder === folder) return serving.address;
+  return (named ?? []).some((one) => one.path === serving.folder) ? serving.address : null;
 }
 
 /** What the agent is told about a folder holding several projects: the names,
@@ -2442,21 +2675,6 @@ function repoItem(raw: Record<string, unknown>, kind: 'issue' | 'pr'): RepoItem 
  *  one call. Null when this folder is not a github repo, or gh is not ready —
  *  both are "nothing to show" rather than a failure.
  */
-/**
- * Whether a conversation's copy is on the same line of work as the project.
- *
- * Unreadable either side answers no. Not knowing is not a reason to write into
- * somebody's folder, and the work is never lost by staying where it was made.
- */
-async function onTheSameLine(project: string, folder: string): Promise<boolean> {
-  const here = await gitRun(project, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  const there = await gitRun(folder, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (here.code !== 0 || there.code !== 0) return false;
-  const a = (here.out ?? '').trim();
-  const b = (there.out ?? '').trim();
-  return a !== '' && b !== '' && a === b;
-}
-
 /** The line of work this folder is on, and the commit it sits at. A review that
  *  does not know this reads whatever happens to be checked out and reports it as
  *  the pull request. */
@@ -2662,186 +2880,34 @@ async function ghComment(
   });
 }
 
-/* -------------------------------------------------------------------------- */
-/* The before and after                                                        */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A picture of the project, and what it says next to the one before it.
- *
- * BACKLOG F2, and the README's oldest unkept promise: *"You see what changed,
- * as a picture. A before and after of the page itself, plus a sentence
- * describing what moved."*
- *
- * ## Nothing waits on this
- *
- * Not one caller awaits it. It starts after a turn has already settled — after
- * the reply has finished streaming, after the versions have been refreshed —
- * and the conversation is usable throughout. Getting a project ready can take
- * half a minute on a cold folder, and a person who has to wait half a minute to
- * be told what they can already see on screen would rightly turn this off.
- *
- * ## And nothing is said when it fails
- *
- * Every failure here is silence. A project that will not build, a page that
- * never loads, a folder we cannot write into: none of that is something the
- * person did, none of it changed anything, and a card saying "I could not take
- * a screenshot" is an app talking about itself in the middle of somebody's
- * work.
- */
-async function look(project: string, held: Held): Promise<void> {
-  const looking = held.looking;
-  // Held onto out here: the block below declares a `held` of its own for the
-  // older picture, and the timeline is still wanted after it.
-  const timeline = held.timeline;
-  if (looking.busy) {
-    looking.again = true;
-    return;
-  }
-
-  looking.busy = true;
-  try {
-    // Taken now and cleared now, so a turn that arrives while the picture is
-    // being taken starts its own list rather than inheriting this one.
-    const changed = whatCouldBeSeen(looking.files);
-    const instruction = looking.instruction;
-    const first = !looking.tried;
-    looking.files = new Set();
-    looking.instruction = null;
-    looking.tried = true;
-
-    // Nothing that could move a pixel. The picture we already have is still
-    // true, so there is nothing to take and nothing to say.
-    if (!first && changed.length === 0) return;
-
-    // On the way in, everything left over from last time goes. A pairing is
-    // "the picture before this one" and that only exists in memory, so nothing
-    // already in the folder can ever be compared against anything — and left
-    // alone it would grow by one picture per launch, forever.
-    if (first) await forgetEverything(project);
-
-    const id = `${Date.now().toString(36)}-${looking.counter}`;
-    looking.counter += 1;
-
-    const taken = await capture({ folder: project, id });
-    if (taken === null) return;
-
-    const shelved = landed(looking.shots, taken.picture);
-    looking.shots = [...shelved.kept];
-    void forget(shelved.forget.map((one) => one.file));
-
-    // The picture is of the project as it now stands, which is the version it
-    // now stands at. That is the only moment the two are known to match. A
-    // folder holding several projects has no folder-level version to name —
-    // the picture still lands, it just remembers no version.
-    const at = timeline === null ? null : await timeline.currentVersion().catch(() => null);
-    if (at !== null) rememberPicture(looking, at.id, taken.thumbnail);
-
-    // The older half. Usually still in hand from last time; read back off the
-    // disk only when it is not, which is the case where the project was opened,
-    // photographed, and then left alone long enough for nothing else to happen.
-    const before = shelved.pair === null ? null : shelved.pair.before;
-    const held =
-      before !== null && (looking.pixels === null || looking.thumbnail === null)
-        ? await readShot(before.file)
-        : null;
-    const beforePixels = before === null ? null : (looking.pixels ?? held?.bitmap ?? null);
-    const beforeThumb = before === null ? null : (looking.thumbnail ?? held?.thumbnail ?? null);
-
-    // Whatever happens next, this is the picture the following turn compares
-    // itself against.
-    looking.pixels = taken.bitmap;
-    looking.thumbnail = taken.thumbnail;
-
-    if (before === null || beforePixels === null || beforeThumb === null) return;
-
-    const moved = whatMoved(beforePixels, taken.bitmap);
-    // Two pictures the same. It happens — a change to a file that only shows on
-    // a page we did not photograph, or below where the picture stops. Showing a
-    // before and after with nothing between them teaches people that the strip
-    // is noise, and then they stop opening the ones that matter.
-    if (moved.fraction === 0) return;
-
-    const told = tellWhatHappened({
-      files: changed,
-      instruction: instruction ?? undefined,
-      areas: moved.areas,
-      fraction: moved.fraction,
-    });
-
-    looking.frames.set(id, { before: before.file, after: taken.picture.file });
-
-    const said =
-      timeline === null ? null : await saidInDesignWords(timeline, project, changed);
-    // The same words the strip shows, kept for whoever this work is handed to.
-    // Two descriptions of one change is how somebody starts wondering which is
-    // true, so there is only ever the one.
-    looking.told.set(id, {
-      title: told.headline,
-      says: said ?? told.headline,
-      where: told.where,
-      before: before.file,
-      after: taken.picture.file,
-    });
-    for (const oldest of looking.told.keys()) {
-      if (looking.told.size <= TOLD) break;
-      looking.told.delete(oldest);
-    }
-
-    showChange(project, {
-      id,
-      at: taken.picture.at,
-      headline: told.headline,
-      inDesignWords: said,
-      where: told.where,
-      areas: moved.areas,
-      beforeThumb,
-      afterThumb: taken.thumbnail,
-      width: taken.picture.width,
-      height: taken.picture.height,
-    });
-  } catch {
-    // Silence, deliberately. See the note above.
-  } finally {
-    looking.busy = false;
-    if (looking.again) {
-      looking.again = false;
-      void look(project, held);
-    }
-  }
-}
-
-/**
- * What changed, in the vocabulary of design rather than of files.
- *
- * "Spacing on three cards, from 16 to 24" instead of "edited Card.tsx". The
- * before is the last saved version of each file and the after is what is on
- * disk now; anything unreadable is simply left out of the comparison.
- */
-async function saidInDesignWords(
-  timeline: Timeline,
-  root: string,
-  files: readonly string[],
-): Promise<string | null> {
-  const current = await timeline.currentVersion().catch(() => null);
-  if (current === null) return null;
-  const edits: Edit[] = [];
-  for (const file of files.slice(0, 20)) {
-    const [before, after] = await Promise.all([
-      timeline.fileAt(current.id, file).catch(() => null),
-      readFile(join(root, file), 'utf8').catch(() => null),
-    ]);
-    if (before === null || after === null || before === after) continue;
-    edits.push({ file, before, after });
-  }
-  if (edits.length === 0) return null;
-  const said = inDesignWords(readChanges(edits));
-  return said === NOTHING_TO_SAY ? null : said;
-}
-
 /** Which conversation a relay is speaking for. Filled the moment the session
  *  exists, which is before anything it says can arrive. */
 type Speaking = { address: string | null };
+
+/**
+ * The events that say where a run is rather than what it did.
+ *
+ * A question on screen arrives as three different events — a permission being
+ * asked for, the questions asked before the first change, and the same being
+ * taken back — and Pi's tidying as two. They are one vocabulary in the domain,
+ * so the mapping lives here rather than a copy of it per caller.
+ */
+function workEventOf(event: AgentEvent): WorkEvent | null {
+  switch (event.type) {
+    case 'needs-confirmation':
+    case 'asked-first':
+      return 'asked';
+    case 'questions-withdrawn':
+    case 'asking-withdrawn':
+      return 'unasked';
+    case 'tidying':
+      return 'tidying';
+    case 'tidied':
+      return 'tidied';
+    default:
+      return null;
+  }
+}
 
 function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
   return (event) => {
@@ -2855,6 +2921,30 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
     if (event.type === 'prompt-size') promptSizes.set(keyOf(path, from.address ?? ''), event.characters);
     const said: AgentEvent = enrichForTheWindow(path, from.address ?? '', event);
     send(path, said, from.address ?? undefined);
+
+    /* Where this conversation's runtime is, taken from the adapter's own account
+       of the turn rather than guessed from the shape of the window. `busy` on is
+       a run beginning and `busy` off is the last one ending, which is the only
+       pair of moments that says a turn really is in flight. */
+    if (said.type === 'busy' && from.address !== null) {
+      states.move(named(from.address), said.on ? 'running' : 'idle', Date.now());
+    }
+
+    /* The two things a run stops being `running` for without ending: a question
+       on screen, and Pi's own tidying of a long conversation. Neither is visible
+       from the shell otherwise, so they are read off the events that say them —
+       and both are cleared by the event that says the wait is over, so nothing
+       is left waiting for a person who has already answered. */
+    const work = workEventOf(said);
+    if (work !== null && from.address !== null) {
+      const conversation = named(from.address);
+      const moved = movedByWork(
+        states.stateOf(conversation),
+        work,
+        held.sessions.find(from.address)?.held.working === true,
+      );
+      if (moved !== null) states.move(conversation, moved, Date.now());
+    }
 
     // Which files a turn wrote, collected as it goes. Read off the same stream
     // the conversation is drawn from rather than by asking the folder
@@ -2880,7 +2970,7 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
         .settled(path, from.address ?? '', how)
         .catch(() => undefined)
         .then(() => {
-          /* The checkout is applied, the pictures are taken and "always do this
+          /* The checkout's work is noted on the review list and "always do this
              at the end" runs when the JOB rests — not at the end of every round
              of a loop working a list down. On a large repository each of those
              is seconds, and doing them per round is how a twelve-step list
@@ -2941,197 +3031,29 @@ function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent
 }
 
 /**
- * The work carried home, and the pictures taken of it.
+ * What a job that has come to rest leaves behind.
  *
- * Once per job. A conversation's work runs in its own checkout; the one in
- * front is the one the folder the window reads belongs to, so when its job
- * comes to rest the work is carried home before the screenshots take it in. A
- * tab running in the background is NOT brought back — that is what keeps two
- * parallel tabs from silently overwriting each other's files.
+ * Once per job. Work that happened in a conversation's own checkout arrives on
+ * the review list rather than in the person's folder. A tab running in the
+ * background is NOT brought back — that is what keeps two parallel tabs from
+ * silently overwriting each other's files.
  */
 function settleUpTheJob(path: string, held: Held, from: Speaking): void {
-  {
-      const address = from.address;
-      const known =
-        address === null || held.suppressCarry.has(address)
-          ? null
-          : held.checkouts.get(address) ?? null;
-      const holding = known !== null && existsSync(known.folder) ? known : null;
+  const address = from.address;
+  const known =
+    address === null || held.suppressCarry.has(address)
+      ? null
+      : held.checkouts.get(address) ?? null;
+  const holding = known !== null && existsSync(known.folder) ? known : null;
 
-      /* Live mirror is how this behaved before the review queue, kept per card
-         for anybody who wants it: the work is carried into the folder as the
-         conversation makes it. Off, which is the default, an entry arrives on
-         the review list and nothing moves until somebody says so. Still only
-         ever the conversation in front, because a tab working in the background
-         writing over the folder on screen is the bug that rule exists for. */
-      const mirroring =
-        address !== null &&
-        held.mirroring.has(address) &&
-        held.sessions.current?.path === address;
-
-      if (holding !== null && address !== null) {
-        void noteForReview(path, held, address, holding, mirroring).catch(() => undefined);
-      }
-      if (!mirroring) {
-        void look(path, held);
-        return;
-      }
-      const checkout = holding;
-      // What came back, and what did not. A file both sides changed is left as
-      // this checkout has it — which is right, and used to happen in silence:
-      // the person saw a finished turn and a file that had not changed.
-      // Carrying home is for a copy working on the same line as the folder on
-      // screen. A conversation somebody deliberately put on its own line is the
-      // opposite of that: applying its files here would land one line of work on
-      // top of another, which is how a folder ends up holding a branch's changes
-      // it never asked for. Landing it is still one press, and says which line.
-      /* A version before the first apply of a job, so the moment before
-         somebody's files were changed is one press away. Once per job: a
-         version before every round would be a rail of identical entries. */
-      const who = from.address ?? '';
-      const first =
-        checkout === null ||
-        held.snappedBeforeApply.has(who) ||
-        preferencesNow?.all().snapBeforeApply === false
-          ? Promise.resolve()
-          : (held.snappedBeforeApply.add(who),
-            held.timeline
-              ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
-              .then(() => undefined)
-              .catch(() => undefined) ?? Promise.resolve());
-      const carried =
-        checkout === null || !existsSync(checkout.folder)
-          ? null
-          : first
-              .then(() => onTheSameLine(path, checkout.folder))
-              .then((sameLine) =>
-                sameLine ? bringBack(gitRunHereFor(), path, checkout.folder) : null,
-              );
-      void (carried ?? Promise.resolve(null))
-        .then((outcome) => {
-          if (outcome !== null && outcome.ok && outcome.value.conflicted.length > 0) {
-            const which = [...outcome.value.conflicted].sort().join('\u0000');
-            if (which !== held.saidHeldBack) {
-              held.saidHeldBack = which;
-              const at = from.address ?? undefined;
-              send(path, { type: 'message-delta', text: `\n\n${bringBackWords.heldBack(outcome.value.conflicted)}` }, at);
-              send(path, { type: 'message-end' }, at);
-            }
-          } else if (outcome !== null && outcome.ok) {
-            held.saidHeldBack = '';
-          }
-          look(path, held);
-        })
-        .catch(() => look(path, held));
+  /* A finished turn does not move files into anybody's folder. Work that
+     happened in a copy arrives on the review list, and putting it into the
+     project is a press that says which line it came from. Live mirror, which
+     used to do it automatically, is gone: it wrote to the person's files
+     because a conversation settled, which is not a decision anybody made. */
+  if (holding !== null && address !== null) {
+    void noteForReview(path, held, address, holding).catch(() => undefined);
   }
-}
-
-/**
- * The same relay, for work being checked in a copy of the project.
- *
- * Everything reaches the conversation exactly as it would, and everything spent
- * is counted exactly as it would be. What is left out is the picture: the
- * change is in the copy, and photographing the folder on screen would produce a
- * before and after of a project nothing has happened to.
- */
-function forwardHeld(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
-  return (event) => {
-    const said: AgentEvent =
-      event.type === 'error' ? { type: 'error', message: plainMessage(event.message) } : event;
-    send(path, said, from.address ?? undefined);
-    if (said.type === 'spend') fleet.spent(null, said.amount);
-    if (said.type === 'settled') sayIfCeilingIsBlind(path, from.address ?? undefined);
-    for (const also of held.spend.observe(said)) {
-      send(path, also, from.address ?? undefined);
-      if (also.type === 'spend-summary') {
-        void recents().then((list) => list.recordSpend(path, also.summary.total));
-      }
-    }
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/* Landing it                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/** Where copies of a project live while work is being checked in them. Outside
- *  the project, so nothing they write can appear in the folder on screen. */
-function workFolder(): string {
-  return join(app.getPath('temp'), 'graphe-work');
-}
-
-/** Where a project's kept copy lives. Hashed, not spelled out: replacing every
- *  awkward character with a dash gives `/work/my site` and `/work-my-site` the
- *  same name, and two projects sharing one install is the thing that breaks. */
-function keptCopyFolder(project: string): string {
-  const key = createHash('sha256').update(resolve(project)).digest('hex');
-  return join(workFolder(), 'kept', key);
-}
-
-/** The one copy kept ready, and whose project it is.
- *
- * One at a time, for the reason the copy is kept at all: it holds an install,
- * and a copy per project would put back exactly the disk this was meant to stop
- * spending. `project` is the key the project was opened under, so it can be
- * looked up again by exactly the string that filed it. */
-let keptCopy: { project: string; folder: string } | null = null;
-
-/** Let the kept copy go, if there is one. Safe at any time — the next piece of
- *  work makes one again. */
-async function letKeptCopyGo(): Promise<void> {
-  const kept = keptCopy;
-  keptCopy = null;
-  if (kept === null) return;
-  await new ProjectHistory(kept.project).removeWorkspace(kept.folder).catch(() => undefined);
-  await rm(kept.folder, { recursive: true, force: true }).catch(() => undefined);
-}
-
-/** Whether a piece of work is being made in that project's copy right now.
- *  Only while it is being made: afterwards what it made is a version, and the
- *  folder is nothing anybody reads. */
-function stillBeingMadeIn(project: string): boolean {
-  return workspaces.find(project)?.held.waiting?.waiting.state === 'making';
-}
-
-/**
- * Whether work here is worth doing in a copy.
- *
- * A copy keeps the folder untouched and lets what the work made be shown before
- * it lands. With nothing to show, only the first is left — and a save point
- * covers that, at no cost, which is how every other coding agent works. A folder
- * we cannot read at all keeps its copy: the careful answer is the one that
- * cannot lose anything.
- */
-async function worthACopy(project: string): Promise<boolean> {
-  try {
-    return canBeShown(readTheFolder(await lookAt(project)));
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Where this project's work should be done.
- *
- * Undefined means take an ordinary copy for this one piece of work: another
- * project is mid-way through using the kept one, and pulling the folder out
- * from under a turn that is running would lose it.
- */
-async function keepCopyFor(project: string): Promise<string | undefined> {
-  if (keptCopy !== null && keptCopy.project !== project) {
-    if (stillBeingMadeIn(keptCopy.project)) return undefined;
-    await letKeptCopyGo();
-  }
-  const folder = keptCopyFolder(project);
-  keptCopy = { project, folder };
-  return folder;
-}
-
-/** Where a project's agreed pictures are kept, one per width. Images, so beside
- *  the rest of what this app keeps rather than in the settings file — and per
- *  project, because a mark is a reading of one page. */
-function agreedFolder(path: string): string {
-  return join(app.getPath('userData'), 'agreed', keyFor(path));
 }
 
 /** One line for the version a held piece of work ends at. Their own words, so
@@ -3141,426 +3063,33 @@ function saysHeldWork(doing: string): string {
   return one === '' ? holdWords.label : one.length > 72 ? `${one.slice(0, 71)}…` : one;
 }
 
-/**
- * What this computer can reach, remembered for a while.
- *
- * Finding out means running two or three helpers and, for one of them, asking
- * an account over the network. That is fine once; it is not fine every time a
- * panel redraws. None of these answers change in the middle of an afternoon.
- */
-type Reach = { at: number; canHandOver: boolean; handOverSays: string; canPutOnline: boolean; onlineSays: string };
-
-const reached = new Map<string, Reach>();
-const STILL_TRUE = 5 * 60_000;
-
-async function whatCanBeReached(folder: string): Promise<Reach> {
-  const already = reached.get(folder);
-  if (already !== undefined && Date.now() - already.at < STILL_TRUE) return already;
-
-  const [found, online, shared] = await Promise.all([
-    whatIsHere(folder).catch(() => ({ helper: false, signedIn: false, home: null, theProjectItself: null })),
-    whatIsHereForOnline(folder).catch(() => ({ helper: false, signedIn: false })),
-    new ProjectHistory(folder).sharedCopy().catch(() => null),
-  ]);
-  const send = canSendItOn({ ...found, home: shared === null ? null : found.home });
-  const up = canPutOnline(online);
-  const fresh: Reach = {
-    at: Date.now(),
-    canHandOver: send.all,
-    handOverSays: send.says,
-    canPutOnline: up.all,
-    onlineSays: up.says,
-  };
-  reached.set(folder, fresh);
-  return fresh;
-}
-
-async function landingNow(folder: string, held: Held): Promise<Landing> {
-  const chosen = (await preferences()).all();
-  const reach = await whatCanBeReached(folder);
-  return {
-    waiting: held.waiting === null ? null : { ...held.waiting.waiting },
-    // Only ever beside the work it is of. Nothing is waiting, so there is
-    // nothing for a picture to be a picture of.
-    held: held.waiting === null ? null : held.pictures,
-    holdBack: holdsBack(chosen.heldBack, folder),
-    keepLogins: keepsLogins(chosen.keptLogins, folder),
-    canHandOver: reach.canHandOver,
-    handOverSays: reach.handOverSays,
-    canPutOnline: reach.canPutOnline,
-    onlineSays: reach.onlineSays,
-  };
-}
-
-/**
- * The copy, and the project it would replace, at every width.
- *
- * Both halves are rendered and photographed, so this is the slowest thing in a
- * held turn by a distance. It is also the only thing that turns "some work
- * finished" into a decision somebody can actually make, so it is not optional
- * and it is not backgrounded.
- */
-async function photographWaiting(project: string, work: HeldWork): Promise<HeldPictures | null> {
-  const sizes = await styleSheets(project)
-    .then(sizesFor)
-    .catch(() => undefined);
-  return photographHeld({
-    photographer: holdCamera(sizes, agreedFolder(project)),
-    copy: work.folder,
-    project,
-    id: work.waiting.id,
-    doing: work.waiting.doing,
-    ...(sizes === undefined ? {} : { sizes }),
-  });
-}
-
-/**
- * Do this piece of work in a copy, and leave it waiting.
- *
- * The conversation is unbroken — every event goes to the same place it always
- * does — and the folder on screen is untouched throughout. What the work made
- * is an ordinary version of the project, kept reachable, so both answers to it
- * are undoable.
- */
-async function checkItFirst(
-  open: { path: string; name: string; held: Held },
-  where: Where,
-  from: Speaking,
-  text: string,
-  cards: readonly ImageCard[] | undefined,
-  lookFirst: boolean,
-): Promise<Result<null>> {
-  const held = open.held;
-  // Per-child when a repo is named — use the child's folder and timeline.
-  // Held.waiting remains a single slot for now; per-child waiting (Map)
-  // is a follow-up once this proves stable. Keep changes minimal.
-  const folder = folderFor(open as Workspace<Held>, where);
-  const timeline = await timelineFor(open as Workspace<Held>, where);
-  const history = new ProjectHistory(folder);
-  held.pictures = null;
-  // A folder holding several projects has no folder-level history to copy.
-  // When where.repo names a child, its own timeline is used instead.
-  if (timeline === null) return fail(SEVERAL_PROJECTS);
-
-  // Work starts from a version. Anything unfinished becomes one first, silently
-  // and without a question, exactly as going back does.
-  //
-  // If that cannot be done, nothing starts. The copy would otherwise be taken
-  // from the last saved version — without whatever is on disk right now — and
-  // letting the result back in later would write over it. Swallowing this was
-  // the quiet way to lose an afternoon's edits.
-  try {
-    await timeline.snapshot({ boundary: 'turn-ended' });
-  } catch (cause) {
-    return fail(historyTrouble(cause));
-  }
-
-  const keptIn = await keepCopyFor(folder);
-  let waiting: HeldWork;
-  try {
-    waiting = await HeldWork.start({
-      history,
-      under: workFolder(),
-      id: `held-${Date.now().toString(36)}`,
-      doing: text,
-      // The same copy every time. Making one is a dependency install, and it is
-      // the same install for every piece of work in this project.
-      ...(keptIn === undefined ? {} : { keepIn: keptIn }),
-    });
-  } catch (cause) {
-    return fail(historyTrouble(cause));
-  }
-  held.waiting = waiting;
-
-  // A copy with no pieces in it fails on the first test command, which reads as
-  // the work being wrong rather than the copy being empty.
-  const fresh = await getReady(folder, waiting.folder);
-  if (!fresh.ready) {
-    return fail({
-      what: 'I could not get the copy ready.',
-      because: fresh.trouble ?? 'Something went wrong setting it up.',
-      actionLabel: 'Got it',
-    });
-  }
-
-  let inside: GrapheSession | null = null;
-  try {
-    inside = await createSession({
-      projectRoot: waiting.folder,
-      guard: { computerUse: await computerUseFacts() },
-      browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
-      // A copy checking one message is not a conversation, so an add-on that
-      // starts turns of its own has no business in it.
-      sessionKind: 'helper',
-      onEvent: forwardHeld(open.path, held, from),
-      timeline: await Timeline.open(waiting.folder),
-      model: (await preferences()).all().model,
-      advisor: (await preferences()).all().advisor,
-      advisorThinking: (await preferences()).all().advisorThinking,
-      advisorGates: (await preferences()).all().advisorGates,
-      thinking: thinkingFor((await preferences()).all()),
-      // This is the message somebody just sent, run in a copy because they
-      // asked to see it first. Plan gates that message wherever it runs.
-      planMode: held.planMode,
-      sessionDir: sessionsFolder(),
-    });
-    held.checking = inside;
-    await inside.prompt(text, cards, { lookFirst });
-  } catch (cause) {
-    held.checking = null;
-    inside?.dispose();
-    await waiting.release().catch(() => undefined);
-    held.waiting = null;
-    const raw = cause instanceof Error ? cause.message : String(cause);
-    return fail(plainTrouble(raw, detailsOf(cause)));
-  }
-  held.checking = null;
-  inside.dispose();
-
-  // Before settling, because settling deletes the copy and the copy is the only
-  // place what the work made exists. A picture that could not be taken is a
-  // thinner decision, never a failed one.
-  held.pictures = await photographWaiting(folder, waiting).catch(() => null);
-
-  try {
-    await waiting.settle(saysHeldWork(text));
-  } catch (cause) {
-    await waiting.release().catch(() => undefined);
-    held.waiting = null;
-    held.pictures = null;
-    return fail(historyTrouble(cause));
-  }
-  // Nothing was changed, so there is nothing waiting and nothing to look at.
-  if (waiting.waiting.version === null) {
-    held.waiting = null;
-    held.pictures = null;
-  }
-  return done(null);
-}
-
-/**
- * What this project's work looks like, for whoever it is handed to.
- *
- * The pictures and the sentences beside them, exactly as the person has already
- * seen them. A project that cannot be photographed falls back to the version
- * titles — but only the ones that name a change. The rest of the timeline is
- * housekeeping, and housekeeping is for the window that shows the timeline.
- */
-async function whatChanged(
-  open: { name: string; held: Held },
-  timeline: Timeline | null = open.held.timeline,
-): Promise<readonly Change[]> {
-  const told = [...open.held.looking.told.values()];
-  if (told.length > 0) return told.slice(-6);
-
-  const versions = await versionsOf(timeline).catch(() => []);
-  return versions
-    .slice(0, LOOK_BACK)
-    .filter((one) => worthTelling(one.title))
-    .slice(0, 6)
-    .reverse()
-    .map((one) => ({ title: one.title, says: '', where: null, before: null, after: null }));
-}
-
-/** How far back to look for six versions worth telling somebody about. Enough
- *  that a run of housekeeping does not hide the work behind it. */
-const LOOK_BACK = 30;
-
-/** The likeliest places a project keeps its own design tokens. */
-const TOKEN_FILES = [
-  'src/styles/tokens.css',
-  'src/styles/variables.css',
-  'src/tokens.css',
-  'styles/tokens.css',
-  'app/globals.css',
-  'src/app/globals.css',
-  'src/index.css',
-  'styles/globals.css',
-];
-
-/**
- * The project's own tokens, and where they live.
- *
- * Whichever candidate file holds the most of them wins — a project with both a
- * token file and a globals file keeps its tokens in one of them, and counting
- * is a better guess than an ordering we made up.
- */
-/** Every stylesheet the project keeps, with its name, so a read can say which
- *  file a token came from. Token files first, then the style folders — the same
- *  breadcrumb `styleSheets` follows, but paired with names for aggregation. */
-async function tokenSheets(root: string): Promise<readonly { name: string; css: string }[]> {
-  const names = [...TOKEN_FILES];
-  for (const folder of STYLE_FOLDERS) {
-    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
-    for (const name of inside) {
-      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
-    }
-  }
-  const out: { name: string; css: string }[] = [];
-  const seen = new Set<string>();
-  for (const name of names) {
-    if (out.length >= MOST_SHEETS || seen.has(name)) continue;
-    seen.add(name);
-    const css = await readFile(join(root, name), 'utf8').catch(() => null);
-    if (css !== null) out.push({ name, css });
-  }
-  return out;
-}
-
-/**
- * The project's design tokens, gathered from every stylesheet it keeps.
- *
- * A project's visual language is rarely one file — tokens live in `globals.css`
- * and `variables.css` and the component sheets together. This reads them all,
- * keeps the first declaration of each name (which is the one that wins on
- * `:root`), and remembers which file each came from so an edit to it lands in
- * the right place. `file`/`text` name the sheet with the most tokens, which is
- * where the live editing preview writes.
- */
-async function styleTokens(
-  root: string,
-): Promise<
-  { file: string; tokens: readonly import('../src/lib/ipc').StyleToken[]; text: string } | null
-> {
-  const sheets = await tokenSheets(root);
-  // Raw reads named by file, then the first declaration of each name kept — the
-  // one that wins on :root — so a value restated per theme is not repeated.
-  const byName = new Map<string, { raw: ReturnType<typeof readTokens>[number]; file: string }>();
-  for (const sheet of sheets) {
-    for (const raw of readTokens(sheet.css)) {
-      if (byName.has(raw.name)) continue;
-      byName.set(raw.name, { raw, file: sheet.name });
-    }
-  }
-  if (byName.size === 0) return null;
-  const raws = [...byName.values()].map((one) => one.raw);
-  const withSteps: import('../src/lib/ipc').StyleToken[] = [...byName.values()].map((one) => ({
-    ...one.raw,
-    steps: steps(one.raw, raws),
-    file: one.file,
-  }));
-  // The sheet holding the most tokens is the one the panel edits live.
-  const counts = new Map<string, number>();
-  for (const one of withSteps) counts.set(one.file ?? '', (counts.get(one.file ?? '') ?? 0) + 1);
-  let bestName = withSteps[0]?.file ?? '';
-  let bestCount = -1;
-  for (const [name, count] of counts) {
-    if (name !== '' && count > bestCount) {
-      bestName = name;
-      bestCount = count;
-    }
-  }
-  const text = sheets.find((one) => one.name === bestName)?.css ?? '';
-  return { file: bestName, tokens: withSteps, text };
-}
-
-/** Folders a project keeps its stylesheets in, looked in one level down. */
-const STYLE_FOLDERS = ['src/styles', 'styles', 'src/css', 'css', 'app', 'src'];
-
-/** Enough to find the sizes a project designs at, few enough that asking costs
- *  nothing. A project with more stylesheets than this has them in a folder. */
-const MOST_SHEETS = 16;
-
-/**
- * The project's stylesheets, as text.
- *
- * The token files first, because a project that names its sizes anywhere names
- * them there, then whatever else is sitting in its style folders. Bounded on
- * purpose: this runs before every look, and a folder of somebody else's build
- * output is not worth reading.
- */
-async function styleSheets(root: string): Promise<readonly string[]> {
-  const names = [...TOKEN_FILES];
-  for (const folder of STYLE_FOLDERS) {
-    const inside = await readdir(join(root, folder)).catch(() => [] as string[]);
-    for (const name of inside) {
-      if (name.toLowerCase().endsWith('.css')) names.push(`${folder}/${name}`);
-    }
-  }
-
-  const texts: string[] = [];
-  const read = new Set<string>();
-  for (const name of names) {
-    if (texts.length >= MOST_SHEETS) break;
-    if (read.has(name)) continue;
-    read.add(name);
-    const css = await readFile(join(root, name), 'utf8').catch(() => null);
-    if (css !== null) texts.push(css);
-  }
-  return texts;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Pointing at something                                                       */
 /* -------------------------------------------------------------------------- */
 
-/**
- * What the project knows, for a click to be read against.
- *
- * Only this process can answer any of it — the project's own values, every
- * place each component is used, what last touched each file — and reading the
- * components alone is a few hundred milliseconds of somebody's folder. A click
- * is answered while they watch, and none of this changes between two clicks in
- * the same minute.
- */
-const knows = new Map<string, { at: number; material: Material }>();
-const STILL_KNOWN = 60_000;
-
-/**
- * The same change under both spellings a page can hand back.
- *
- * A file arrives from the page as its address there, and the two shapes that
- * come out of that are the project-relative path and the whole path with the
- * leading slash gone. History knows only the first, so the second is written
- * down beside it rather than guessed at afterwards.
- */
-function changesByPath(root: string, changes: ReadonlyMap<string, LastChange>): Map<string, Touched> {
-  const whole = root.split(sep).filter((one) => one !== '').join('/');
-  const found = new Map<string, Touched>();
-  for (const [path, one] of changes) {
-    const change: Touched = { name: one.name, when: one.when, id: one.id };
-    found.set(path, change);
-    found.set(`${whole}/${path}`, change);
-  }
-  return found;
-}
-
-async function whatIsKnown(folder: string): Promise<Material> {
-  const already = knows.get(folder);
-  if (already !== undefined && Date.now() - already.at < STILL_KNOWN) return already.material;
-
-  const [styles, sheets, usage, changes] = await Promise.all([
-    styleTokens(folder).catch(() => null),
-    styleSheets(folder).catch(() => [] as readonly string[]),
-    readUsage(folder).catch(() => null),
-    new ProjectHistory(folder).lastChangeByFile().catch(() => new Map<string, LastChange>()),
-  ]);
-
-  const material: Material = {
-    tokens: styles?.tokens ?? [],
-    usage,
-    changes: changesByPath(folder, changes),
-    widths: sizesFor(sheets),
-  };
-  knows.set(folder, { at: Date.now(), material });
-  return material;
-}
-
-/** One click, read against the project it came out of. `says` is the same click
- *  as the one line the composer would have made somebody type. */
-async function readingOf(folder: string, pointed: Pointed): Promise<PointedAt | null> {
-  try {
-    const material = await whatIsKnown(folder);
-    const reading = readPointed(pointed, material);
-    return { pointed, reading, says: saysReading(reading) };
-  } catch {
-    return null;
-  }
-}
-
 /** Who is watching which browser, so a second press or a closed project ends
  *  the right one. */
 const watching = new Map<string, { stop: boolean }>();
+
+/** The epoch each preview's pictures are in: one more each time the window asks
+ *  to look again. A picture taken before a reload, or by a browser that has been
+ *  started over, is in an earlier one, and the window drops it rather than
+ *  drawing it as the picture now. */
+const previewEpochs = new Map<string, number>();
+
+/**
+ * What the pictures of one project's browser are of.
+ *
+ * The preview's own name is the browsing session's, which is the same for as
+ * long as this folder is the one being looked at, and a different folder is a
+ * different preview. The epoch is one more than the last time the window looked.
+ */
+function previewOf(project: string): { preview: string; epoch: number } {
+  const preview = sessionFor(project);
+  const epoch = (previewEpochs.get(preview) ?? 0) + 1;
+  previewEpochs.set(preview, epoch);
+  return { preview, epoch };
+}
 
 function stopWatching(project: string): void {
   const going = watching.get(project);
@@ -3573,28 +3102,47 @@ function stopWatching(project: string): void {
  *
  * One at a time rather than on a timer: a picture that takes longer than the
  * gap would otherwise pile up behind itself until there is nothing left to
- * take a picture with.
+ * take a picture with. Every picture says which preview it is of.
  */
-function watchTheBrowser(project: string, keeps: string | null): void {
+function watchTheBrowser(
+  project: string,
+  folder: string,
+  keeps: string | null,
+  of: { preview: string; epoch: number },
+): void {
+  // Asking again replaces what was running: two loops would send pictures of
+  // two different pages, with no way to tell which is which.
+  stopWatching(project);
   const mine = { stop: false };
   watching.set(project, mine);
   void (async () => {
     while (!mine.stop) {
-      const bytes = await browserFrame(project, undefined, keeps).catch(() => null);
+      // A window that has gone is one nothing can be drawn in, and a picture
+      // nobody can be shown is a browser composited and encoded for nobody.
+      // Ends here rather than at the next quit: a window closed mid-watch left
+      // the loop running for the rest of the session.
+      if (mainWindow === null || mainWindow.isDestroyed()) {
+        if (watching.get(project) === mine) stopWatching(project);
+        return;
+      }
+      /* Photographed in `folder` — the browser the conversation's own tools are
+         driving — and sent under `project`, which is what the window subscribed
+         with. The two are the same folder until a chat works in a copy. */
+      const bytes = await browserFrame(folder, undefined, keeps).catch(() => null);
       if (mine.stop) return;
       if (bytes !== null && mainWindow !== null && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(CHANNEL.browserFrame, { project, bytes });
+        mainWindow.webContents.send(CHANNEL.browserFrame, { ...of, project, bytes });
       }
-      await new Promise((go) => setTimeout(go, bytes === null ? 2000 : 700));
+      const bide = Promise.withResolvers<void>();
+      setTimeout(bide.resolve, bytes === null ? 2000 : 700);
+      await bide.promise;
     }
   })();
 }
 
-function sayPointed(folder: string, pointed: Pointed): void {
-  void readingOf(folder, pointed).then((at) => {
-    if (at === null || mainWindow === null || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send(CHANNEL.pointed, at);
-  });
+function sayPointed(pointed: Pointed): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.pointed, pointed);
 }
 
 /** Where every project's conversations are kept. */
@@ -3666,6 +3214,13 @@ function sayIfCeilingIsBlind(project: string, at: string | undefined): void {
   send(project, { type: 'message-end' }, at);
 }
 
+/** Said when a terminal is written to after it has ended or was never here. */
+const NO_TERMINAL: Trouble = {
+  what: 'That terminal is not open any more.',
+  because: 'It ended, or the window it belonged to is gone. Open a new one from the same place.',
+  actionLabel: 'Got it',
+};
+
 /** Said when a conversation is asked about a checkout it does not have. Naming
  *  it plainly beats acting on one belonging to somebody else. */
 const NO_CHECKOUT_HERE =
@@ -3707,10 +3262,37 @@ function childRepoFor(open: Workspace<Held>, where: Where): DetectedRepo | null 
   return childNamed(open.held.childRepos, where.repo);
 }
 
-/** The folder a call means: a conversation's own copy, one of the projects
- *  inside a folder that holds several, or the folder itself. */
+/**
+ * The folder the registry already knows a conversation works in.
+ *
+ * Read out of the index in memory so a sync caller need not wait for it, and
+ * null before it has been read at all. Only ever a workspace of the project the
+ * call names: a conversation of another project must not pull this answer into
+ * a folder the call never mentioned.
+ */
+function recordedFolderNow(open: Workspace<Held>, where: Where): string | null {
+  if (where.conversation === undefined || !workspaceIndexLoaded) return null;
+  const record = workspaceForConversation(workspaceIndex, where.conversation);
+  if (record === null) return null;
+  if (record.state === 'deleted' || record.state === 'deleting') return null;
+  const project = projectAtPath(workspaceIndex, canonical(open.path));
+  return project !== null && project.projectId === record.projectId ? record.cwd : null;
+}
+
+/** The folder a call means, in the order it means them: a conversation's own
+ *  copy, one of the projects inside a folder that holds several, the folder the
+ *  registry wrote down for the conversation, then the folder itself.
+ *
+ * The registry is the part that stops a call about a conversation nobody has
+ * open — put down, evicted, or asked about before it was resumed — from being
+ * answered with whichever folder happens to be in front. */
 function folderFor(open: Workspace<Held>, where: Where): string {
-  return checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path;
+  return (
+    checkoutEntryFor(open, where)?.folder ??
+    childRepoFor(open, where)?.path ??
+    recordedFolderNow(open, where) ??
+    open.path
+  );
 }
 
 /** The saved work behind that folder. A child project's is opened the first
@@ -3830,40 +3412,752 @@ function worktreesFolder(project: string): string {
   return copiesFolder(app.getPath('userData'), 'worktrees', project);
 }
 
-/** Where writing carried out of a copy is kept. Somewhere ordinary and findable
- *  — whoever wrote it is going to come looking. */
-function keptAsideFolder(project: string): string {
-  const key = project.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
-  return join(app.getPath('userData'), 'kept-aside', key);
+/**
+ * The project id a folder is filed under, minting the record when this is the
+ * first time anybody has asked.
+ *
+ * Rescued writing is filed under a digest of this rather than the folder's
+ * path, because two projects can carry the same name and a shared root is one
+ * project's copy written over another's. A project that moves keeps its id, so
+ * what somebody has not come back for is still found from where it is now.
+ */
+async function projectIdFor(path: string): Promise<string> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, path);
+  if (ensured.made) {
+    workspaceIndex = ensured.index;
+    await saveWorkspaceIndex();
+  }
+  return ensured.project.projectId;
 }
 
-/** Copy a conversation's own writing out before its copy is given back. Those
- *  files are in no save and no version, so this is the only copy of them. */
-function keepAside(project: string, whose: string): Rescue {
+/** Carry a copy's own writing out before the copy is given back, and say where
+ *  it went.
+ *
+ * Those files are in no save and no version, so this is the only copy of them —
+ * and the folders holding them are named out loud, because the new root is not
+ * where an earlier version put them and a path is the only way to the files.
+ */
+function keepAside(project: string, projectId: string, whose: string): Rescue {
+  const where: Rescued = { base: app.getPath('userData'), project, projectId };
+  const rescue = writesAside(where, whose);
   return async (folder, files) => {
-    for (const one of files) {
-      const to = join(keptAsideFolder(project), whose, one);
-      try {
-        await mkdir(dirname(to), { recursive: true });
-        // Cloned where the filesystem can: on APFS the bytes are shared until
-        // one side is written to, so rescuing a large file costs nothing.
-        await copyFile(join(folder, one), to, constants.COPYFILE_FICLONE);
-      } catch {
-        // One that could not be carried is enough to keep the copy. Saying it
-        // went and then deleting the only copy is the whole failure this was
-        // written to prevent.
-        return false;
-      }
-    }
+    if (!(await rescue(folder, files))) return false;
+    const kept = await rescuedCopies(where, whose);
+    log.line('info', 'writing set aside', { project, whose, files: files.length, kept });
+    send(project, { type: 'notice', what: rescueWords.setAside(kept) });
     return true;
+  };
+}
+
+/**
+ * Every saved conversation that belongs to this project.
+ *
+ * Across all its workspaces, and decided by the registry where the registry
+ * knows: Pi's own per-directory listing only ever sees the chats that started
+ * in one folder, which left every conversation that worked in a checkout out of
+ * the sidebar. A transcript nobody has written down yet falls back to the
+ * folder it was started in.
+ *
+ * A failure to read the list is a failure, not an empty list: "you have no
+ * conversations" is the one thing it is not.
+ */
+async function conversationsInProject(
+  path: string,
+): Promise<{ ok: true; value: readonly Conversation[] } | { ok: false; because: string }> {
+  const listed = await listAllConversations(sessionsFolder());
+  if (!listed.ok) return listed;
+  const index = await loadWorkspaceIndex();
+  const { projectId } = await localWorkspaceFor(path);
+  const root = canonical(path);
+  const under = canonical(worktreesFolder(path));
+  return {
+    ok: true,
+    value: listed.value.filter((one) => {
+      // What the registry says first: a conversation works in a workspace, and
+      // a workspace belongs to a project, however the folder is named.
+      const workspace =
+        workspaceForConversation(index, one.path) ?? workspaceForConversation(index, one.id);
+      if (workspace !== null) return workspace.projectId === projectId;
+      // Nothing written down yet: the folder it was started in, so a chat from
+      // a checkout still belongs to the project that owns the checkout.
+      const cwd = one.cwd === null ? '' : canonical(one.cwd);
+      return cwd !== '' && (cwd === root || cwd === under || cwd.startsWith(`${under}${sep}`));
+    }).map((one) => {
+      // Whether somebody put it away is the registry's to know, not Pi's — and
+      // with it the state that leaves the conversation in: put away with
+      // nothing running is `archived`, whatever the runtime last said. A turn
+      // really going is still going, and says so: the window forgets a
+      // conversation the moment its tab goes, so one working behind a closed
+      // tab would otherwise read as sitting still.
+      const putAway =
+        conversationById(index, one.path)?.archived === true ||
+        conversationById(index, one.id)?.archived === true;
+      // The folder this conversation works in, when the shell can tell which
+      // one that is. A row can then say the folder is gone before somebody
+      // opens it and finds out, which is what the registry was written for and
+      // none of what it was reaching.
+      const workspace =
+        workspaceForConversation(index, one.path) ?? workspaceForConversation(index, one.id);
+      const trouble = workspaceTrouble(workspace);
+      return {
+        ...one,
+        archived: putAway,
+        state: reportedState(states.stateOf(named(one.path)), putAway),
+        ...(trouble === null ? {} : { workspace: trouble }),
+      };
+    }),
+  };
+}
+
+/**
+ * Write down where the conversations saved before the registry were working.
+ *
+ * Once, under a lock, with the legacy files copied aside first. It never moves,
+ * renames or deletes anything: it reads what earlier versions wrote, asks the
+ * disk what is actually there, and records the answer. A run that is
+ * interrupted resumes from its own marker, and a profile that has already been
+ * migrated is not asked twice.
+ */
+async function migrateWorkspacesOnce(): Promise<void> {
+  const dir = app.getPath('userData');
+  const markerFile = join(dir, MARKER_FILE);
+  const already = await readFile(markerFile, 'utf8').catch(() => null);
+  if (already !== null && readMarker(already) !== null) return;
+  await runWorkspaceMigration();
+}
+
+/**
+ * The move itself, for a profile that has not been through it or somebody who
+ * asked for the check again.
+ *
+ * Safe to run twice: what it writes is decided by what is on the disk rather
+ * than by what it did last time, and a copy is never written over one that is
+ * already there. Running it on a migrated profile therefore re-reads the same
+ * folders and reports the same counts.
+ */
+async function runWorkspaceMigration(): Promise<void> {
+  const dir = app.getPath('userData');
+  const markerFile = join(dir, MARKER_FILE);
+  const lock = join(dir, LOCK_FILE);
+  // A move that already happened keeps the moment it happened. Asking for the
+  // check again re-reads the same folders; it does not make the move newer.
+  const before = await readFile(markerFile, 'utf8').catch(() => null);
+  const wasAt = before === null ? null : readMarker(before)?.completedAt ?? null;
+  // Somebody else is doing it, or did it a moment ago. A second writer here
+  // would decide the same ids and fight over the same file.
+  const mine = await mkdir(lock, { recursive: false }).then(
+    () => true,
+    () => false,
+  );
+  if (!mine) return;
+  try {
+    const index = await loadWorkspaceIndex();
+    // A newer app's profile is not this build's to migrate: the run would write
+    // a marker and an index over something it cannot read.
+    if (workspaceIndexTooNew) return;
+    const remembered = await rememberedProjects().catch(() => []);
+    const projects = await Promise.all(
+      remembered.map(async (one) => {
+        const checkoutFile = checkoutIndexFile(one.path);
+        const raw = await readFile(checkoutFile, 'utf8').catch(() => null);
+        return {
+          path: one.path,
+          checkoutFile,
+          // The whole file, not the filtered map: a row whose folder is outside
+          // the managed root is exactly what has to be seen and marked, not
+          // quietly dropped on the way in.
+          ...(raw === null ? {} : { checkouts: JSON.parse(raw) as unknown }),
+          managedRoot: worktreesFolder(one.path),
+        };
+      }),
+    );
+    const manifest = discover({
+      projects,
+      recentsFile: join(dir, 'projects.json'),
+      exists: (path: string) => existsSync(path),
+    });
+    const run = await commit(manifest, {
+      index,
+      probe: {
+        exists: async (path) => existsSync(path),
+        isRepo: async (path) =>
+          (await gitRun(path, ['rev-parse', '--is-inside-work-tree']).catch(() => null))?.code === 0,
+        branchOf: async (path) => {
+          const named = await gitRun(path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+          const branch = (named?.out ?? '').trim();
+          return named?.code === 0 && branch !== '' && branch !== 'HEAD' ? branch : null;
+        },
+        worktreeList: async (repo) => {
+          const listed = await gitRun(repo, ['worktree', 'list', '--porcelain']).catch(() => null);
+          return (listed?.out ?? '')
+            .split('\n')
+            .filter((line) => line.startsWith('worktree '))
+            .map((line) => line.slice('worktree '.length).trim())
+            .filter((one) => one !== '');
+        },
+      },
+      now: Date.now(),
+      indexFile: workspaceIndexFile(),
+    });
+    // The copies first: a migration that rewrote the index and then failed to
+    // keep the old files would have nothing to go back to. Exclusive, so a
+    // check run after this one cannot replace the pre-migration state it kept
+    // with the migrated one.
+    const kept: string[] = [];
+    for (const one of run.backups) {
+      await copyFile(one.path, one.backup, constants.COPYFILE_EXCL).catch(() => undefined);
+      // A copy that was already there is the one from the first run, and it is
+      // still the way back, so a second run reports it too. The source path is
+      // what is written down: the copy is that path with `.bak` after it.
+      if (existsSync(one.backup)) kept.push(one.path);
+    }
+    workspaceIndex = run.index;
+    await saveWorkspaceIndex();
+    await writeAtomically(
+      markerFile,
+      `${JSON.stringify(
+        {
+          ...run.marker,
+          completedAt: wasAt ?? run.marker.completedAt,
+          unlinked: run.unlinked,
+          quarantined: run.quarantined,
+          // What was really kept, which is not the same list as what was about
+          // to be: a copy already there is the one from the first run.
+          backups: kept,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    log.line('info', 'workspaces migrated', {
+      sources: run.marker.sources,
+      verdicts: run.marker.verdicts,
+      unlinked: run.unlinked.length,
+      quarantined: run.quarantined.length,
+      collisions: run.collisions.length,
+    });
+  } finally {
+    await rm(lock, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * What the move found, for the Storage page.
+ *
+ * The record is the whole answer except for two things it cannot know about
+ * itself: whether this profile is from a newer app, and how many of the copies
+ * it names are still there. Both are asked here rather than stored twice.
+ */
+async function migrationNow(): Promise<MigrationNow> {
+  // Reading the index is what notices a newer profile, and the page can be the
+  // first thing opened in a session.
+  await loadWorkspaceIndex();
+  const dir = app.getPath('userData');
+  const marker = await readFile(join(dir, MARKER_FILE), 'utf8').catch(() => null);
+  return readoutOf({
+    marker,
+    newer: workspaceIndexTooNew,
+    backupFolder: dir,
+    keptBackups: (paths) => paths.filter((one) => existsSync(one)).length,
+  });
+}
+
+/* ---------------------------------------------- which folder, written down -- */
+
+/**
+ * Where every conversation works, in one file.
+ *
+ * One index for the whole app rather than one per project: a conversation has to
+ * be answerable about its folder before any project is open, and a workspace's
+ * identity is only worth having if one writer decides it.
+ */
+function workspaceIndexFile(): string {
+  return join(app.getPath('userData'), 'workspaces.json');
+}
+
+let workspaceIndex: WorkspaceIndex = emptyIndex();
+let workspaceIndexLoaded = false;
+/**
+ * The profile on disk was written by a newer app than this one.
+ *
+ * It is read and never written: going back to an older build must not tidy a
+ * newer profile away or overwrite it with less than it holds. The shell keeps
+ * running without persisting the registry until the newer app is back. See
+ * RELEASING.md, "Rolling back".
+ */
+let workspaceIndexTooNew = false;
+let writingWorkspaceIndex: Promise<void> = Promise.resolve();
+
+/**
+ * Read the index once and keep it.
+ *
+ * A file that cannot be read is moved aside, with the reason in the log, rather
+ * than replaced. What is in it is the record of where somebody's work was, and
+ * deciding on their behalf what it said is worse than starting empty. A file
+ * from a newer app is not moved anywhere: it is left exactly as it is.
+ */
+async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
+  if (workspaceIndexLoaded) return workspaceIndex;
+  workspaceIndexLoaded = true;
+  const file = workspaceIndexFile();
+  const text = await readFile(file, 'utf8').catch(() => null);
+  if (text === null) return workspaceIndex;
+  const read = parseIndex(text);
+  if (read.problem !== null) {
+    const verdict = verdictOn(read);
+    if (verdict === 'leave-alone') {
+      workspaceIndexTooNew = true;
+      log.line('warn', 'workspace index is from a newer app; leaving it as it is', {
+        problem: read.problem,
+        file,
+      });
+      return workspaceIndex;
+    }
+    const kept = `${file}.unreadable-${String(Date.now())}`;
+    await rename(file, kept).catch(() => undefined);
+    log.line('warn', 'workspace index was unreadable; kept aside', { problem: read.problem, kept });
+    return workspaceIndex;
+  }
+  workspaceIndex = read.index;
+  return workspaceIndex;
+}
+
+/** Written in the order it was asked for, so two saves cannot interleave and
+ *  leave the file holding half of each. Nothing is written at all while the
+ *  profile on disk belongs to a newer app. */
+function saveWorkspaceIndex(): Promise<void> {
+  if (workspaceIndexTooNew) return Promise.resolve();
+  const text = serializeIndex(workspaceIndex);
+  writingWorkspaceIndex = writingWorkspaceIndex
+    .then(() => writeAtomically(workspaceIndexFile(), text))
+    .catch(() => undefined);
+  return writingWorkspaceIndex;
+}
+
+/**
+ * The repository a workspace's folder is, written onto its record.
+ *
+ * Read when a workspace is made or reopened, which is when the answer can
+ * change: a folder replaced by somebody else's repository, a checkout restored
+ * from a branch. A record with no key cannot be matched against a folder that
+ * has one, so an unfilled record is a gap in every identity check below.
+ */
+async function rememberRepo(record: WorkspaceRecord): Promise<WorkspaceRecord> {
+  const key = existsSync(record.cwd) ? await repoKeyOf(gitRunHereFor(), record.cwd) : null;
+  if (key === null || key === record.repoKey) return record;
+  workspaceIndex = setRepoKey(workspaceIndex, record.workspaceId, key, Date.now());
+  await saveWorkspaceIndex();
+  return workspaceIndex.workspaces[record.workspaceId] ?? record;
+}
+
+/** The project's own folder, written down. No git: opening a folder is not an
+ *  operation on a repository, and this is what opening one does. */
+async function localWorkspaceFor(
+  projectPath: string,
+): Promise<{ projectId: string; workspace: WorkspaceRecord }> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, projectPath);
+  const added = addWorkspace(ensured.index, {
+    projectId: ensured.project.projectId,
+    path: projectPath,
+    kind: 'local',
+    managed: false,
+    now: Date.now(),
+  });
+  workspaceIndex = added.index;
+  if (ensured.made || added.made) await saveWorkspaceIndex();
+  return { projectId: ensured.project.projectId, workspace: await rememberRepo(added.workspace) };
+}
+
+/** A checkout this app works in, written down if it is not already known. Used
+ *  for a worktree that exists (ours or imported), so a conversation can point at
+ *  it without inventing a second record for the same folder. */
+async function worktreeWorkspaceFor(
+  projectPath: string,
+  folder: string,
+  branch: string | null,
+  baseSha: string | null,
+): Promise<WorkspaceRecord> {
+  const index = await loadWorkspaceIndex();
+  const ensured = ensureProject(index, projectPath);
+  // Read before the record is matched or written: a folder that holds another
+  // repository now is a workspace of its own, not the one recorded at this path.
+  const repoKey = existsSync(folder) ? await repoKeyOf(gitRunHereFor(), folder) : null;
+  const known = workspaceAtPath(ensured.index, ensured.project.projectId, folder, repoKey);
+  const added =
+    known === null
+      ? addWorkspace(ensured.index, {
+          projectId: ensured.project.projectId,
+          path: folder,
+          kind: 'worktree',
+          managed: true,
+          branch,
+          baseSha,
+          repoKey,
+          now: Date.now(),
+        })
+      : { index: ensured.index, workspace: known, made: false };
+  workspaceIndex = added.index;
+  if (ensured.made || added.made) await saveWorkspaceIndex();
+  return rememberRepo(added.workspace);
+}
+
+/** Remember which workspace a conversation works in. The one line that answers
+ *  "which files am I changing" without asking which tab is in front. */
+async function noteConversationWorkspace(
+  conversationId: string,
+  workspaceId: string,
+): Promise<void> {
+  await loadWorkspaceIndex();
+  const attached = attachConversation(workspaceIndex, conversationId, workspaceId);
+  if (attached === workspaceIndex) return;
+  workspaceIndex = attached;
+  await saveWorkspaceIndex();
+}
+
+/** What the registry says about a conversation, or null when it has never been
+ *  written down. Null is an answer, not a reason to pick the folder in front. */
+async function recordedWorkspace(conversationId: string): Promise<WorkspaceRecord | null> {
+  return workspaceForConversation(await loadWorkspaceIndex(), conversationId);
+}
+
+/** The workspace a request named, when it named one. `how` carries it for a New
+ *  worktree, which is the only way a chat starts somewhere other than the
+ *  project's own folder. */
+async function namedWorkspaceOf(how: Opening): Promise<WorkspaceRecord | null> {
+  const id = how.kind === 'fresh' ? how.workspace : undefined;
+  if (id === undefined) return null;
+  return workspaceById(await loadWorkspaceIndex(), id);
+}
+
+/**
+ * Write down which workspace a conversation works in, and the transcript it is
+ * being written into.
+ *
+ * One record, under the conversation's own id: the id is minted when the chat
+ * is made and the transcript is attached to it, so the record is not a second
+ * name for the same conversation and a resume does not make another one.
+ */
+async function noteWhereItWorks(
+  open: { path: string; held: Held },
+  address: string,
+  folder: string | null,
+  lineage: { from: string; kind: 'continue' | 'fork' } | null = null,
+): Promise<void> {
+  const home =
+    folder === null
+      ? (await localWorkspaceFor(open.path)).workspace
+      : await worktreeWorkspaceFor(
+          open.path,
+          folder,
+          open.held.checkouts.get(address)?.branch ?? null,
+          null,
+        );
+  const found = open.held.sessions.find(address);
+  await loadWorkspaceIndex();
+  // The record first, then the transcript: a conversation exists from the
+  // moment it starts, so its folder is answerable before Pi has written a word
+  // of it.
+  const added = addConversation(workspaceIndex, {
+    conversationId: address,
+    workspaceId: home.workspaceId,
+    title: found?.name ?? '',
+    lineage,
+    now: Date.now(),
+  });
+  workspaceIndex = updateConversation(added.index, address, {
+    sessionFile: found?.held.conversation ?? null,
+    updatedAt: Date.now(),
+    ...(lineage === null ? {} : { lineage }),
+  });
+  await saveWorkspaceIndex();
+}
+
+/**
+ * A checkout that exists, spread out again if it was put away.
+ *
+ * A record with no folder on disk and no branch to bring back is a workspace
+ * that is gone: the answer is that, and never the project folder, because an
+ * agent that thinks it is editing its own copy while it edits somebody's work
+ * is the failure this whole file is arranged around.
+ */
+async function spreadOutAgain(
+  project: string,
+  record: WorkspaceRecord,
+): Promise<Result<Checkout>> {
+  if (existsSync(record.cwd)) {
+    // The folder is there, and it has to be the same repository: a folder
+    // holding somebody else's project at the path this conversation recorded is
+    // not where its work is, and handing it over would edit the wrong files.
+    if (!(await sameRepository(gitRunHereFor(), project, record.cwd))) return fail(workspaceGone(record));
+    await rememberRepo(record).catch(() => undefined);
+    return done({ folder: record.cwd, branch: record.branch ?? '' });
+  }
+  if (record.branch === null || record.branch === '') return fail(workspaceGone(record));
+  const back = await reopenWorktree(gitRunHereFor(), project, record.branch, record.cwd).catch(
+    () => null,
+  );
+  if (back === null || !back.ok) return fail(workspaceGone(record));
+  await rememberRepo(record).catch(() => undefined);
+  return done({ folder: record.cwd, branch: record.branch });
+}
+
+/** Said when a conversation's workspace is not where it was. It is not opened
+ *  somewhere else, and this is the sentence that says so. */
+function workspaceGone(record: WorkspaceRecord): Trouble {
+  return {
+    what: 'The folder this conversation was working in is not there any more.',
+    because: `It worked in ${record.displayPath}, and that folder is gone or is no longer a checkout of this project. Nothing has been opened in your project folder instead.`,
+    actionLabel: 'Got it',
+  };
+}
+
+/**
+ * Start a conversation in a workspace, as a deliberate act.
+ *
+ * This is the only path that makes a checkout, and it makes one because somebody
+ * asked for one: named base, named folder, and the conversation the window is
+ * about to show. Everything it can go wrong at is reported as a failure rather
+ * than as a quiet fallback to the person's own files.
+ */
+async function startInNewWorktree(
+  open: { path: string; held: Held },
+  wanted: { base: string | null },
+): Promise<Result<Started>> {
+  const named = freshCheckout(open.held, open.path);
+  const made = await createWorktree(gitRunHereFor(), open.path, named.name, wanted.base === null ? null : { ref: wanted.base }, {
+    folder: named.folder,
+  });
+  if (!made.ok || made.value === null) {
+    return fail({
+      what: 'I could not make a copy of the project to work in.',
+      because: made.ok
+        ? 'Git did not answer, so nothing was created and your project is untouched.'
+        : made.because,
+      actionLabel: 'Got it',
+    });
+  }
+  const baseSha = await headSha(open.path);
+  const workspace = await worktreeWorkspaceFor(open.path, made.value.folder, made.value.branch, baseSha);
+  const started = await startConversation(open, openingIn(workspace.workspaceId));
+  if (!started.ok) {
+    // The copy exists and the conversation did not. It is left where it is,
+    // empty and named, rather than deleted underneath whoever was watching.
+    return started;
+  }
+  await noteConversationWorkspace(started.value.address, workspace.workspaceId);
+  return started;
+}
+
+/** The commit a checkout is being made from, written down so the copy can say
+ *  what it started at even after the branch has moved on. */
+async function headSha(folder: string): Promise<string | null> {
+  const found = await gitRun(folder, ['rev-parse', 'HEAD']).catch(() => null);
+  const sha = found?.code === 0 ? (found.out ?? '').trim() : '';
+  return sha === '' ? null : sha;
+}
+
+/**
+ * What a project carries into a checkout, and what one would still need.
+ *
+ * Read from disk every time rather than cached: the ticks are a person's and
+ * can be changed in the flow, and the gitignored files change whenever somebody
+ * edits `.gitignore`.
+ */
+async function setupHereOf(project: string): Promise<SetupHere> {
+  const chosen = setupFilesIn(await readSetupChoices(app.getPath('userData')), project);
+  return {
+    candidates: await seedingCandidates(gitRunHereFor(), project, chosen),
+    plan: await installPlanAt(project),
+  };
+}
+
+/** How far the install in each checkout has got, as this run knows it.
+ *
+ * In memory, deliberately: an install is a fact about a folder, and a "done"
+ * read back from a file written before somebody emptied `node_modules` is worse
+ * than not knowing. A fresh launch says "not yet", which is the cautious answer
+ * and the one that gets checked again. */
+const installs = new Map<string, Dependencies>();
+
+function dependenciesIn(folder: string): Dependencies {
+  return installs.get(canonical(folder)) ?? dependenciesNotStarted;
+}
+
+/** What installing runs, said in the shell's own terms: the same helper runner
+ *  everything else goes through, and no credentials in what it says back. */
+const runInstall: RunCommand = async (command, args, options) => {
+  const ran = await runHelper(command, args, {
+    folder: options.folder,
+    ...(options.patience === undefined ? {} : { patience: options.patience }),
+  });
+  return { code: ran.code, said: ran.said };
+};
+
+/**
+ * What a New worktree would do here, read and not done.
+ *
+ * The folder it would use, the commit it would start from, and the files that
+ * are changed here and would not come with it — a copy starts from a commit,
+ * and somebody deciding whether to make one deserves to know that before it
+ * exists rather than after.
+ */
+async function planForNewWorktree(
+  open: { path: string; held: Held },
+): Promise<WorktreePlan> {
+  const run = gitRunHereFor();
+  // What the copy would be given and what it would still need, read even when
+  // the copy cannot be made: it is the same answer either way, and it costs one
+  // git command that the folder listing already paid for.
+  const setup = await setupHereOf(open.path);
+  const empty: Pick<WorktreePlan, 'folder' | 'baseBranch' | 'baseSha' | 'leftBehind'> = {
+    folder: '',
+    baseBranch: null,
+    baseSha: null,
+    leftBehind: [],
+  };
+  const inside = await run(['rev-parse', '--is-inside-work-tree'], { cwd: open.path }).catch(
+    () => null,
+  );
+  if (inside === null || inside.code !== 0) {
+    return { ...empty, setup, possible: false, because: worktreeWords.notRepo };
+  }
+  const sha = await headSha(open.path);
+  if (sha === null) {
+    return {
+      ...empty,
+      setup,
+      possible: false,
+      because: 'This repository has nothing committed yet, so a copy would have nowhere to start from.',
+    };
+  }
+  const named = await gitRun(open.path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
+  const branch = (named?.out ?? '').trim();
+  const status = await gitRun(open.path, ['status', '--porcelain']).catch(() => null);
+  const leftBehind = (status?.out ?? '')
+    .split('\n')
+    .map((line) => line.slice(3).trim())
+    .filter((one) => one !== '')
+    .slice(0, 50);
+  return {
+    possible: true,
+    because: null,
+    folder: freshCheckoutName(open.held, open.path),
+    baseBranch: branch === '' || branch === 'HEAD' ? null : branch,
+    baseSha: sha,
+    leftBehind,
+    setup,
+  };
+}
+
+/** The folder a new checkout would get, without spending the counter that
+ *  names it: a plan is not a decision. */
+function freshCheckoutName(held: Held, project: string): string {
+  const chosen = nextCheckoutName(
+    held.checkoutsMade,
+    (name) => existsSync(join(worktreesFolder(project), name)),
+  );
+  return join(worktreesFolder(project), chosen.name);
+}
+
+/** The first thing a person asked, from the transcript. Null when the
+ *  transcript has no words of theirs in it yet. */
+function firstThingAsked(history: readonly AgentEvent[]): string | null {
+  for (const one of history) {
+    if (one.type === 'user-said' && one.text.trim() !== '') return one.text;
+  }
+  return null;
+}
+
+/** The last thing the agent said: where the conversation had got to. */
+function lastThingSaid(history: readonly AgentEvent[]): string | null {
+  let said: string[] = [];
+  for (const one of history) {
+    if (one.type === 'user-said') {
+      said = [];
+      continue;
+    }
+    if (one.type === 'message-delta') said.push(one.text);
+    if (one.type === 'message-end') said = [said.join('')];
+  }
+  const text = said.join('').trim();
+  return text === '' ? null : text;
+}
+
+/** Write down where a conversation came from. A link, never a copy. */
+async function rememberLineage(
+  address: string,
+  lineage: { from: string; kind: 'continue' | 'fork' },
+): Promise<void> {
+  await loadWorkspaceIndex();
+  // One id, because a conversation has one: the record is keyed by it, and the
+  // transcript is an attribute of it rather than a second name for it.
+  workspaceIndex = updateConversation(workspaceIndex, address, { lineage });
+  await saveWorkspaceIndex();
+}
+
+/** A conversation just started, in the shape the window opens one. */
+function openedFrom(open: { path: string; name: string; held: Held }, started: Started): OpenedProject {
+  const checkout = open.held.checkouts.get(started.address) ?? null;
+  return {
+    path: open.path,
+    name: open.name,
+    history: withNote(started.session.history, started.note),
+    conversation: started.session.conversation,
+    address: started.address,
+    howFar: started.session.howFar,
+    ownCopy: checkout !== null,
   };
 }
 
 /* ------------------------------------------------ checkouts left behind -- */
 
+/**
+ * Who is working in a folder right now, as the sweep asks it.
+ *
+ * Two facts, and they cover different moments. A conversation open in a
+ * checkout of its own is somebody about to write there, and that is the folder
+ * the copy is spread out in — the front conversation works in the project
+ * folder itself, which is never under the sweep's root. A lease is a run
+ * writing this minute, which is the one that matters when somebody presses
+ * Clear mid-turn: a run takes its folder for its whole length, every tool and
+ * the pause for an answer included.
+ *
+ * A run the app died in the middle of is not one of these, and deliberately so:
+ * by the time a launch sweeps, that run is over — its note was read and
+ * answered on the way up — so nothing is in flight and no folder is anybody's.
+ * A turn nobody is waiting for is not restarted, and its folder is an ordinary
+ * stray on the same clock as every other.
+ *
+ * The name is what a person recognises, in the order they would recognise it:
+ * what the conversation is called, then the branch it is on without our prefix.
+ * The shelf falls back to the conversation's own id, which is opaque, so that is
+ * never used — a folder left behind under an id is one nobody can account for.
+ *
+ * Read at each question rather than once, because the window opens the last
+ * project while this launch is still sweeping: a list taken before that would
+ * call a folder somebody has just started working in an abandoned one.
+ */
+async function liveWriters(): Promise<Live> {
+  const open: LiveWriter[] = [];
+  for (const one of workspaces.open) {
+    for (const [address, checkout] of one.held.checkouts) {
+      const named = one.held.sessions.find(address)?.name ?? '';
+      const said = named === address ? '' : named.trim();
+      open.push({
+        folder: checkout.folder,
+        who: said === '' ? checkout.branch.replace(/^graphe\//, '') : said,
+      });
+    }
+  }
+  return writingIn({ leases: workspaceLocks, open });
+}
+
 /** Every checkout left spread out on disk when the app last went away. What a
  *  conversation owns is its branch, and the index keeps that, so one somebody
- *  returns to is spread out again. A folder holding work is left alone. */
+ *  returns to is spread out again. A folder holding work, and one somebody is
+ *  writing in this minute, are both left alone. */
 async function sweepStrayCheckouts(): Promise<number> {
   const projects = await rememberedProjects().catch(() => []);
   let given = 0;
@@ -3884,8 +4178,14 @@ async function sweepStrayCheckouts(): Promise<number> {
     const found = await readdir(root, { withFileTypes: true }).catch(() => []);
     const folders = found.filter((one) => one.isDirectory()).map((one) => join(root, one.name));
     if (folders.length === 0) continue;
+    const projectId = await projectIdFor(project.path);
+    const live = await liveWriters();
     const released = await sweepCheckouts(gitRunHereFor(), project.path, folders, {
-      rescue: (folder, files) => keepAside(project.path, basename(folder))(folder, files),
+      // Never a folder somebody is writing in, whatever its age: a run holds
+      // its folder from the first tool to the last, and what it has written is
+      // in no save and no version.
+      inUse: (folder) => live.who(folder) !== null,
+      rescue: (folder, files) => keepAside(project.path, projectId, basename(folder))(folder, files),
       /* A copy whose branch already landed and that nothing has touched in a
          fortnight is what a gigabyte of `node_modules` is sitting in. Never
          one holding work, which `sweepCheckouts` checks first. */
@@ -3924,20 +4224,11 @@ async function readCheckouts(project: string): Promise<Map<string, Checkout>> {
 async function saveCheckouts(project: string, held: Held): Promise<void> {
   const file = checkoutIndexFile(project);
   await mkdir(dirname(file), { recursive: true });
-  const rows = Object.fromEntries(
-    [...held.checkouts].map(([address, one]) => [checkoutKey(held, address), one]),
-  );
+  const rows = Object.fromEntries([...held.checkouts]);
   // Beside it and moved into place: a half-written index orphans every
   // checkout of the project, and there is nothing left that knows where the
   // work was.
   await writeAtomically(file, JSON.stringify(rows));
-}
-
-/** What a conversation is asked for by once it has been written down. An
- *  address is `new-N` until the first write and never changes after it, so an
- *  index filed under one is an index a resume never matches. */
-function checkoutKey(held: Held, address: string): string {
-  return held.sessions.find(address)?.held.conversation ?? address;
 }
 
 /** Put a conversation's checkout away, and remember where it went. Quiet: a
@@ -3945,15 +4236,10 @@ function checkoutKey(held: Held, address: string): string {
 async function putAwayCheckoutAt(project: string, held: Held, address: string): Promise<void> {
   const one = held.checkouts.get(address);
   if (one === undefined || !existsSync(one.folder)) return;
-  const filed = checkoutKey(held, address);
   const away = await putAwayWorktree(gitRunHereFor(), project, one.folder, {
-    rescue: keepAside(project, basename(one.folder)),
+    rescue: keepAside(project, await projectIdFor(project), basename(one.folder)),
   }).catch(() => ({ put: false }));
   if (!away.put) return;
-  if (filed !== address) {
-    held.checkouts.delete(address);
-    held.checkouts.set(filed, one);
-  }
   await saveCheckouts(project, held).catch(() => undefined);
 }
 
@@ -4100,72 +4386,11 @@ function reviewIndexFile(project: string): string {
   return join(app.getPath('userData'), 'review-queue', `${key}.json`);
 }
 
-type ReviewIndex = { entries: readonly ReviewQueued[]; mirroring: readonly string[] };
-
-/** One stored row, checked field by field. Anything that does not read as an
- *  entry is dropped rather than repaired: a half-understood row would draw a
- *  card offering to carry files nobody can name. */
-function reviewRow(value: unknown): ReviewQueued | null {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  const id = row['id'];
-  const title = row['title'];
-  const address = row['address'];
-  const at = row['at'];
-  const from = row['from'];
-  if (typeof id !== 'string' || id === '') return null;
-  if (typeof title !== 'string' || typeof address !== 'string') return null;
-  if (typeof at !== 'number' || !Number.isFinite(at)) return null;
-  if (from !== 'conversation' && from !== 'board' && from !== 'schedule') return null;
-  const files: FileTally[] = [];
-  for (const one of Array.isArray(row['files']) ? (row['files'] as unknown[]) : []) {
-    if (one === null || typeof one !== 'object') continue;
-    const file = one as Record<string, unknown>;
-    if (typeof file['path'] !== 'string' || file['path'] === '') continue;
-    files.push({
-      path: file['path'],
-      added: typeof file['added'] === 'number' ? file['added'] : 0,
-      removed: typeof file['removed'] === 'number' ? file['removed'] : 0,
-    });
-  }
-  if (files.length === 0) return null;
-  const choices: Record<string, FileVerdict> = {};
-  const stored = row['choices'];
-  if (stored !== null && typeof stored === 'object' && !Array.isArray(stored)) {
-    for (const [path, choice] of Object.entries(stored as Record<string, unknown>)) {
-      if (choice === 'take theirs' || choice === 'keep mine') choices[path] = choice;
-    }
-  }
-  return {
-    id,
-    from,
-    title,
-    address,
-    files,
-    at,
-    read: row['read'] === true,
-    ...(Object.keys(choices).length === 0 ? {} : { choices }),
-  };
-}
-
+/** One project's queue, read back off disk. A file that will not parse is an
+ *  empty queue rather than a throw — see `readReviewIndex`. */
 async function readReviewQueue(project: string): Promise<ReviewIndex> {
-  try {
-    const parsed = JSON.parse(await readFile(reviewIndexFile(project), 'utf8')) as unknown;
-    if (parsed === null || typeof parsed !== 'object') return { entries: [], mirroring: [] };
-    const held = parsed as Record<string, unknown>;
-    const rows = Array.isArray(held['entries']) ? (held['entries'] as unknown[]) : [];
-    const entries: ReviewQueued[] = [];
-    for (const row of rows) {
-      const one = reviewRow(row);
-      if (one !== null) entries.push(one);
-    }
-    const mirroring = Array.isArray(held['mirroring'])
-      ? (held['mirroring'] as unknown[]).filter((one): one is string => typeof one === 'string')
-      : [];
-    return { entries: queueFrom(entries), mirroring };
-  } catch {
-    return { entries: [], mirroring: [] };
-  }
+  const text = await readFile(reviewIndexFile(project), 'utf8').catch(() => null);
+  return text === null ? { entries: [], mirroring: [] } : readReviewIndex(text);
 }
 
 async function saveReviewQueue(project: string, held: Held): Promise<void> {
@@ -4175,7 +4400,7 @@ async function saveReviewQueue(project: string, held: Held): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   await writeAtomically(
     file,
-    JSON.stringify({ entries: held.review, mirroring: [...held.mirroring] }),
+    reviewIndexText({ entries: held.review, mirroring: held.mirroringLegacy }),
   );
 }
 
@@ -4258,6 +4483,61 @@ async function reviewDiff(folder: string, base: string): Promise<string> {
 }
 
 /**
+ * What a review of this copy is read against, so a decision can be checked
+ * before it is carried out.
+ *
+ * The copy's own state is its revision plus its working tree — a copy's work is
+ * usually uncommitted, so the revision alone would call two different states
+ * the same — and each path in that tree is read for its content, not just for
+ * its name and status. The target is the revision of the workspace the work
+ * would land in, because that is the other side somebody is deciding against.
+ * Null when either cannot be read: a decision nobody can check is not one to
+ * carry out.
+ */
+async function reviewSnapshotOf(folder: string, repo: string): Promise<ReviewSnapshot | null> {
+  const [head, status, target] = await Promise.all([
+    gitRun(folder, ['rev-parse', 'HEAD']),
+    gitRun(folder, ['status', '--porcelain', '-z', '--untracked-files=all']),
+    gitRun(repo, ['rev-parse', 'HEAD']),
+  ]);
+  if (head.code !== 0 || status.code !== 0 || target.code !== 0) return null;
+  const done = (one: { out?: string }): string => (one.out ?? '').trim();
+  return { source: treeReading(done(head), await treeEntries(folder, status.out ?? '')), target: done(target) };
+}
+
+/**
+ * Every path the tree reports as moved, with what is behind it.
+ *
+ * Read one at a time on purpose: a folder with a thousand changed files should
+ * not have a thousand of them open at once just to say whether a decision is
+ * still about what is on disk.
+ */
+async function treeEntries(folder: string, porcelain: string): Promise<readonly TreeEntry[]> {
+  const fields = porcelain.split('\0').filter((one) => one !== '');
+  const entries: TreeEntry[] = [];
+  for (let at = 0; at < fields.length; at += 1) {
+    const one = fields[at] ?? '';
+    const state = one.slice(0, 2);
+    const path = one.slice(3);
+    // A rename or a copy carries the path it came from in the field after this
+    // one; what is on disk to read is the name in this one.
+    if (state.startsWith('R') || state.startsWith('C')) at += 1;
+    entries.push({ state, path, hash: await contentOf(resolve(folder, path)) });
+  }
+  return entries;
+}
+
+/** What one path holds, for comparison: the hash of its bytes, its size when it
+ *  is too big to read, or the fact that it is not there. */
+async function contentOf(where: string): Promise<string> {
+  const about = await stat(where).catch(() => null);
+  if (about === null) return 'gone';
+  if (about.size > TOO_BIG_TO_COUNT) return `size ${String(about.size)}`;
+  const bytes = await readFile(where).catch(() => null);
+  return bytes === null ? 'unreadable' : createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
  * An entry for what this conversation's checkout is holding, put on the list.
  *
  * `queueFrom` keeps whatever a person has already done to an entry with the
@@ -4271,7 +4551,6 @@ async function noteForReview(
   held: Held,
   address: string,
   checkout: Checkout,
-  mirrored: boolean,
   from: Arriving['from'] = 'conversation',
   called?: string,
 ): Promise<void> {
@@ -4280,6 +4559,8 @@ async function noteForReview(
   if (checkout.branch.startsWith('graphe/pr-')) return;
   const base = await sharedBase(gitRunHereFor(), checkout.folder, project);
   if (base === null) return;
+  const snapshot = await reviewSnapshotOf(checkout.folder, project);
+  if (snapshot === null) return;
   const files = await talliesFor(checkout.folder, base);
   if (files.length === 0) return;
   const named = called ?? held.sessions.find(address)?.name;
@@ -4290,14 +4571,14 @@ async function noteForReview(
     address,
     files,
     at: Date.now(),
+    snapshot,
   };
   const before = held.review.length;
   held.review = queueFrom(held.review, [arriving]);
-  if (mirrored) held.review = markRead(held.review, address);
   await saveReviewQueue(project, held).catch(() => undefined);
   // Said once, the first time work waits here instead of arriving. Without it
   // the change reads as the work having gone missing.
-  if (!mirrored && before === 0 && !toldAboutReview.has(project)) {
+  if (before === 0 && !toldAboutReview.has(project)) {
     toldAboutReview.add(project);
     await rememberToldAboutReview();
     send(project, { type: 'notice', what: reviewWords.firstTime }, address === '' ? undefined : address);
@@ -4355,8 +4636,35 @@ function reviewRows(held: Held): readonly ReviewEntry[] {
   return held.review.map((one) => ({
     ...one,
     branch: held.checkouts.get(one.address)?.branch ?? '',
-    mirror: held.mirroring.has(one.address),
   }));
+}
+
+/**
+ * A decision about files that have moved since they were read.
+ *
+ * Nothing is carried out, and the entry goes back to the list unread and
+ * undecided, so what somebody looks at next is what is on disk now rather than
+ * the answer they gave about something else.
+ */
+async function staleTrouble(
+  open: Workspace<Held>,
+  entry: ReviewQueued,
+  now: ReviewSnapshot | null,
+): Promise<Trouble> {
+  if (now !== null) {
+    open.held.review = open.held.review.map((one) =>
+      one.id === entry.id ? reviewedAgain(one, now) : one,
+    );
+    await saveReviewQueue(open.path, open.held).catch(() => undefined);
+  }
+  return {
+    what: reviewWords.stale(entry.title),
+    because:
+      now === null
+        ? 'I could not read the work behind it just now, so I did not carry anything over.'
+        : 'Open it again and you will be looking at the files as they are now.',
+    actionLabel: 'Got it',
+  };
 }
 
 const NO_SUCH_ENTRY: Trouble = {
@@ -4368,6 +4676,15 @@ const NO_SUCH_ENTRY: Trouble = {
 const REVIEW_WORK_GONE: Trouble = {
   what: 'The work behind this is not in the project any more.',
   because: 'Its checkout has been landed or thrown away, so there is nothing left to carry over.',
+  actionLabel: 'Got it',
+};
+
+/** Asked to install in a folder with no manifest at its root. Not an error —
+ *  there is simply no install to run, and saying so beats running nothing. */
+const NOTHING_TO_INSTALL: Trouble = {
+  what: 'There is nothing here to install.',
+  because:
+    'No lockfile or package manifest was found at the top of this checkout, so there is no install for me to run.',
   actionLabel: 'Got it',
 };
 
@@ -4515,11 +4832,17 @@ function openProject(folder: string): Promise<Result<OpenedProject>> {
 
 /** A saved transcript may be pressed twice before its first open completes.
  * Serialize that address so two Pi sessions can never append to one file. Fresh
- * conversations deliberately have no key: two fresh requests mean two tabs. */
+ * conversations are serialized by their press instead: two presses are two tabs,
+ * one press sent twice is one conversation. */
 const openingConversations = new Map<
   string,
   Promise<Result<{ session: GrapheSession; address: string }>>
 >();
+
+/** Every New press the shell has answered lately, by the key it came with. Two
+ *  requests for one press would otherwise build two sessions and write two
+ *  conversation records for one intention. */
+const presses = new Answered<Result<Started>>();
 
 async function startConversation(
   open: { path: string; held: Held },
@@ -4527,7 +4850,15 @@ async function startConversation(
   keep?: string,
 ): Promise<Result<Started>> {
   const asked = how.kind === 'carry-on' ? how.path : undefined;
-  if (asked === undefined) return startConversationUnlocked(open, how, keep);
+  if (asked === undefined) {
+    const pressed = how.kind === 'fresh' ? how.key : undefined;
+    if (pressed === undefined) return startConversationUnlocked(open, how, keep);
+    // Scoped to the project: a key from the window means one press in one
+    // folder, and nothing about it may reach into another project's chats.
+    return presses.answering(`${open.path}\u0000${pressed}`, () =>
+      startConversationUnlocked(open, how, keep),
+    );
+  }
   const key = `${open.path}\u0000${asked}`;
   const existing = openingConversations.get(key);
   if (existing !== undefined) return existing;
@@ -4540,6 +4871,71 @@ async function startConversation(
 
 /** A conversation now live, and anything the window should say over it once. */
 type Started = { session: GrapheSession; address: string; note?: string };
+
+/** A saved conversation read off disk with no session behind it.
+ *
+ * This is what "open read-only" is: the words are there and nothing can be
+ * asked of them. There is no working directory to run in, so no runtime is
+ * built, nothing is resumed and no file is touched — which is the honest answer
+ * for a conversation whose folder is gone. */
+type ReadOnly = { address: string; conversation: string | null; history: readonly AgentEvent[] };
+
+/** Whether a recorded folder is really this conversation's workspace now.
+ *
+ * Read rather than assumed, and only when there is a key to compare: a folder
+ * holding a different repository at the path this conversation recorded is not
+ * where its work is, and handing it over would edit somebody else's project. A
+ * record with no key has nothing to compare against, which is not a mismatch. */
+async function folderFacts(record: WorkspaceRecord): Promise<FolderFacts> {
+  if (!existsSync(record.cwd)) return { present: false, sameRepository: false };
+  if (record.repoKey === null) return { present: true, sameRepository: true };
+  const here = await repoKeyOf(gitRunHereFor(), record.cwd).catch(() => null);
+  return { present: true, sameRepository: here === null || here === record.repoKey };
+}
+
+/** What the window is told about a workspace it cannot use, or null when there
+ *  is nothing to say. `displayPath` is what the record was written with, which
+ *  is what somebody recognises. */
+function workspaceTrouble(record: WorkspaceRecord | null): WorkspaceTrouble | null {
+  if (record === null) return null;
+  const said = unavailableFor({ state: record.state, folder: record.displayPath });
+  if (said === null) return null;
+  return {
+    folder: said.folder,
+    state: record.state === 'recovery-required' ? 'recovery-required' : 'missing',
+    because: said.because,
+  };
+}
+
+/**
+ * A conversation whose recorded workspace cannot be used, opened read-only.
+ *
+ * The plan's rule for this state: where the folder and its branch are both gone
+ * there is nothing to reconstruct, so the transcript is read and shown and the
+ * window is told why. Deliberately not an error card, and deliberately not a
+ * silent fallback into the project folder — either would leave somebody
+ * believing they were editing their own copy.
+ *
+ * Null when there is no record, or the record is usable: both are ordinary
+ * opens and go on to build a session.
+ */
+async function readOnlyOpening(
+  asked: string,
+  record: WorkspaceRecord | null,
+): Promise<ReadOnly | null> {
+  if (record === null || !isUnusable(record.state)) return null;
+  if (usableWhereRecorded(record.state, await folderFacts(record))) return null;
+  const conversation = conversationById(await loadWorkspaceIndex(), asked);
+  const file = conversation?.sessionFile ?? null;
+  // The words are the whole of it. A transcript that will not read is still not
+  // an error to shout about: there is nothing to show, and the band above says
+  // the thing worth acting on, which is where the folder went.
+  const history =
+    file === null
+      ? []
+      : await readTranscript(file).then((read) => (read.ok ? read.value : []));
+  return { address: conversation?.conversationId ?? asked, conversation: file, history };
+}
 
 /**
  * Start a conversation in a project, and put it in front of the others.
@@ -4554,52 +4950,72 @@ async function startConversationUnlocked(
 ): Promise<Result<Started>> {
   const held = open.held;
   const asked = how.kind === 'carry-on' ? how.path : undefined;
+  /** The permission rung the conversation being replaced was on, if one was. */
+  let rungBefore: HowFar | null = null;
   if (asked !== undefined) {
     const already = conversationAt(held, { conversation: asked });
-    if (already !== null) {
+    if (already !== null && already.held.activationPending === null) {
       held.sessions.resume(already.path);
       return done({ session: already.held, address: already.path });
+    }
+    // Opening is a state, not a thing that happens to nobody: two opens of one
+    // conversation would be two writers for one transcript, and the table
+    // refuses the second.
+    states.move(named(asked), 'opening', Date.now());
+    if (already !== null) {
+      /*
+       * An add-on changed while this conversation was open, so the session
+       * holding it is out of date rather than busy being somebody's. It is put
+       * down and built again at the same address: the transcript is the file it
+       * was already writing to, the model, permissions and workspace are the
+       * same records this call reads for any conversation, and the window's own
+       * draft belongs to the conversation rather than to the session that
+       * happened to be open when it was typed.
+       */
+      rungBefore = already.held.howFar;
+      await already.held.stop().catch(() => undefined);
+      putDown(held, already.path);
     }
   }
 
   const from: Speaking = { address: null };
   const prefs = (await preferences()).all();
-  // The first conversation of a project is the one on the folder the person is
-  // looking at; any further one is a parallel tab and works in its own checkout
-  // rather than writing the same files the first one is writing.
-  const primary = held.sessions.open.length === 0;
-  // A put-down conversation may still own an isolated checkout with unapplied
-  // work. Reopening must resume that exact folder rather than overwrite its map
-  // entry with a fresh copy and orphan the old work.
+  /* Which folder this conversation works in, taken from the record and from
+     what was asked for — never from how many conversations are already open.
+     That count used to decide it, which made an ordinary second chat copy the
+     project and made a failed copy write to the person's folder instead. */
   let checkout: Checkout | null =
     asked === undefined ? null : (held.checkouts.get(asked) ?? null);
   if (checkout !== null) {
     checkout = await reopenCheckout(open.path, checkout);
-    // Its work is not in the project any more. A fresh checkout below is a
-    // better answer than refusing to open the conversation at all.
+    // Its work is not in the project any more. The record is dropped here and
+    // the registry below decides where this conversation works instead.
     if (checkout === null && asked !== undefined) held.checkouts.delete(asked);
   }
-  let madeCheckout = false;
-  if (!primary && checkout === null) {
-    const named = freshCheckout(held, open.path);
-    const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
-      folder: named.folder,
-    });
-    if (made.ok && made.value !== null) {
-      checkout = { folder: made.value.folder, branch: made.value.branch };
-      madeCheckout = true;
+  const wanted = asked === undefined ? await namedWorkspaceOf(how) : undefined;
+  if (checkout === null) {
+    const recorded =
+      asked === undefined
+        ? (wanted ?? (await localWorkspaceFor(open.path)).workspace)
+        : await recordedWorkspace(asked);
+    if (recorded !== null && recorded.kind === 'worktree') {
+      const back = await spreadOutAgain(open.path, recorded);
+      if (!back.ok) return back;
+      checkout = { folder: recorded.cwd, branch: recorded.branch ?? '' };
     }
   }
   // A checkout holds tracked files and nothing else, so the `.env.local` the
-  // project needs to run is not in it. Idempotent, so a checkout spread out
-  // again copies nothing twice.
+  // project needs to run is not in it. Carried from this project's own recorded
+  // choices and nothing else, and idempotent, so a checkout spread out again
+  // copies nothing twice.
   const seeded =
     checkout === null
-      ? { carried: [] as readonly string[], left: 0 }
-      : await seedCheckout(gitRunHereFor(), open.path, checkout.folder);
+      ? null
+      : await seedFromChoices(gitRunHereFor(), open.path, checkout.folder, app.getPath('userData'));
+  const installHere = checkout === null ? dependenciesNotStarted : dependenciesIn(checkout.folder);
   const notes = [
     ...(held.childRepos.length >= SEVERAL_CHILDREN ? await childRepoNotes(held.childRepos) : []),
-    ...(checkout === null ? [] : [seedWords.told(seeded.carried)]),
+    ...(seeded === null ? [] : [seedWords.told(seeded.carried, installHere)]),
   ];
   let session: GrapheSession;
   try {
@@ -4607,6 +5023,9 @@ async function startConversationUnlocked(
       projectRoot: checkout?.folder ?? open.path,
       guard: { computerUse: await computerUseFacts() },
       onEvent: forwardTo(open.path, held, from),
+      // What an add-on asks goes to the window that is watching this
+      // conversation, and nowhere else.
+      ask: askTheWindowFor(open, from),
       // Restore points must describe the tree this session is actually changing.
       timeline:
         checkout === null
@@ -4673,37 +5092,80 @@ async function startConversationUnlocked(
       // long-lived install accumulates transcripts (pictures included, which are
       // the bulk of it). Both want the "forget this conversation" action B1.1
       // asks for, which is not built yet.
-      ...(asked !== undefined
-        ? { sessionPath: asked }
-        : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
+      ...(how.kind === 'fresh' && how.forkFrom !== undefined
+        ? { sessionDir: sessionsFolder(), forkFrom: how.forkFrom }
+        : asked !== undefined
+          ? { sessionPath: asked }
+          : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
       ...(providerAuthPath === null ? {} : { authPath: providerAuthPath }),
     });
   } catch (cause) {
-    if (madeCheckout && checkout !== null) {
-      await dropWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
-    }
+    // Nothing is thrown away here. A checkout this app did not just make is
+    // somebody's work, and a session that would not start is not a reason to
+    // delete the folder it was going to work in.
     // The adapter wraps whatever went wrong in a sentence of its own, so the
     // reason worth reading is down the `cause` chain rather than on top of it.
     // Search the whole chain before falling back to the likeliest explanation.
     const chain = detailsOf(cause);
+    // A conversation whose runtime could not be built is `failed`, not idle:
+    // that is the difference between a chat that is open and can take a
+    // question, and one that is not there at all.
+    if (asked !== undefined) states.move(named(asked), 'failed', Date.now());
     return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
   }
 
   // `keep` is a conversation rebuilt in place — the window is already calling it
   // something, and a new name for the same thread would lose it.
-  const address = keep ?? addressOf(session);
+  //
+  // Otherwise the talk has one of three shapes. A fresh chat takes the name of
+  // the press that asked for it, so the window can keep a draft under the id the
+  // conversation will really have, and a retry of that press is the same chat
+  // rather than a second one. One the window named by its transcript keeps the
+  // id already written down for that file — which is how a profile from before
+  // ids existed stays one conversation rather than becoming two. Anything else
+  // is found by the file the session is writing, or minted.
+  await loadWorkspaceIndex();
+  const written = asked === undefined ? null : conversationById(workspaceIndex, asked);
+  const address =
+    keep ??
+    written?.conversationId ??
+    asked ??
+    (how.kind === 'fresh' ? how.key : undefined) ??
+    addressFor(session);
   from.address = address;
+  // A checkout row filed under the old name — the transcript path — is moved
+  // onto the conversation's own id, so the work it points at is not orphaned.
+  claimCheckout(held, address, session);
+  // How far the agent may go is held on the session, so a conversation built
+  // again — a reload after an add-on changed, most of all — would come back at
+  // the cautious default rather than at what somebody chose for it. Put back
+  // before anything can be asked of this session.
+  if (rungBefore !== null) session.goAsFarAs(rungBefore);
   if (checkout !== null) {
     held.checkouts.set(address, checkout);
     await saveCheckouts(open.path, held).catch(() => undefined);
   }
+  await noteWhereItWorks(open, address, checkout?.folder ?? null).catch(() => undefined);
   keepConversation(held, address, session);
+  // Open and quiet: nothing is being asked of it yet, and a restart from here
+  // leaves it exactly as it is.
+  states.move(named(address), 'idle', Date.now());
+  // Said over the history this conversation comes back with, once. The note a
+  // run leaves behind is one of them; what the checkout was given, and what the
+  // project named that did not arrive, are the others.
+  const overIt = [
+    ...(seeded === null ? [] : seedingNotes(seeded, open.path)),
+    // A run the app died in the middle of, said once, over the transcript it
+    // was writing. Nothing is picked up where it left off: the turn was
+    // somebody's and they are not waiting for it any more.
+    tookInterruptedNote(address),
+  ].filter((one): one is string => one !== null);
   return done({
     session,
     address,
     // Carried out to whoever built the conversation, rather than sent now: the
     // window has no thread to put it in until this call has answered.
-    ...(seeded.carried.length === 0 ? {} : { note: seedWords.carried(seeded.carried, open.path) }),
+    ...(overIt.length === 0 ? {} : { note: overIt.join('\n\n') }),
   });
 }
 
@@ -4790,7 +5252,6 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     sessions: conversationsIn(path),
     running: new Running(),
     serving: null,
-    variations: [],
     looking: nothingSeenYet(),
     suppressCarry: new Set(),
     saidHeldBack: '',
@@ -4798,10 +5259,7 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
     checkoutsMade: restoredCheckouts.size,
     checkouts: restoredCheckouts,
     review: restoredReview.entries,
-    mirroring: new Set(restoredReview.mirroring),
-    waiting: null,
-    checking: null,
-    pictures: null,
+    mirroringLegacy: restoredReview.mirroring,
     sending: false,
     planMode: false,
   };
@@ -4822,13 +5280,6 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   // What was left waiting last sitting counts on the dock this one.
   showWhatIsWaiting();
   await (await recents()).remember({ path, name });
-
-  // The picture of the project as it stands, taken before anybody asks for
-  // anything. Without it the first change of a sitting has nothing to be
-  // compared against, and the one change people most want to see is usually the
-  // first one they made. Nothing waits on it — `openProject` has already
-  // returned by the time this gets anywhere near a browser window.
-  void look(path, held);
 
   // The conversation this folder left behind, if there is one — the window
   // turns it back into the desk it was (BACKLOG B1.1).
@@ -4921,6 +5372,19 @@ async function insideFolder(where: string): Promise<readonly Found[]> {
   }
   return found;
 }
+
+/**
+ * What each listing and each file was last read at.
+ *
+ * Kept so an answer can say whether the folder has moved since the window last
+ * looked: a panel drawn from memory is the thing that goes stale, and this is
+ * the record it is checked against. Nothing here is a cache — every read goes
+ * to disk — so the worst a wrong entry can do is make a caller read again.
+ */
+const listingReadings = new Readings();
+const fileReadings = new Readings();
+/** One per copy and base: what the diff on screen was read from. */
+const reviewDiffReadings = new Readings();
 
 /** Where a file the window asked for really is, or why it is not somewhere we
  *  will read from. Checked as written and again as resolved, so a link out of
@@ -5338,6 +5802,178 @@ async function sendOnTheirBehalf(project: string, address: string, text: string)
  *  neither. */
 const ours = new Map<string, readonly string[]>();
 
+/** An answer off the wire, or null when it is not one. */
+function readAnswer(value: unknown): ExtensionAnswer | null {
+  const one = value as { kind?: unknown; value?: unknown } | null;
+  if (one === null || typeof one !== 'object') return null;
+  if (one.kind === 'confirm') return { kind: 'confirm', value: one.value === true };
+  if (one.kind === 'select' || one.kind === 'input' || one.kind === 'editor') {
+    const text = typeof one.value === 'string' ? one.value : null;
+    return { kind: one.kind, value: text };
+  }
+  return null;
+}
+
+/**
+ * Questions add-ons have asked, waiting for an answer.
+ *
+ * Keyed by a request id that only ever goes up, so an answer that arrives twice
+ * settles once and an answer to a question that has gone comes back harmless
+ * rather than granting something. A stop, a close or a window going away
+ * settles what is left as cancelled: nothing is ever left waiting for a screen
+ * that is not there.
+ */
+const addonAsks = new Map<
+  string,
+  { settle: (answer: ExtensionAnswer) => void; where: Where }
+>();
+
+let addonAsksSoFar = 0;
+
+/** The answer an add-on gets when its question cannot be put to anybody. */
+function nothingToAsk(ask: ExtensionAsk): ExtensionAnswer {
+  if (ask.kind === 'confirm') return { kind: 'confirm', value: false };
+  if (ask.kind === 'select') return { kind: 'select', value: null };
+  if (ask.kind === 'editor') return { kind: 'editor', value: null };
+  return { kind: 'input', value: null };
+}
+
+/** Settle every question that belongs to a conversation, as cancelled. Used
+ *  when its run stops and when the project closes. */
+function withdrawAsks(where: Where): void {
+  for (const [id, one] of [...addonAsks]) {
+    if (where.project !== undefined && one.where.project !== where.project) continue;
+    if (where.conversation !== undefined && one.where.conversation !== where.conversation) continue;
+    addonAsks.delete(id);
+    one.settle({ kind: 'confirm', value: false });
+  }
+}
+
+/**
+ * Put an add-on's question to the window and wait for the answer.
+ *
+ * The window is the only thing that can answer: with none, or with a request
+ * the window never answers, the result is a cancellation in the shape of the
+ * question. A timeout the add-on asked for is honoured here rather than trusted
+ * to the renderer.
+ */
+function askTheWindowFor(
+  open: { path: string },
+  from: Speaking,
+): (ask: ExtensionAsk) => Promise<ExtensionAnswer> {
+  return (ask: ExtensionAsk) =>
+    new Promise<ExtensionAnswer>((resolve) => {
+      const win = mainWindow;
+      if (win === null || win.isDestroyed()) {
+        resolve(nothingToAsk(ask));
+        return;
+      }
+      addonAsksSoFar += 1;
+      const requestId = `addon-${String(addonAsksSoFar)}`;
+      const where: Where = {
+        project: open.path,
+        ...(from.address === null ? {} : { conversation: from.address }),
+      };
+      let bell: ReturnType<typeof setTimeout> | undefined;
+      const settle = (answer: ExtensionAnswer): void => {
+        if (!addonAsks.has(requestId)) return;
+        addonAsks.delete(requestId);
+        if (bell !== undefined) clearTimeout(bell);
+        resolve(answer);
+      };
+      addonAsks.set(requestId, { settle, where });
+      const patience = ask.kind === 'editor' ? null : ask.timeoutMs;
+      if (patience !== null) {
+        bell = setTimeout(() => settle(nothingToAsk(ask)), patience);
+        (bell as unknown as { unref?: () => void }).unref?.();
+      }
+      win.webContents.send(CHANNEL.extensionAsk, {
+        ...ask,
+        requestId,
+        project: open.path,
+        conversation: from.address,
+      });
+    });
+}
+
+/**
+ * One run per folder.
+ *
+ * Two chats may work in the same workspace; they may not write it at the same
+ * minute. A run holds its folder for its whole length — every tool, every child
+ * and the pause for an answer — and the next one waits in arrival order.
+ */
+const workspaceLocks = new WorkspaceLocks();
+
+/** The run each conversation currently has going, so a second message from the
+ *  same chat joins its own run rather than queueing behind it. */
+const runsHere = new Map<string, { key: string; runId: string }>();
+
+/** The runs waiting for the folder, kept by conversation in arrival order, so
+ *  taking the line back can actually stop them: the words are not in Pi's
+ *  queue, so Pi cannot. Each carries the folder it was queued for as it was at
+ *  send time — cancelling asks the lock for that, not for whatever the chat is
+ *  pointed at now. */
+const waitingForTheFolder = new Map<string, readonly WaitingSend[]>();
+
+let runsSoFar = 0;
+
+/**
+ * Every terminal this app has open.
+ *
+ * Output is forwarded to the window as it arrives, chunk by chunk: a terminal
+ * is a stream, not a document, and buffering it until something asks would make
+ * a build log arrive in one lump at the end.
+ */
+const terminals = new Terminals(
+  (chunk) => {
+    const win = mainWindow;
+    if (win === null || win.isDestroyed()) return;
+    win.webContents.send(CHANNEL.terminalData, chunk);
+  },
+  (exit) => {
+    const win = mainWindow;
+    if (win === null || win.isDestroyed()) return;
+    win.webContents.send(CHANNEL.terminalExit, exit);
+  },
+);
+
+/**
+ * Take the messages waiting for the folder out of the queue.
+ *
+ * The words belong to the window until the run has actually started, so taking
+ * them back has to cancel the wait itself: resolving the ticket as cancelled is
+ * what stops the send, and returning the words is what puts them in the box.
+ * Everything this conversation has waiting comes back, in the order it was
+ * asked for. Empty when this conversation is not the one waiting.
+ */
+function takeBackFromTheFolder(open: Workspace<Held>, where: Where): readonly string[] {
+  const session = sessionAt(open, where);
+  if (session === null) return [];
+  const whose = keyOf(open.path, addressOf(open.held, session));
+  const waiting = waitingForTheFolder.get(whose) ?? [];
+  waitingForTheFolder.delete(whose);
+  for (const one of waiting) workspaceLocks.cancel(one.workspace, one.id);
+  return waiting.map((one) => one.text);
+}
+
+/**
+ * What is waiting for this folder, said to the window whole, every time it
+ * changes.
+ *
+ * The shell holds these, so the shell is the one that can describe the line. A
+ * window adding one event and removing another would have to pair them by the
+ * words in them, and two sends of the same sentence cannot be told apart that
+ * way.
+ */
+function tellTheFolderLine(
+  open: Workspace<Held>,
+  address: string,
+  waiting: readonly WaitingSend[],
+): void {
+  send(open.path, { type: 'queued-for-folder', waiting }, address);
+}
+
 /** How heavy the system prompt was on the last call of each conversation. Read
  *  by the diagnostics, drawn nowhere. */
 const promptSizes = new Map<string, number>();
@@ -5517,6 +6153,11 @@ let reloadedAlready = false;
  *  which shells out to it; helpers do not need it. Null until asked. */
 let npmIsHere: boolean | null = null;
 
+/** Whether Homebrew is on the path, asked once. It decides whether the npm line
+ *  on the add-ons screen offers `brew install node` or the download page on its
+ *  own. */
+let brewIsHere: boolean | null = null;
+
 /** One calm card, and something to send. Said as a notice rather than an error
  *  on a conversation: nothing the person asked for went wrong. */
 function sayWentWrong(message: string): void {
@@ -5649,12 +6290,11 @@ const RELEASE_NOTES = 'https://github.com/AadiXC0DE/graphe/releases';
  */
 let gitIsHere: boolean | null = null;
 
-const GIT_MISSING = {
-  what: 'This Mac does not have git yet, and I keep every version of your work in it.',
-  because:
-    'macOS installs it with the command line tools. Press Install and macOS will ask; I will wait.',
-  actionLabel: 'Install',
-} as const;
+/** Whether npm is here, asked once. The same answer the add-on shelf uses. */
+async function npmInReach(): Promise<boolean> {
+  npmIsHere ??= await npmOnPath();
+  return npmIsHere;
+}
 
 async function probeGit(): Promise<boolean> {
   if (gitIsHere !== null) return gitIsHere;
@@ -5664,6 +6304,30 @@ async function probeGit(): Promise<boolean> {
   gitIsHere = ran !== null && !notHere(ran) && ran.code === 0;
   log.line('info', 'git', { here: gitIsHere });
   return gitIsHere;
+}
+
+/**
+ * Everything true of this machine rather than of one conversation, kept so the
+ * window can ask for it as well as be told.
+ *
+ * Told once, at launch, into nothing: a window that is still loading misses the
+ * push, and on a first launch there is no conversation for it to land in
+ * either. Kept here, and asked for by the window when it is up.
+ */
+const appWide: AppNotice[] = [];
+
+function sayAppWide(one: AppNotice): void {
+  if (!appWide.some((each) => each.id === one.id)) appWide.push(one);
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.appNotice, one);
+}
+
+/** What is missing, probed now and remembered. Both probes answer from what
+ *  they found the first time, so asking again costs nothing. */
+async function whatIsMissing(): Promise<readonly AppNotice[]> {
+  const said = appWideFor({ git: await probeGit(), npm: await npmInReach() });
+  for (const one of said) if (!appWide.some((each) => each.id === one.id)) appWide.push(one);
+  return said;
 }
 
 /** Once a day, and never in the way. A failure is silent: whether somebody is
@@ -5740,6 +6404,7 @@ function watchForANewerOne(): void {
  */
 async function whatIsLyingAround(): Promise<readonly Sweepable[]> {
   const userData = app.getPath('userData');
+  const live = await liveWriters();
   const all: Sweepable[] = [];
   const walk = async (folder: string, kind: Sweepable['kind']): Promise<void> => {
     const names = await readdir(folder, { withFileTypes: true }).catch(() => []);
@@ -5747,7 +6412,15 @@ async function whatIsLyingAround(): Promise<readonly Sweepable[]> {
       const path = join(folder, one.name);
       const when = await stat(path).catch(() => null);
       if (when === null) continue;
-      all.push({ path, kind, at: when.mtimeMs, holdsWork: await holdsWorkIn(path, kind) });
+      all.push({
+        path,
+        kind,
+        at: when.mtimeMs,
+        holdsWork: await holdsWorkIn(path, kind),
+        // A folder with a run writing in it is not finished with, whatever its
+        // age: what it is making is in no save and no version.
+        inUse: live.who(path),
+      });
     }
   };
   // Worktrees are two deep — one folder per project, one per conversation.
@@ -5914,29 +6587,6 @@ function deskFor(path: string, name: string): AwayDesk {
  *  background work keeps the ordinary command ceilings. */
 const GOAL_WALL_MS = 4 * 60 * 60 * 1000;
 
-/** The list of repeats, mirrored here so drawing the panel never waits on a
- *  disk. The file is the truth; this is the copy the window is told about. */
-let standingNow: readonly Standing[] = [];
-let standingPromise: Promise<StandingFile> | null = null;
-
-function standingFile(): Promise<StandingFile> {
-  standingPromise ??= StandingFile.open(join(app.getPath('userData'), 'standing.json')).then(
-    (file) => {
-      standingNow = file.all();
-      return file;
-    },
-  );
-  return standingPromise;
-}
-
-async function changeStanding(
-  change: (all: readonly Standing[]) => readonly Standing[],
-): Promise<void> {
-  const file = await standingFile();
-  standingNow = await file.change(change);
-  watchTheClock();
-}
-
 /** One line about what a piece of work did, out of what it actually said. */
 function saidBriefly(text: string): string | null {
   const one = text.replace(/\s+/g, ' ').trim();
@@ -6030,8 +6680,7 @@ function afterFor(desk: AwayDesk, id: string): AwayAfter | null {
 }
 
 function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
-  // One numbering for the whole board, shared with the comparison sheet, so a
-  // go is called the same thing in both places.
+  // One numbering for the whole board, so every piece is called the same thing.
   const numbering = waysNumbering(desk.bench.pieces);
 
   const on: AwayPiece[] = desk.bench.pieces.map((piece) => {
@@ -6081,18 +6730,18 @@ function awayPieces(desk: AwayDesk): readonly AwayPiece[] {
   return on;
 }
 
-function awayRepeats(path: string, now: number): readonly Repeating[] {
-  return standingFor(standingNow, path).map((one) => {
-    const said = saysStanding(one, now);
-    return {
-      id: one.id,
-      doing: one.doing,
-      says: said.says,
-      next: said.next,
-      on: one.on,
-      lastSaid: one.lastSaid,
-    };
-  });
+function awayNow(path: string): Away {
+  const desk = awayDesks.get(path);
+  if (desk === undefined) {
+    return { pieces: [], atOnce: AT_A_TIME, spent: null, sinceYouWere: null };
+  }
+  const pieces = awayPieces(desk);
+  return {
+    pieces,
+    atOnce: desk.bench.atOnce,
+    spent: desk.spend.ledger?.total() ?? null,
+    sinceYouWere: desk.unseen ? saysWhileAway(pieces) : null,
+  };
 }
 
 /** Everything this project has going, as the window draws it. */
@@ -6108,22 +6757,6 @@ async function connectedNow(path: string): Promise<ConnectedState> {
     file: mcpFile(path),
     trouble: config.trouble ?? null,
     skipped: config.skipped === undefined ? [] : [...config.skipped],
-  };
-}
-
-function awayNow(path: string): Away {
-  const repeats = awayRepeats(path, Date.now());
-  const desk = awayDesks.get(path);
-  if (desk === undefined) {
-    return { pieces: [], repeats, atOnce: AT_A_TIME, spent: null, sinceYouWere: null };
-  }
-  const pieces = awayPieces(desk);
-  return {
-    pieces,
-    repeats,
-    atOnce: desk.bench.atOnce,
-    spent: desk.spend.ledger?.total() ?? null,
-    sinceYouWere: desk.unseen ? saysWhileAway(pieces) : null,
   };
 }
 
@@ -6247,7 +6880,6 @@ function onePreference(which: unknown, value: unknown): Partial<Preferences> | n
   }
   if (
     which === 'nameConversations' ||
-    which === 'askBeforeClosing' ||
     which === 'snapBeforeApply' ||
     which === 'notifySound' ||
     which === 'badgeDock'
@@ -6531,7 +7163,7 @@ function tellTheConversation(desk: AwayDesk, piece: PieceOfWork): void {
   // else a finished piece would be seen.
   const checkout = open.held.checkouts.get(piece.id);
   if (checkout !== undefined) {
-    void noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing).catch(
+    void noteForReview(desk.path, open.held, piece.id, checkout, 'board', piece.doing).catch(
       () => undefined,
     );
   }
@@ -6805,53 +7437,6 @@ function writeDownWhatWasGoing(): void {
   }
 }
 
-/* ------------------------------------------------------- over and over */
-
-/** Often enough that a morning is not missed by much, seldom enough that a
- *  laptop's battery never notices. */
-const LOOK_EVERY = 30_000;
-
-let clock: ReturnType<typeof setInterval> | null = null;
-
-function watchTheClock(): void {
-  if (clock !== null) return;
-  if (!standingNow.some((one) => one.on)) return;
-  clock = setInterval(() => void whatIsDue(), LOOK_EVERY);
-  void whatIsDue();
-}
-
-function stopWatchingTheClock(): void {
-  if (clock === null) return;
-  clearInterval(clock);
-  clock = null;
-}
-
-/** True while one round is being worked out, so a slow project cannot have two
- *  rounds asking for the same thing twice. */
-let looking = false;
-
-async function whatIsDue(): Promise<void> {
-  if (looking) return;
-  looking = true;
-  try {
-    const file = await standingFile();
-    const now = Date.now();
-    for (const one of dueNow(file.all(), now)) {
-      // Written down before anything happens. A machine that loses power
-      // half-way through must come back to a repeat that has been done, not one
-      // that looks overdue and runs a second time.
-      standingNow = await file.change((all) => ranStanding(all, one.id, { at: now }));
-      const name = basename(one.project) === '' ? one.project : basename(one.project);
-      await keepGoing(one.project, name, one.doing);
-    }
-  } catch {
-    // A round that could not be worked out is a round missed, and the next one
-    // is thirty seconds away.
-  } finally {
-    looking = false;
-  }
-}
-
 /* ------------------------------------------------------------- the end */
 
 /** True while something is actually in flight. One stopped on a question is
@@ -6866,52 +7451,18 @@ function stillGoing(): boolean {
   return false;
 }
 
-/**
- * Whether the app has a reason to outlive its window.
- *
- * Work in flight, always: closing the window is not the same as changing your
- * mind, and stopping a run half-way leaves a copy of somebody's project behind
- * with nothing to show for it.
- *
- * A repeat waiting for its morning, only on macOS, where closing the window has
- * never meant quitting and the app is visibly still there in the Dock. Anywhere
- * else, closing the last window means done — the repeats pick up the next time
- * it is opened, and one missed morning is done once rather than counted up.
- * Nobody is left with a process they cannot see and cannot end.
- */
-function mustStayUp(): boolean {
-  if (stillGoing()) return true;
-  return process.platform === 'darwin' && standingNow.some((one) => one.on);
-}
-
 /** Called when a piece of work finishes. With no window and nothing left to do,
  *  the app lets itself go rather than sitting there invisibly. */
 function quitIfNothingIsLeft(): void {
   if (mainWindow !== null && !mainWindow.isDestroyed()) return;
-  if (mustStayUp()) return;
+  if (stillGoing()) return;
   closeSession();
   if (process.platform !== 'darwin') app.quit();
-}
-
-/** What the window asked for, as a rhythm. Null when it is not one of the four,
- *  which is a stale window rather than something to say a sentence about. */
-function asRepeat(every: unknown, at: unknown, on: unknown): Repeat | null {
-  const known: readonly EveryKind[] = ['day', 'weekday', 'week', 'month'];
-  if (typeof every !== 'string' || !known.includes(every as EveryKind)) return null;
-  if (typeof at !== 'object' || at === null) return null;
-  const time = at as Record<string, unknown>;
-  if (typeof time['hour'] !== 'number' || typeof time['minute'] !== 'number') return null;
-  const when: TimeOfDay = { hour: time['hour'], minute: time['minute'] };
-  const which = typeof on === 'number' ? on : 1;
-  if (every === 'week') return { every: 'week', on: which as Weekday, at: when };
-  if (every === 'month') return { every: 'month', on: which, at: when };
-  return { every: every as 'day' | 'weekday', at: when };
 }
 
 /** Everything in flight, let go. Every question still standing is turned down —
  *  which changes nothing, because a question is asked before the thing happens. */
 function stopEverythingAway(): void {
-  stopWatchingTheClock();
   for (const desk of awayDesks.values()) {
     for (const run of desk.runs.values()) {
       run.held.stop();
@@ -6965,9 +7516,9 @@ const NEEDS_NO_PROGRAMS = new Set<string>([
   CHANNEL.goalLoad,
   CHANNEL.goalSave,
   CHANNEL.goalClear,
-  CHANNEL.flowLoad,
-  CHANNEL.flowSave,
-  CHANNEL.flowForget,
+  // Neither reaches for a program: reading the record, and showing a folder.
+  CHANNEL.migration,
+  CHANNEL.showBackups,
 ]);
 
 function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unknown[]) => Promise<Result<T>>): void {
@@ -6981,10 +7532,13 @@ function handle<T>(channel: string, run: (event: IpcMainInvokeEvent, args: unkno
       return await run(event, args);
     } catch (cause) {
       // Nothing below is expected to throw. If one does, the window still gets a
-      // sentence rather than a rejected promise it has no way to describe.
+      // sentence rather than a rejected promise it has no way to describe — and
+      // the sentence says what is true, which is that this stopped somewhere
+      // unknown rather than that the world is unchanged.
       return fail<T>({
-        what: 'Something went wrong on my side.',
-        because: 'I have stopped where I was. Nothing else has been changed.',
+        what: 'Something went wrong on my side, and this did not finish.',
+        because:
+          'Part of it may have gone through already, and I cannot tell from here how much did. Check how things stand before trying again.',
         actionLabel: 'Got it',
         details: detailsOf(cause),
       });
@@ -7164,30 +7718,9 @@ function abandonPrompts(): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Staying in step with Figma                                                  */
+/* Figma, as the agent's own reading of a link                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Which Figma file each project follows. Opened on demand, for the same
- *  reason `recents` is: `app.getPath` cannot be asked before the app is ready. */
-let followedPromise: Promise<FollowedFile> | null = null;
-
-function followed(): Promise<FollowedFile> {
-  followedPromise ??= FollowedFile.open(join(app.getPath('userData'), 'followed.json'));
-  return followedPromise;
-}
-
-/**
- * What a reading of a Figma file is made with, or null when there is nothing to
- * make one with.
- *
- * The shelf's Figma entry is the way in for everybody else; until that
- * connection can be asked for a file from here, an environment value is the one
- * hand-hold somebody who knows their way around has. Null is answered honestly
- * rather than papered over — an invented finding about somebody's design is
- * worse than no finding at all.
- */
-/** The credential this computer has for Figma, or nothing. Read in one place
- *  so the panel and the agent are never connected to different things. */
 /**
  * The Figma token, from the keychain first and the environment second.
  *
@@ -7216,49 +7749,6 @@ let kept_secrets: SecretFile | null = null;
  *  as being signed out of everything. */
 let providerAuthPath: string | null = null;
 
-function figmaReading(): ReadDesign | null {
-  const credential = figmaCredential();
-  return credential === '' ? null : throughFigma(createReader({ token: credential }));
-}
-
-const NO_FIGMA: Trouble = {
-  what: 'I have no way into Figma yet.',
-  because:
-    'Nothing on this computer is connected to Figma, so there is no file for me to open. Connect Figma and point me at it again.',
-  actionLabel: 'Got it',
-};
-
-/** Whatever went wrong asking Figma, said as it was said. Those sentences are
- *  already written for the person who pasted the link. */
-function figmaTrouble(cause: unknown): Trouble {
-  const said = cause instanceof Error ? cause.message.trim() : '';
-  return {
-    what: said === '' ? 'I could not read that Figma file.' : said,
-    because: 'Nothing here has changed, so it is worth trying again once that is sorted.',
-    actionLabel: 'Got it',
-  };
-}
-
-function saidBy(cause: unknown): string {
-  const said = cause instanceof Error ? cause.message.trim() : '';
-  return said === '' ? 'I could not read that Figma file.' : said;
-}
-
-/** The whole band, worked out from what is kept. The comparison itself is pure
- *  and lives in src/design/moved.ts. */
-function inStepOf(held: HeldDesign | null, trouble: string | null = null): InStep {
-  if (held === null) {
-    return { following: null, moved: [], says: NOTHING_FOLLOWED, trouble };
-  }
-  const moved = findMoved(held.design, held.latest, { name: held.name });
-  return {
-    following: { id: held.id, name: held.name, url: held.url, readAt: held.readAt },
-    moved,
-    says: saysInStep(held.name, moved),
-    trouble,
-  };
-}
-
 function register(): void {
   handle<OpenedProject>(CHANNEL.openProject, async (_event, args) => {
     const [path] = args;
@@ -7279,9 +7769,6 @@ function register(): void {
       // Ours, though, goes. Somebody who has just said "I am done with this
       // project" should not be left holding a folder of our screenshots of it.
       await forgetEverything(resolve(path));
-      if (keptCopy !== null && resolve(keptCopy.project) === resolve(path)) {
-        await letKeptCopyGo();
-      }
       // And nothing of theirs goes on happening on its own for a project they
       // have just put down.
       const desk = awayDesks.get(resolve(path));
@@ -7295,9 +7782,6 @@ function register(): void {
         await desk.bench.clear().catch(() => undefined);
         awayDesks.delete(resolve(path));
       }
-      await (await followed()).forget(resolve(path));
-      await changeStanding((all) => withoutProject(all, resolve(path)));
-      if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
     }
     return done(await rememberedProjects());
   });
@@ -7472,28 +7956,34 @@ function register(): void {
     if (open === null) {
       return done({ git: null, preview: null, artifacts: [], swatches: [], styles: null });
     }
-    const made = artifactsAmong([...open.held.looking.files]);
-    // A palette is only a palette once its colours have been read, and it is the
-    // one artifact worth opening a file for.
-    const palette = made.find((one) => one.kind === 'palette') ?? null;
-    const swatches =
-      palette === null
-        ? []
-        : paletteFrom(await readFile(join(open.path, palette.path), 'utf8').catch(() => ''));
     // A parallel conversation works in its own checkout. The right panel must
     // describe the folder its agent is actually changing, not always the
     // project's primary checkout — otherwise a successful `git switch` looks
     // like it never happened.
     // The same folder the design view saves into, so what is shown and what is
     // written are never two different projects.
+    //
+    // This one folder is the whole answer: the branch, the files behind the
+    // artifacts, the palette and the preview address are all read out of it, so
+    // one panel can never describe two folders at once.
     const cwd = folderFor(open, where);
-    // Several projects in one folder: each child answers where it lives; the parent answers nothing.
+    // Several projects in one folder: each child answers where it lives, so the
+    // panel can say which repositories the folder holds. The parent has no
+    // repository of its own, and nothing at the parent is served.
     const many = open.held.childRepos.length >= SEVERAL_CHILDREN;
     const repos = many
       ? (await Promise.all(open.held.childRepos.map(readRepoOverview))).filter(
           (one): one is RepoOverview => one !== null,
         )
       : undefined;
+    const made = await artifactsIn(cwd, open.held.looking.files);
+    // A palette is only a palette once its colours have been read, and it is the
+    // one artifact worth opening a file for.
+    const palette = made.find((one) => one.kind === 'palette') ?? null;
+    const swatches =
+      palette === null
+        ? []
+        : paletteFrom(await readFile(join(cwd, palette.path), 'utf8').catch(() => ''));
     const git = many ? null : await readGitStatusWithLines(cwd);
     return done({
       git:
@@ -7501,92 +7991,12 @@ function register(): void {
           ? null
           : { ...git, branches: await readBranches(cwd) },
       ...(repos === undefined ? {} : { repos }),
-      preview: open.held.serving?.address ?? null,
+      preview: previewForPanel(open.held.serving, cwd, repos),
       artifacts: made,
       swatches,
-      styles: await styleTokens(cwd),
     });
   });
 
-  handle<readonly SavedVersion[]>(CHANNEL.designCommit, async (_event, args) => {
-    const [changes] = args;
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof changes !== 'object' || changes === null) return fail(NOTHING_OPEN);
-    const timeline = await timelineFor(open, where);
-    if (timeline === null) return fail(SEVERAL_PROJECTS);
-    // The folder the timeline belongs to. In a folder holding several projects
-    // these are not the same place, and writing one project's tokens into the
-    // folder above it is a change nobody asked for and nobody would find.
-    const folder = folderFor(open, where);
-    const given = changes as Partial<DesignChange>;
-    const tokens = Array.isArray(given.tokens)
-      ? given.tokens.filter((one) => typeof one.name === 'string' && typeof one.value === 'string')
-      : [];
-    const motions = Array.isArray(given.motions)
-      ? given.motions.filter(
-          (one) => Array.isArray(one.places) && typeof one.change === 'object' && one.change !== null,
-        )
-      : [];
-    // The whole design view is one saved moment. Anything sent here is written
-    // back where each token lived and then kept as a single version — the
-    // window holds the edits so nothing is committed on a slide.
-    const styles = await styleTokens(folder);
-    if (styles === null && tokens.length === 0 && motions.length === 0) return fail(NOTHING_OPEN);
-    try {
-      // Apply edits per file, so a token that came from a component sheet is
-      // written where it lives, not into whichever sheet holds the most. The
-      // source is looked up by name from the read, because the window only
-      // sends a name and a value.
-      const perFile = new Map<string, string>();
-      const edits = new Map<string, { name: string; value: string }[]>();
-      const whereLives = new Map<string, string>();
-      if (styles !== null) {
-        for (const one of styles.tokens) whereLives.set(one.name, one.file ?? styles.file);
-      }
-      for (const one of tokens) {
-        const file = whereLives.get(one.name) ?? styles?.file;
-        if (file === undefined) continue;
-        edits.set(file, [...(edits.get(file) ?? []), { name: one.name, value: one.value }]);
-      }
-      const writeFileEdits = async (
-        file: string,
-        list: readonly { name: string; value: string }[],
-      ): Promise<void> => {
-        const where = join(folder, file);
-        let css = await readFile(where, 'utf8');
-        let wrote = false;
-        for (const one of list) {
-          const next = writeToken(css, one.name, one.value);
-          if (next !== css) {
-            css = next;
-            wrote = true;
-          }
-        }
-        if (wrote) perFile.set(where, css);
-      };
-      for (const [file, list] of edits) await writeFileEdits(file, list);
-      // Motion edits land in the primary stylesheet.
-      if (styles !== null && motions.length > 0) {
-        const where = join(folder, styles.file);
-        let css = perFile.get(where) ?? (await readFile(where, 'utf8'));
-        for (const one of motions) {
-          const next = writeMotionAll(css, one.places as Parameters<typeof writeMotionAll>[1], one.change as Parameters<typeof writeMotionAll>[2]);
-          if (next !== css) {
-            css = next;
-            perFile.set(where, css);
-          }
-        }
-      }
-      for (const [where, css] of perFile) await writeAtomically(where, css);
-      await timeline.snapshot({ boundary: 'user-asked', by: 'you' });
-      return done(await versionsOf(timeline));
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause);
-      return fail(plainTrouble(raw, detailsOf(cause)));
-    }
-  });
 
   handle<PutBack>(CHANNEL.putBack, async (_event, args) => {
     const [versionId] = args;
@@ -7626,14 +8036,6 @@ function register(): void {
     }
   });
 
-  /** What each version looked like. Empty is a real answer: a project nothing
-   *  has been photographed in yet has no pictures, and the rail says so by
-   *  drawing words instead. */
-  handle<Readonly<Record<string, string>>>(CHANNEL.versionPictures, (_event, args) => {
-    const open = projectAt(whereIn(args));
-    return Promise.resolve(done(open === null ? {} : Object.fromEntries(open.held.looking.pictures)));
-  });
-
   handle<Preferences>(CHANNEL.preferences, async () => done((await preferences()).all()));
 
   handle<Preferences>(CHANNEL.setShowMe, async (_event, args) => {
@@ -7650,50 +8052,82 @@ function register(): void {
 
   /** Everything the project holds. Nothing open is an empty list rather than a
    *  failure: the panel simply has nothing to draw. */
-  handle<readonly FileEntry[]>(CHANNEL.projectFiles, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return done([]);
+  handle<FilesRead>(CHANNEL.projectFiles, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return done({ files: [], revision: '' });
+    // The folder the conversation works in, not the project root: a chat in its
+    // own copy is shown the files it is actually changing.
+    const folder = folderFor(open, where);
     const children = open.held.childRepos;
     // A folder holding several projects has no git of its own to ask; each
     // child is asked where it lives, and its files are spelled the way the
     // parent's listing spells them — `backend/src/app.ts` — so the markers
-    // land on the right rows.
-    const [walked, ...childStatuses] = await Promise.all([
-      everythingIn(open.path, insideFolder),
-      ...(children.length >= SEVERAL_CHILDREN
-        ? children.map((one) => readGitStatus(one.path))
-        : [readGitStatus(open.path)]),
-    ]);
-    const changed =
-      children.length >= SEVERAL_CHILDREN
-        ? changedAcross(
-            children.map((one, at) => ({ rel: one.rel, files: childStatuses[at]?.files ?? [] })),
+    // land on the right rows. Only while the listing is the parent folder
+    // itself: a named child or a chat's own copy is marked from its own status.
+    const several = children.length >= SEVERAL_CHILDREN && folder === open.path;
+    const [walked, changed] = await Promise.all([
+      everythingIn(folder, insideFolder),
+      several
+        ? Promise.all(children.map((one) => readGitStatus(one.path))).then((statuses) =>
+            changedAcross(
+              children.map((one, at) => ({ rel: one.rel, files: statuses[at]?.files ?? [] })),
+            ),
           )
-        : (childStatuses[0]?.files ?? []);
-    return done(markChanged(walked.files, changed));
+        : readGitStatus(folder).then((status) => status?.files ?? []),
+    ]);
+    const files = markChanged(walked.files, changed);
+    /* What this listing was read from, so the window can tell whether the
+       folder has moved under it: the folder, and every name and size in it. An
+       editor writing a file of the same length is not in here — that is what
+       the open file's own revision is for, since it is the bytes that matter
+       once somebody is reading one. */
+    const revision = listRevision([
+      folder,
+      ...files.map((one) => `${one.path} ${String(one.size)}`),
+      ...changed.map((one) => one.path),
+    ]);
+    listingReadings.note(listingKey(folder), revision);
+    return done({ files, revision });
   });
 
   /** One file, to read. Everything that could go wrong here — a location
-   *  outside the folder, a file that is bytes rather than words, one too big
-   *  for a screen — comes back as a sentence instead of as content. */
-  handle<string>(CHANNEL.fileText, async (_event, args) => {
-    const [path] = args;
-    const open = projectAt(whereIn(args));
+   *  outside the project, a file too big, bytes that are not text — comes back
+   *  as a sentence instead of content.
+   *
+   *  `args[1]` is the revision the window last read this file at, when it has
+   *  one. A file that no longer matches it is answered as it is now, with
+   *  `changed` set: an editor or a terminal writing the same path between two
+   *  looks must not leave the old bytes drawn as the current ones. */
+  handle<TextRead>(CHANNEL.fileText, async (_event, args) => {
+    const [path, expect] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof path !== 'string' || path.trim() === '') {
       return fail(cannotShowFile(cannotOpen.gone));
     }
-    const where = await fileInProject(open.path, path);
-    if (where.full === undefined) return fail(cannotShowFile(where.because));
+    // Out of the conversation's own folder, so a chat working in a copy opens
+    // the version it is changing rather than the project's.
+    const folder = folderFor(open, where);
+    const full = await fileInProject(folder, path);
+    if (full.full === undefined) return fail(cannotShowFile(full.because));
 
-    const found = await stat(where.full).catch(() => null);
+    const found = await stat(full.full).catch(() => null);
     if (found === null || !found.isFile()) return fail(cannotShowFile(cannotOpen.gone));
     if (tooBig(found.size)) return fail(cannotShowFile(cannotOpen.tooBig));
 
-    const bytes = await readFile(where.full).catch(() => null);
+    const bytes = await readFile(full.full).catch(() => null);
     if (bytes === null) return fail(cannotShowFile(cannotOpen.gone));
     if (looksBinary(bytes)) return fail(cannotShowFile(cannotOpen.notText));
-    return done(bytes.toString('utf8'));
+    const revision = fileRevision(bytes);
+    const read = fileReadings.note(fileKey(folder, path), revision);
+    return done({
+      path,
+      text: bytes.toString('utf8'),
+      revision,
+      changed: read.changed && typeof expect === 'string' && expect !== revision,
+    });
   });
 
   /** Against the project in front, so the window never has to name a folder to
@@ -7915,16 +8349,29 @@ function register(): void {
     return Promise.resolve(done(session?.howFar ?? 'asking'));
   });
 
-  /** Plan is held on the project rather than on one conversation: it seeds every
-   *  conversation started while it is on, so the two would otherwise disagree
-   *  about a folder that is meant to be read-only. */
+  /**
+   * Plan is held on the conversation it was turned on in.
+   *
+   * It used to be a project-wide switch that reached into every open session, so
+   * turning it on in one chat made a second chat stop writing too, with nothing
+   * on that chat's screen saying why. The project default still seeds a new
+   * conversation, which is what Settings edits; the switch itself is this
+   * conversation's.
+   */
   handle<boolean>(CHANNEL.setPlanMode, (_event, args) => {
     const [on] = args;
     if (typeof on !== 'boolean') return Promise.resolve(fail<boolean>(NOT_A_YES_OR_NO));
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
-    open.held.planMode = on;
-    for (const one of open.held.sessions.open) one.held.setPlanMode(on);
+    const session = workingAt(open, where);
+    if (session === null) {
+      // Nobody named a conversation, which is the Settings case: this is the
+      // default a new chat starts with, not a change to whoever is open.
+      open.held.planMode = on;
+      return Promise.resolve(done(on));
+    }
+    session.setPlanMode(on);
     // What the board was holding is only waiting, so leaving Plan is what lets
     // it go — without this the queue waits for a turn that never comes.
     if (!on) {
@@ -7970,7 +8417,7 @@ function register(): void {
       return done(was.held.carried);
     }
     const carryOn = was?.held.conversation ?? null;
-    if (was !== null) held.sessions.close(was.path);
+    if (was !== null) putDown(held, was.path);
     const started = await startConversation(open, openingFor(carryOn), was?.path);
     if (!started.ok) return started;
     return done(started.value.session.carried);
@@ -7995,94 +8442,6 @@ function register(): void {
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
     }
-  });
-
-  handle<{ looks: readonly Look[]; says: string }>(CHANNEL.checkWidths, async (_event, args) => {
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_TO_SHOW);
-    const widthFolder = folderFor(open, where);
-    if (widthFolder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
-      return fail(SEVERAL_PROJECTS);
-    }
-    let ready;
-    try {
-      ready = await makeAndServe({ folder: widthFolder, says: () => undefined });
-    } catch (cause) {
-      return fail(couldNotShow(cause));
-    }
-    if (ready.kind !== 'showing') return done({ looks: [], says: ready.question });
-    try {
-      // The sizes this project designs at, out of its own stylesheets. Three
-      // sizes it has never written a line about answer somebody else's question.
-      const sizes = sizesFor(await styleSheets(widthFolder));
-      const looks = await lookAtEveryWidth(ready.serving.address, sizes);
-      return done({ looks, says: readsWell(looks).says });
-    } finally {
-      await ready.serving.stop().catch(() => undefined);
-    }
-  });
-
-  handle<string | null>(CHANNEL.shareReview, async (_event, args) => {
-    const asked = whereIn(args);
-    const open = projectAt(asked);
-    if (open === null) return fail(NOTHING_OPEN);
-    const versions = await versionsOf(await timelineFor(open, asked));
-    const changes: Shown[] = versions.slice(0, 12).map((version) => ({
-      title: version.title,
-      when: version.at,
-      says: '',
-      before: null,
-      after: null,
-    }));
-    const review: Review = {
-      project: open.name,
-      made: Date.now(),
-      changes,
-      spent: null,
-    };
-    const safe = safeToShare(review);
-    if (!safe.ok) {
-      return fail({ what: 'I have not made that page.', because: safe.because, actionLabel: 'Got it' });
-    }
-    const where = await dialog.showSaveDialog(mainWindow ?? undefined!, {
-      defaultPath: join(app.getPath('desktop'), `${open.name} - what changed.html`),
-      filters: [{ name: 'Web page', extensions: ['html'] }],
-    });
-    if (where.canceled || where.filePath === undefined) return done(null);
-    try {
-      await writeAtomically(where.filePath, reviewPage(review));
-      shell.showItemInFolder(where.filePath);
-      return done(where.filePath);
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause);
-      return fail(plainTrouble(raw, detailsOf(cause)));
-    }
-  });
-
-  /* ------------------------------------------------------------ landing it */
-
-  handle<Landing>(CHANNEL.landing, async (_event, args) => {
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    return done(await landingNow(folderFor(open, where), open.held));
-  });
-
-  handle<Preferences>(CHANNEL.setHowMuch, async (_event, args) => {
-    const [id] = args;
-    if (typeof id !== 'string') return fail(NOTHING_OPEN);
-    // Whatever arrives, what is stored is one of the three.
-    return done(await (await preferences()).change({ howMuch: howMuchBy(id).id }));
-  });
-
-  handle<Preferences>(CHANNEL.setHoldBack, async (_event, args) => {
-    const [on] = args;
-    if (typeof on !== 'boolean') return fail(NOTHING_OPEN);
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const held = (await preferences()).all().heldBack;
-    return done(await (await preferences()).change({ heldBack: { ...held, [open.path]: on } }));
   });
 
   handle<Preferences>(CHANNEL.setKeepLogins, async (_event, args) => {
@@ -8134,165 +8493,6 @@ function register(): void {
     return done(
       await prefs.change({ theme: base, appearance: { ...prefs.all().appearance, base } }),
     );
-  });
-
-  handle<Decided>(CHANNEL.decideOnWork, async (_event, args) => {
-    const [letIn, observed] = args;
-    if (typeof observed !== 'boolean') return fail(NOTHING_OPEN);
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    const waiting = open.held.waiting;
-
-    const asItStands = async (undoTo: string | null): Promise<Decided> => ({
-      landing: await landingNow(folderFor(open, where), open.held),
-      versions: await versionsOf(await timelineFor(open, where)).catch(() => []),
-      letIn: letIn === true,
-      undoTo,
-    });
-
-    if (waiting === null || waiting.waiting.version === null) {
-      return done(await asItStands(null));
-    }
-
-    // The pictures go with the answer, so read them before either branch
-    // clears them.
-    const changes = open.held.pictures?.changes ?? [];
-    const agreed = agreedFolder(open.path);
-
-    if (letIn !== true) {
-      // Nothing moves. The work is kept reachable rather than thrown away, so
-      // "bring it back" is the ordinary put-back and nothing special.
-      const version = waiting.setAside();
-      open.held.waiting = null;
-      open.held.pictures = null;
-      await dropShots(agreed).catch(() => undefined);
-      return done(await asItStands(version));
-    }
-
-    try {
-      // Anything unfinished in the folder becomes a version first, the same way
-      // going back does, so letting work in can never write over it.
-      await open.held.timeline?.snapshot({ boundary: 'turn-ended' });
-      const outcome = await waiting.approve(saysHeldWork(waiting.waiting.doing));
-      open.held.waiting = null;
-      open.held.pictures = null;
-      // Work may pass automatically when the movement is under the line, but
-      // the comparison baseline moves only after a person actually looked and
-      // pressed. Otherwise five small unseen changes become five new baselines
-      // and the accumulated drift the gate exists to catch stays at zero.
-      if (observed) {
-        await keepShots(agreed, nextAccepted(changes, true)).catch(() => undefined);
-      } else {
-        await dropShots(agreed).catch(() => undefined);
-      }
-      return done(await asItStands(outcome?.undoTo ?? null));
-    } catch (cause) {
-      return fail(historyTrouble(cause));
-    }
-  });
-
-  /** Composed once: both of the verbs below are the only two in this file that
-   *  can put something on the internet, and they refuse identically. */
-  const notPressed: Trouble = {
-    what: 'Nothing has left this computer.',
-    because: 'This only ever happens from a press, and I did not get one.',
-    actionLabel: 'Got it',
-  };
-  const alreadyGoing: Trouble = {
-    what: 'I am already sending something.',
-    because: 'Let this one finish and then ask again.',
-    actionLabel: 'Got it',
-  };
-
-  handle<HandedOver>(CHANNEL.handToDeveloper, async (_event, args) => {
-    const [confirmed] = args;
-    if (confirmed !== true) return fail(notPressed);
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    if (open.held.sending) return fail(alreadyGoing);
-    // Work is handed on from one project. In a folder holding several, the
-    // call says which — and the row it came from is that project's own.
-    const folder = folderFor(open, where);
-    if (folder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
-      return fail(SEVERAL_PROJECTS);
-    }
-    const child = childRepoFor(open, where);
-
-    open.held.sending = true;
-    try {
-      const timeline = await timelineFor(open, where);
-      const changes = await whatChanged(open, timeline);
-      const newest = (await timeline?.currentVersion().catch(() => null)) ?? null;
-      const handed = await handToDeveloper({
-        history: new ProjectHistory(folder),
-        folder,
-        name: child?.rel ?? open.name,
-        under: workFolder(),
-        title: newest?.title ?? changes[changes.length - 1]?.title ?? open.name,
-        changes,
-        at: Date.now(),
-      });
-      // What this computer can reach may well have changed by doing it.
-      reached.delete(open.path);
-      return done(handed);
-    } catch (cause) {
-      if (cause instanceof HandoverError) {
-        return fail({
-          what: handoverWords.couldNotSend,
-          because: cause.message,
-          actionLabel: 'Got it',
-          ...(cause.details.trim() === '' ? {} : { details: cause.details }),
-        });
-      }
-      return fail(historyTrouble(cause));
-    } finally {
-      open.held.sending = false;
-    }
-  });
-
-  handle<WentOnline>(CHANNEL.putOnline, async (_event, args) => {
-    const [confirmed] = args;
-    if (confirmed !== true) return fail(notPressed);
-    const where = whereIn(args);
-    const open = projectAt(where);
-    if (open === null) return fail(NOTHING_OPEN);
-    if (open.held.sending) return fail(alreadyGoing);
-    // Put one project online, never a folder that holds several.
-    const folder = folderFor(open, where);
-    if (folder === open.path && open.held.childRepos.length >= SEVERAL_CHILDREN) {
-      return fail(SEVERAL_PROJECTS);
-    }
-
-    open.held.sending = true;
-    try {
-      return done(await putOnline({ folder, says: tell }));
-    } catch (cause) {
-      if (cause instanceof OnlineError) {
-        return fail({
-          what: onlineWords.couldNotPut,
-          because: cause.message,
-          actionLabel: 'Got it',
-          ...(cause.details.trim() === '' ? {} : { details: cause.details }),
-        });
-      }
-      return fail(couldNotShow(cause));
-    } finally {
-      open.held.sending = false;
-      tell({ says: showSays.ready, done: true });
-    }
-  });
-
-  /* ------------------------------------------- while you are not looking */
-
-  /* Every project's board at once. The desks are already kept per folder and
-     pushed at the window as they change; this is the first read, so a board
-     opened before anything has happened is not empty for the wrong reason. */
-  handle<readonly AwayNotice[]>(CHANNEL.awayEverywhere, async () => {
-    await standingFile().catch(() => null);
-    const everywhere = [...awayDesks.keys()].map((path) => ({ project: path, away: awayNow(path) }));
-    return done(everywhere);
   });
 
   /* The other tools a project has plugged in. Reading the list is free; asking
@@ -8419,25 +8619,31 @@ function register(): void {
 
   handle<{ steering: readonly string[]; followUp: readonly string[] }>(
     CHANNEL.takeBackQueue,
-    (_event, args) => {
+    async (_event, args) => {
       const where = whereIn(args);
       const open = projectAt(where);
       const session = open === null ? null : sessionAt(open, where);
-      if (session === null) return Promise.resolve(done({ steering: [], followUp: [] }));
+      // A message waiting for the folder is not in Pi's queue, so Pi cannot
+      // give it back. It is taken out here, or the line would sit on screen
+      // with a press that does nothing.
+      const waiting = open === null ? [] : takeBackFromTheFolder(open, where);
+      if (session === null) return Promise.resolve(done({ steering: waiting, followUp: [] }));
       const taken = session.takeBackQueue();
       // A line that would not come back is still queued. Answering with an
       // empty one took the words off the screen while the agent still had them.
       if (!taken.ok) return Promise.resolve(fail(couldNotTakeBack(taken.because)));
-      return Promise.resolve(done({ steering: taken.steering, followUp: taken.followUp }));
+      return Promise.resolve(
+        done({
+          steering: [...waiting, ...taken.steering],
+          followUp: taken.followUp,
+        }),
+      );
     },
   );
 
   handle<Away>(CHANNEL.away, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
-    // Read before answering, so the first ask of a launch is not told there are
-    // no repeats when there are.
-    await standingFile().catch(() => null);
     // Asking is coming back to it, so whatever was waiting has now been seen.
     const answer = awayNow(open.path);
     const desk = awayDesks.get(open.path);
@@ -8451,59 +8657,6 @@ function register(): void {
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof text !== 'string' || text.trim() === '') return done(awayNow(open.path));
     await keepGoing(open.path, open.name, text, null, untilDone === true);
-    return done(awayNow(open.path));
-  });
-
-  handle<Away>(CHANNEL.startAfter, async (_event, args) => {
-    const [text, after] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof text !== 'string' || text.trim() === '' || typeof after !== 'string') {
-      return done(awayNow(open.path));
-    }
-    const went = await keepGoing(open.path, open.name, text, after);
-    if (!went.ok) return fail(couldNotWait(went.because));
-    return done(awayNow(open.path));
-  });
-
-  /** Change what one waits for, or let it off its wait. Only work that has not
-   *  started: what is already going cannot be made to wait for anything. */
-  handle<Away>(CHANNEL.putAfter, async (_event, args) => {
-    const [id, after] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const desk = awayDesks.get(open.path);
-    if (desk === undefined || typeof id !== 'string') return done(awayNow(open.path));
-
-    if (after === null) {
-      const held = desk.chain.take(id);
-      if (held === null) return done(awayNow(open.path));
-      desk.after.delete(id);
-      desk.bench.ask(held.doing, { id: held.id, at: held.at, startedBy: held.startedBy ?? null });
-      noteDown(desk, id);
-      pushAway(open.path);
-      await runWhatCan(desk);
-      return done(awayNow(open.path));
-    }
-    if (typeof after !== 'string') return done(awayNow(open.path));
-
-    const allowed = desk.chain.could(id, after);
-    if (!allowed.ok) return fail(couldNotWait(allowed.because));
-
-    const was = pieceFor(desk, id);
-    if (was === null) return done(awayNow(open.path));
-    desk.chain.take(id);
-    void desk.bench.drop(id);
-
-    // Nothing left to wait for, or nothing that would hold: either way it goes
-    // back on the board and takes its turn there.
-    const asked = desk.chain.hold({ id, doing: was.doing, at: was.at, after, startedBy: was.startedBy ?? null });
-    if (asked.ok) desk.after.set(id, after);
-    if (!asked.ok || !asked.waits) desk.bench.ask(was.doing, { id, at: was.at, startedBy: was.startedBy ?? null });
-    noteDown(desk, id);
-    pushAway(open.path);
-    if (!asked.ok) return fail(couldNotWait(asked.because));
-    if (!asked.waits) await runWhatCan(desk);
     return done(awayNow(open.path));
   });
 
@@ -8556,54 +8709,6 @@ function register(): void {
     forgetNote(desk, id);
     stopWhatFollows(desk, id, because);
   }
-
-  /**
-   * Take several finished pieces in, in the order they need to be in.
-   *
-   * One press rather than several: they were meant to arrive in an order, and
-   * taking them one at a time by hand is exactly how that order gets lost.
-   * Whatever happens — the whole set in, or a stop part way — the run is one
-   * version away from never having happened, and the sentence says which.
-   */
-  handle<Away>(CHANNEL.keepSet, async (_event, args) => {
-    const [ids] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const desk = awayDesks.get(open.path);
-    if (desk === undefined || !Array.isArray(ids) || ids.length === 0) {
-      return done(awayNow(open.path));
-    }
-    const wanted = (ids as unknown[]).filter((one): one is string => typeof one === 'string');
-    try {
-      // A version first, the same way keeping one does, so the whole run has
-      // somewhere to be undone to even before the first piece goes in.
-      await open.held.timeline?.snapshot({ boundary: 'turn-ended' }).catch(() => null);
-      const took = await desk.bench.keepSet(wanted, (piece) => saysHeldWork(piece.doing), {
-        after: (id) => desk.after.get(id) ?? null,
-        lettingGo: async (going) => {
-          for (const one of going) await stopWorkIn(desk, one);
-        },
-      });
-      if (took.ok !== true) return fail(couldNotTakeSet(took.because));
-      filesMovedIn(open);
-
-      for (const other of took.insteadOf) letGoOfRun(desk, other, afterWords.thrownAway);
-      for (const id of took.landed) {
-        desk.runs.delete(id);
-        desk.chain.take(id);
-        forgetNote(desk, id);
-      }
-      await runWhatCan(desk);
-
-      // Said whichever way it went: how many went in, and — when one stopped —
-      // which one, over which file, and that the rest are still there.
-      const said = saysTook(took, (id: string) => desk.bench.pieces.find((one) => one.id === id)?.doing ?? id);
-      if (took.stoppedAt !== null) return fail({ ...said, actionLabel: 'Got it' });
-    } catch (cause) {
-      return fail(historyTrouble(cause));
-    }
-    return done(awayNow(open.path));
-  });
 
   handle<Away>(CHANNEL.keepAway, async (_event, args) => {
     const [id] = args;
@@ -8711,141 +8816,50 @@ function register(): void {
     return done(awayNow(open.path));
   });
 
-  /**
-   * The several goes at one job, each with what it actually changed.
-   *
-   * Read on the press rather than kept: a go still working has a different
-   * answer a minute later, and a stale patch shown beside a fresh one is worse
-   * than no comparison at all.
-   *
-   * Every go in the group comes back, whether or not it has a copy of its own
-   * yet. One that has not started has nothing to show and says so; leaving it
-   * out instead would renumber the ones that did, and somebody choosing between
-   * columns would be reading names that no card on the board agrees with.
-   */
-  handle<readonly SideOfWork[]>(CHANNEL.compareWays, async (_event, args) => {
-    const [ways] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const desk = awayDesks.get(open.path);
-    if (desk === undefined || typeof ways !== 'string') return done([]);
-
-    const numbering = waysNumbering(desk.bench.pieces);
-    const group = desk.bench.pieces.filter((one) => one.ways === ways);
-    // Every go started from the project as it stood, so the line of work it is
-    // on is what all of these columns are held against.
-    const base = (await readGitStatus(open.path))?.branch ?? '';
-    const sides: SideOfWork[] = [];
-    for (const piece of group) {
-      const named = numbering.get(piece.id);
-      if (named === undefined) continue;
-      let diff = '';
-      if (piece.folder !== null) {
-        try {
-          diff = await new ProjectHistory(piece.folder).diffFor({ kind: 'working' });
-        } catch {
-          // A copy we cannot read is still one of the goes; it is shown as having
-          // changed nothing rather than dropped, which would silently narrow the
-          // choice somebody is about to make.
-        }
-      }
-      const spent = desk.costs.get(piece.id) ?? null;
-      sides.push({
-        id: piece.id,
-        name: boardWords.oneOf(named.at, named.of),
-        state: piece.state,
-        diff,
-        picture: piece.picture,
-        spent: spent === null ? null : formatMoney(spent),
-        folder: piece.folder,
-        base,
-      });
-    }
-    return done(sides);
-  });
-
-  handle<Away>(CHANNEL.addRepeat, async (_event, args) => {
-    const [doing, every, at, on] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const repeat = asRepeat(every, at, on);
-    if (typeof doing !== 'string' || doing.trim() === '' || repeat === null) {
-      return done(awayNow(open.path));
-    }
-    let because: string | null = null;
-    await changeStanding((all) => {
-      const asked = addStanding(all, {
-        id: `every-${Date.now().toString(36)}`,
-        project: open.path,
-        doing,
-        repeat,
-        at: Date.now(),
-      });
-      because = asked.because;
-      return asked.all;
-    });
-    if (because !== null) {
-      return fail({ what: 'I did not add that.', because, actionLabel: 'Got it' });
-    }
-    return done(awayNow(open.path));
-  });
-
-  handle<Away>(CHANNEL.switchRepeat, async (_event, args) => {
-    const [id, on] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof id === 'string' && typeof on === 'boolean') {
-      await changeStanding((all) => switchStanding(all, id, on));
-      if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
-    }
-    return done(awayNow(open.path));
-  });
-
-  handle<Away>(CHANNEL.forgetRepeat, async (_event, args) => {
-    const [id] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof id === 'string') await changeStanding((all) => withoutStanding(all, id));
-    if (!standingNow.some((one) => one.on)) stopWatchingTheClock();
-    return done(awayNow(open.path));
-  });
-
   handle<OpenedProject>(CHANNEL.openConversation, async (_event, args) => {
-    const [path] = args;
+    const [path, , pressed] = args;
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
+    // A conversation whose recorded folder is gone opens read-only rather than
+    // being quietly opened somewhere else. Checked before anything is built,
+    // because the whole of it is that no session is made: there is no working
+    // directory to run one in.
+    if (typeof path === 'string' && path !== '') {
+      const record = await recordedWorkspace(path);
+      const read = await readOnlyOpening(path, record);
+      if (read !== null) {
+        const said = workspaceTrouble(record);
+        return done({
+          path: open.path,
+          name: open.name,
+          history: read.history,
+          conversation: read.conversation,
+          address: read.address,
+          readOnly: true,
+          ...(said === null ? {} : { unavailable: said }),
+        });
+      }
+    }
     // The one already open stays open. Moving between conversations is moving
     // between things that are both still going on, and the ledger belongs to the
     // sitting rather than to either of them, so it stays too.
     //
     // No path is somebody pressing "new" — a conversation started, not the last
-    // one carried on, which is what opening the project already does.
-    const started = await startConversation(open, openingFor(path, true));
+    // one carried on, which is what opening the project already does. The press
+    // it came with is what makes a retry of that same press one conversation
+    // rather than two.
+    const started = await startConversation(open, openingFor(path, true, pressed));
     if (!started.ok) return started;
-    // Making a checkout conversation the one in front brings its work home so
-    // the folder the window reads is the work it has done so far. If it cannot
-    // come home (a conflict with the folder's own version), the conversation
-    // still opens and its work stays in its checkout until it settles.
+    // Opening a conversation is looking at it. A copy's work is described
+    // rather than carried home: bringing it back on a glance made navigating a
+    // write to the project, and merging stays a thing somebody asks for.
     const checkout = open.held.checkouts.get(started.value.address) ?? null;
-    if (checkout !== null) {
-      const carried = await bringBack(gitRunHereFor(), open.path, checkout.folder).catch(() => null);
-      // Said here as well as when a turn settles: opening a conversation and
-      // reading a file that never changed, with nothing on screen to explain
-      // it, is the same silence either way round.
-      if (carried !== null && carried.ok && carried.value.conflicted.length > 0) {
-        const which = [...carried.value.conflicted].sort().join('\u0000');
-        if (which !== open.held.saidHeldBack) {
-          open.held.saidHeldBack = which;
-          const at = started.value.address;
-          send(open.path, { type: 'message-delta', text: bringBackWords.heldBack(carried.value.conflicted) }, at);
-          send(open.path, { type: 'message-end' }, at);
-        }
-      }
-    }
+    const note =
+      checkout === null ? started.value.note : ownCopyWords.whereItWorks(checkout.folder, open.path);
     return done({
       path: open.path,
       name: open.name,
-      history: withNote(started.value.session.history, started.value.note),
+      history: withNote(started.value.session.history, note),
       conversation: started.value.session.conversation,
       address: started.value.address,
       howFar: started.value.session.howFar,
@@ -8856,10 +8870,425 @@ function register(): void {
   });
 
   /**
+   * The answer to something an add-on asked.
+   *
+   * Answered once: a second press, a press after Stop, or an answer to a
+   * question that has already gone comes back as "no longer waiting" rather
+   * than as a second answer. The shape is checked here because the renderer is
+   * not trusted with it, and an answer of the wrong shape is dropped.
+   */
+  handle<null>(CHANNEL.extensionAnswer, (_event, args) => {
+    const [requestId, answer] = args;
+    if (typeof requestId !== 'string' || requestId === '') return Promise.resolve(fail(NOTHING_OPEN));
+    const waiting = addonAsks.get(requestId);
+    if (waiting === undefined) {
+      return Promise.resolve(
+        fail({
+          what: 'That question is no longer waiting.',
+          because: 'It was answered already, or the run it belonged to has stopped.',
+          actionLabel: 'Got it',
+        }),
+      );
+    }
+    const settled = readAnswer(answer);
+    if (settled === null) return Promise.resolve(fail(NOTHING_OPEN));
+    waiting.settle(settled);
+    return Promise.resolve(done(null));
+  });
+
+  /**
+   * Continue in a new chat.
+   *
+   * A new conversation with a new identity, in the same workspace, opening with
+   * one editable note about where the last one got to. Nothing of the old
+   * transcript comes across: what carries the work is the files, which are the
+   * same files, and the note, which a person can change before it is sent.
+   */
+  handle<OpenedProject>(CHANNEL.conversationContinue, async (_event, args) => {
+    const [source] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const from = conversationAt(open.held, {
+      ...(typeof source === 'string' && source !== '' ? { conversation: source } : {}),
+    });
+    if (from === null) return fail(NO_SUCH_ENTRY);
+    // What it was asked and where it got to are read off the transcript it is
+    // holding; a conversation that is not live has no transcript to read.
+    const note = handoffMessage({
+      from: from.held.name ?? open.name,
+      objective: firstThingAsked(from.held.history),
+      gotTo: lastThingSaid(from.held.history),
+      files: [...open.held.looking.files].slice(-12).reverse(),
+      folder: folderFor(open, { conversation: from.path }),
+      project: open.name,
+    });
+    const home = await recordedWorkspace(from.path);
+    const started = await startConversation(
+      open,
+      home === null ? { kind: 'fresh' } : openingIn(home.workspaceId),
+    );
+    if (!started.ok) return started;
+    await rememberLineage(started.value.address, { from: from.path, kind: 'continue' });
+    return done({ ...openedFrom(open, started.value), handoff: note });
+  });
+
+  /**
+   * Fork this conversation.
+   *
+   * Pi's own fork: the same history written into a conversation of its own, so
+   * both carry on from the same words and neither is a copy of the other's
+   * folder. Refused while the source is still working — a fork taken mid-turn
+   * is a fork of something that had not finished happening.
+   */
+  handle<OpenedProject>(CHANNEL.conversationFork, async (_event, args) => {
+    const [source, said] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const from = conversationAt(open.held, {
+      ...(typeof source === 'string' && source !== '' ? { conversation: source } : {}),
+    });
+    if (from === null) return fail(NO_SUCH_ENTRY);
+    /* Which exchange to stop at, when somebody pressed on one message rather
+       than on the conversation. Counted rather than named by an id because it
+       is the one coordinate the window and the record share: the window has
+       counted the things the person said off the same transcript. */
+    const boundary =
+      typeof said === 'number' && Number.isInteger(said) && said > 0 ? said : null;
+    if (boundary !== null && boundary > from.held.moments.length) {
+      return fail({
+        what: 'That message is not in this conversation any more.',
+        because: 'The conversation has changed since it was drawn. Open it again, and press on the message you want.',
+        actionLabel: 'Got it',
+      });
+    }
+    if (from.held.working || from.held.listening) {
+      // Pressing on the newest message is pressing on a boundary that is still
+      // being written, and that is worth its own sentence.
+      const atTheEnd = boundary === null || boundary >= from.held.moments.length;
+      return fail(
+        atTheEnd
+          ? {
+              what: 'That message is still being written.',
+              because: 'Fork here needs a finished exchange to stop at. Stop it first, or wait until this turn ends.',
+              actionLabel: 'Got it',
+            }
+          : {
+              what: 'That conversation is still working.',
+              because: 'A fork made mid-turn would copy a conversation that had not finished happening. Stop it first, or wait.',
+              actionLabel: 'Got it',
+            },
+      );
+    }
+    const transcript = from.held.conversation;
+    if (transcript === null) {
+      return fail({
+        what: 'There is nothing to fork yet.',
+        because: 'This conversation has not been written down, so there is no history to copy.',
+        actionLabel: 'Got it',
+      });
+    }
+    /* A fork from an earlier point is written as a session file of its own
+       holding the conversation up to that exchange, and the new conversation is
+       copied from that — Pi's own copy, so whatever tidying it did inside the
+       history is kept. The file it was cut into is a step, not a conversation,
+       so it goes as soon as the copy has been taken from it. */
+    let cutFrom = transcript;
+    let cut: string | null = null;
+    if (boundary !== null && boundary < from.held.moments.length) {
+      cut = from.held.forkAfter(boundary);
+      if (cut === null) {
+        return fail({
+          what: 'I could not fork from that message.',
+          because: 'The history up to it would not copy. Fork the whole conversation instead, or open it again and try once more.',
+          actionLabel: 'Got it',
+        });
+      }
+      cutFrom = cut;
+    }
+    const home = await recordedWorkspace(from.path);
+    let started: Result<Started>;
+    try {
+      started = await startConversation(
+        open,
+        home === null
+          ? { kind: 'fresh', forkFrom: cutFrom }
+          : { kind: 'fresh', workspace: home.workspaceId, forkFrom: cutFrom },
+      );
+    } finally {
+      if (cut !== null) await rm(cut, { force: true }).catch(() => undefined);
+    }
+    if (!started.ok) return started;
+    await rememberLineage(started.value.address, { from: from.path, kind: 'fork' });
+    return done(openedFrom(open, started.value));
+  });
+
+  /**
+   * Archive a conversation, or put it back in the list.
+   *
+   * Archive is not delete and not close: the transcript stays, the views stay,
+   * and only the list stops showing it. Nothing here touches a folder.
+   */
+  handle<readonly Conversation[]>(CHANNEL.conversationArchive, async (_event, args) => {
+    const [id, on] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '' || typeof on !== 'boolean') {
+      return fail(NO_SUCH_ENTRY);
+    }
+    await loadWorkspaceIndex();
+    workspaceIndex = updateConversation(workspaceIndex, id, { archived: on, updatedAt: Date.now() });
+    await saveWorkspaceIndex();
+    const listed = await conversationsInProject(open.path);
+    if (!listed.ok) return fail(NOTHING_OPEN);
+    return done(listed.value);
+  });
+
+  /**
+   * Point a conversation at the folder its work is in now.
+   *
+   * The one thing that repairs a conversation whose recorded folder is gone,
+   * and deliberately the only thing: the record is moved onto the folder
+   * somebody chose, so the same conversation carries on in the same transcript
+   * with the same runtime, and nothing is copied. A folder that is not there, or
+   * that holds a different repository, is refused with a sentence and nothing is
+   * changed — the alternative is an agent editing somebody else's files while
+   * the window says it is working on this one.
+   */
+  handle<OpenedProject>(CHANNEL.conversationRelink, async (_event, args) => {
+    const [folder] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const asked = where.conversation;
+    if (typeof asked !== 'string' || asked === '') return fail(NO_SUCH_ENTRY);
+    const record = await recordedWorkspace(asked);
+    if (record === null) return fail(NO_SUCH_ENTRY);
+    if (typeof folder !== 'string' || folder === '') {
+      return fail({
+        what: 'No folder was chosen.',
+        because: 'Choose the folder this conversation should work in, and press again.',
+        actionLabel: 'Got it',
+      });
+    }
+    const chosen = canonical(folder);
+    const found = await stat(chosen).catch(() => null);
+    const facts: FolderFacts =
+      found === null || !found.isDirectory()
+        ? { present: false, sameRepository: false }
+        : {
+            present: true,
+            sameRepository:
+              record.repoKey === null ||
+              (await repoKeyOf(gitRunHereFor(), chosen).catch(() => null)) === record.repoKey,
+          };
+    const refused = whyNotRelink(facts);
+    if (refused !== null) {
+      return fail({ what: 'That folder cannot be used.', because: refused, actionLabel: 'Got it' });
+    }
+    await loadWorkspaceIndex();
+    // The workspace the conversation now works in: the folder somebody chose,
+    // written down as a workspace of this project. `addWorkspace` hands back the
+    // record already there when this folder is one, so pointing twice is one.
+    const ensured = ensureProject(workspaceIndex, open.path);
+    const added = addWorkspace(ensured.index, {
+      projectId: ensured.project.projectId,
+      path: chosen,
+      kind: 'worktree',
+      managed: false,
+      createdBy: 'relink',
+      now: Date.now(),
+    });
+    workspaceIndex = added.index;
+    const verified = await rememberRepo(added.workspace);
+    workspaceIndex = attachConversation(workspaceIndex, asked, verified.workspaceId);
+    await saveWorkspaceIndex();
+    // A checkout row still filed under the old folder would spread the
+    // conversation out somewhere else again, so it goes: the folder just chosen
+    // is where its work is, and that is what the record now says.
+    if (open.held.checkouts.delete(asked)) {
+      await saveCheckouts(open.path, open.held).catch(() => undefined);
+    }
+    const started = await startConversation(open, openingFor(asked, false));
+    if (!started.ok) return started;
+    return done(openedFrom(open, started.value));
+  });
+
+  /**
+   * A terminal in the workspace this call names.
+   *
+   * The folder comes from the same resolver every other call uses, so it is the
+   * workspace somebody selected and never a path off the wire. Nothing about
+   * the call can choose a command: what starts is the person's own shell.
+   */
+  handle<TerminalSession>(CHANNEL.terminalOpen, async (_event, args) => {
+    const [size] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const asked = (size ?? {}) as { cols?: unknown; rows?: unknown; kind?: unknown };
+    const kind: TerminalKind =
+      asked.kind === 'agent' || asked.kind === 'server' ? asked.kind : 'shell';
+    const made = terminals.open({
+      workspace: folderFor(open, where),
+      kind,
+      cols: typeof asked.cols === 'number' ? asked.cols : 80,
+      rows: typeof asked.rows === 'number' ? asked.rows : 24,
+    });
+    if (!made.ok) {
+      const state = terminals.available();
+      return fail({
+        what: 'I could not start a terminal here.',
+        because: state.yes === false ? state.because : made.because,
+        actionLabel: 'Got it',
+      });
+    }
+    return done(made.session);
+  });
+
+  handle<string>(CHANNEL.terminalScrollback, (_event, args) => {
+    const [id] = args;
+    return Promise.resolve(done(typeof id === 'string' ? terminals.scrollback(id) : ''));
+  });
+
+  handle<null>(CHANNEL.terminalWrite, (_event, args) => {
+    const [id, data] = args;
+    if (typeof id !== 'string' || typeof data !== 'string') return Promise.resolve(fail(NO_TERMINAL));
+    if (data.length > 64 * 1024) return Promise.resolve(fail(NO_TERMINAL));
+    return Promise.resolve(terminals.write(id, data) ? done(null) : fail(NO_TERMINAL));
+  });
+
+  handle<null>(CHANNEL.terminalResize, (_event, args) => {
+    const [id, cols, rows] = args;
+    if (typeof id !== 'string' || typeof cols !== 'number' || typeof rows !== 'number') {
+      return Promise.resolve(fail(NO_TERMINAL));
+    }
+    return Promise.resolve(terminals.resize(id, cols, rows) ? done(null) : fail(NO_TERMINAL));
+  });
+
+  handle<null>(CHANNEL.terminalClose, (_event, args) => {
+    const [id] = args;
+    if (typeof id !== 'string') return Promise.resolve(fail(NO_TERMINAL));
+    terminals.close(id);
+    return Promise.resolve(done(null));
+  });
+
+  handle<readonly TerminalSession[]>(CHANNEL.terminalList, (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return Promise.resolve(done<readonly TerminalSession[]>([]));
+    const folder = canonical(open.path);
+    return Promise.resolve(
+      done(terminals.list().filter((one) => canonical(one.workspace).startsWith(folder))),
+    );
+  });
+
+  /**
+   * What a New worktree would make, before anybody commits to it.
+   *
+   * Read only: no folder, no branch and no counter is spent, so asking twice
+   * gives the same answer and a dialog can be opened and closed for free.
+   */
+  handle<WorktreePlan>(CHANNEL.worktreePlan, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await planForNewWorktree(open));
+  });
+
+  /**
+   * What this project carries into a checkout, and what one would still need.
+   *
+   * The same reading the plan carries, on its own so the flow can re-ask after
+   * somebody changes their mind without planning a copy again.
+   */
+  handle<SetupHere>(CHANNEL.setupFiles, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    return done(await setupHereOf(open.path));
+  });
+
+  /**
+   * Write down which files this project carries.
+   *
+   * Answered with the reading as it is now, so the flow draws what is true
+   * rather than what it hoped, and a file somebody edited by hand between the
+   * two is dropped rather than copied.
+   */
+  handle<SetupHere>(CHANNEL.setupChoose, async (_event, args) => {
+    const [files] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const wanted = Array.isArray(files) ? files.filter((one) => typeof one === 'string') : [];
+    try {
+      await chooseSetupFiles(app.getPath('userData'), open.path, wanted);
+    } catch {
+      return fail({
+        what: 'I could not write down which files to carry.',
+        because: `Your choices are kept beside the rest of what this app remembers, and that file could not be written. The copy would otherwise carry the wrong files, so nothing has been made.`,
+        actionLabel: 'Got it',
+      });
+    }
+    return done(await setupHereOf(open.path));
+  });
+
+  /**
+   * Install what this checkout needs.
+   *
+   * Its own operation rather than part of making a checkout: it takes minutes,
+   * it fails for reasons that have nothing to do with git, and what it leaves
+   * behind is an install rather than a copy. Where it got to is kept for
+   * whoever asks next, and a checkout created a moment ago has not run it.
+   */
+  handle<SetupState>(CHANNEL.setupInstall, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = folderFor(open, where);
+    const plan = await installPlanAt(folder);
+    if (plan === null) return fail(NOTHING_TO_INSTALL);
+    const state = await installDependencies(runInstall, folder, plan, (one) => {
+      installs.set(canonical(folder), one);
+    });
+    installs.set(canonical(folder), state);
+    return done({ state, plan });
+  });
+
+  /** Where that install stands, for a window that was not there when it ran. */
+  handle<SetupState>(CHANNEL.setupState, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const folder = folderFor(open, where);
+    return done({ state: dependenciesIn(folder), plan: await installPlanAt(folder) });
+  });
+
+  /**
+   * Make the copy, and start a conversation in it.
+   *
+   * The only thing in the app that makes a checkout without being asked to
+   * bring one back, and it makes one because somebody pressed this.
+   */
+  handle<OpenedProject>(CHANNEL.worktreeNew, async (_event, args) => {
+    const [base] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    const started = await startInNewWorktree(open, {
+      base: typeof base === 'string' && base.trim() !== '' ? base : null,
+    });
+    if (!started.ok) return started;
+    return done(openedFrom(open, started.value));
+  });
+
+  /**
    * Put a conversation down.
    *
    * Closing is closing a view. Nothing is thrown away — it stays written down
-   * exactly as it was, and opening it again carries on from the last word.
+   * exactly as it was, and opening it again carries on from the last word. A
+   * conversation with a run in flight keeps it, and nothing of its is touched:
+   * pressing the small x on a tab is putting the tab away, not spending the
+   * turn somebody already paid for. Ending a run is what Stop is for, and the
+   * conversation stays in the list, saying it is still working, until they do.
    */
   handle<null>(CHANNEL.closeConversation, (_event, args) => {
     const where = whereIn(args);
@@ -8867,16 +9296,13 @@ function register(): void {
     if (open === null) return Promise.resolve(fail(NOTHING_OPEN));
     const found = conversationAt(open.held, where);
     if (found === null) return Promise.resolve(done(null));
-    // Put the copy away before the session goes, while it can still be asked
-    // what it was written down as.
-    const away = putAwayCheckoutAt(open.path, open.held, found.path);
-    // Somebody closing a conversation themselves is the end of that sitting.
-    // Not awaited — they have moved on, and nothing here is theirs to wait for.
-    const noted = found.held.settleUp().catch(() => false);
-    void noted.finally(() => {
-      open.held.sessions.close(found.path);
-    });
-    return away.then(() => done(null));
+    // Closing is closing a view, not workspace cleanup: the copy stays on disk
+    // with whatever is uncommitted in it. Putting a copy away is its own press,
+    // and that press checks for work nobody has landed first.
+    if (inFlight(states.stateOf(named(found.path)))) return Promise.resolve(done(null));
+    withdrawAsks(where);
+    putDown(open.held, found.path);
+    return Promise.resolve(done(null));
   });
 
   /**
@@ -8916,30 +9342,137 @@ function register(): void {
       const file = one.held.conversation;
       if (one.path === target || (file !== null && resolve(file) === target)) {
         await one.held.stop().catch(() => undefined);
-        // A whole second copy of the project on disk, kept for a conversation
-        // that no longer exists. The branch stays: putting a conversation down
-        // is not a decision to lose what it wrote.
-        const checkout = open.held.checkouts.get(one.path);
-        if (checkout !== undefined) {
-          await releaseWorktree(gitRunHereFor(), open.path, checkout.folder).catch(() => undefined);
-          open.held.checkouts.delete(one.path);
-          await saveCheckouts(open.path, open.held).catch(() => undefined);
-        }
-        open.held.sessions.close(one.path);
+        // The folder, the branch and the registry row all stay: deleting a chat
+        // is not a decision to lose what it wrote, and a forced worktree removal
+        // would take the uncommitted work with it. Only the live view of the row
+        // is forgotten here; the index on disk still knows where the copy is, so
+        // it can be landed or given back deliberately.
+        open.held.checkouts.delete(one.path);
+        putDown(open.held, one.path);
       }
     }
     try {
-      await rm(target, { force: true });
-      await rm(`${target}.bak`, { force: true }).catch(() => undefined);
+      /* Moved, not destroyed. Deleting a chat is a press and a press can be a
+         mistake, and the transcript is the only copy of what was said. The
+         caller is told it is gone only when it really is out of the sessions
+         folder. */
+      const kept = await moveToTrash(target, app.getPath('userData'));
+      if (kept === null) throw new Error('the transcript would not move');
     } catch (cause) {
       return fail({
         what: 'I could not throw that conversation away.',
-        because: 'This computer would not let me remove the file.',
+        because: 'This computer would not let me move the file.',
         actionLabel: 'Got it',
         details: detailsOf(cause),
       });
     }
-    return done(await listConversations(open.path, sessionsFolder()));
+    const left = await conversationsInProject(open.path);
+    // The list comes from the shell either way: the file is gone, and a list
+    // that did not come back is worth saying rather than pretending.
+    if (!left.ok) return fail(NOTHING_OPEN);
+    return done(left.value);
+  });
+
+  /**
+   * Write down what somebody attached, under the profile, by content id.
+   *
+   * The wire carries base64, because that is what the window has; from here on
+   * an attachment is a file named by the hash of its own bytes, which is what
+   * makes a retry after a failed send, a reload, and the same picture sent from
+   * two conversations one stored copy with one id.
+   *
+   * The small copy is made here rather than in the store because decoding a PNG
+   * is Electron's job, not the profile's; a document gets none, and a picture
+   * this computer cannot read gets none either and keeps its name on the chip.
+   */
+  handle<KeptAttachments>(CHANNEL.keepAttachments, async (_event, args) => {
+    const [given, holding] = args;
+    const files: Incoming[] = [];
+    for (const one of Array.isArray(given) ? given : []) {
+      const picture = one as Partial<Record<'kind' | 'name' | 'mimeType' | 'bytes', unknown>> | null;
+      if (picture === null || typeof picture !== 'object') continue;
+      const { kind, name, mimeType, bytes } = picture;
+      if (
+        (kind !== 'image' && kind !== 'document') ||
+        typeof name !== 'string' ||
+        typeof mimeType !== 'string' ||
+        typeof bytes !== 'string' ||
+        bytes === ''
+      ) {
+        continue;
+      }
+      const raw = Buffer.from(bytes, 'base64');
+      let thumb: Buffer | null = null;
+      if (kind === 'image') {
+        const drawn = nativeImage.createFromBuffer(raw);
+        if (!drawn.isEmpty()) {
+          // A chip is drawn at about this size, and every one of these is kept
+          // in memory for the life of the row: 320 wide is what reads and no
+          // more.
+          thumb = (drawn.getSize().width > 320 ? drawn.resize({ width: 320 }) : drawn).toJPEG(72);
+        }
+      }
+      files.push({ name, kind, mimeType, bytes: raw, ...(thumb === null ? {} : { thumb }) });
+    }
+    const carrying = (Array.isArray(holding) ? holding : []).filter(
+      (one): one is string => typeof one === 'string' && one !== '',
+    );
+    return done(await keep(app.getPath('userData'), files, carrying));
+  });
+
+  /** The original bytes of a kept attachment, for sending the same one again or
+   *  opening it. Null when nothing is stored under that id. */
+  handle<AttachmentCopy | null>(CHANNEL.attachmentCopy, async (_event, args) => {
+    const [id] = args;
+    return done(await copyOf(app.getPath('userData'), id));
+  });
+
+  /** What is in the trash, and the rule it is kept under. The rule travels with
+   *  the list so the screen states it rather than guessing at it: nothing is
+   *  emptied on its own, and emptying happens when somebody asks. */
+  handle<TrashView>(CHANNEL.trashList, async () => {
+    try {
+      return done({ items: await listTrash(app.getPath('userData')), rule: TRASH_RULE });
+    } catch (cause) {
+      return fail({
+        what: 'I could not read the trash.',
+        because: 'The folder the deleted conversations are kept in did not answer. Nothing has been changed.',
+        actionLabel: 'Try again',
+        details: detailsOf(cause),
+      });
+    }
+  });
+
+  /** Put one conversation back where the shell lists conversations from, under
+   *  its own name. Nothing is written over: a name that is taken leaves the
+   *  kept copy exactly where it is. */
+  handle<string | null>(CHANNEL.trashRestore, async (_event, args) => {
+    const [name] = args;
+    const back = await restoreFromTrash(
+      typeof name === 'string' ? name : '',
+      app.getPath('userData'),
+      sessionsFolder(),
+    );
+    if (back === null) {
+      return fail({
+        what: 'I could not put that conversation back.',
+        because:
+          'Either it is not in the trash any more, or a conversation with that name is open already. Nothing has been changed, and anything still in the trash is still there.',
+        actionLabel: 'Got it',
+      });
+    }
+    return done(back);
+  });
+
+  /** Delete exactly the kept conversations named — never the rest of the trash,
+   *  and never anything a person did not point at. What comes back is what
+   *  actually went, so the count on screen is the count that happened. */
+  handle<readonly string[]>(CHANNEL.trashEmpty, async (_event, args) => {
+    const [names] = args;
+    const asked = (Array.isArray(names) ? names : []).filter(
+      (one): one is string => typeof one === 'string' && one !== '',
+    );
+    return done(await emptyTrash(app.getPath('userData'), asked));
   });
 
   /** One shelf per run. Building it reads settings off disk, and the screen it
@@ -8947,82 +9480,100 @@ function register(): void {
   let shelf: Awaited<ReturnType<typeof openShelf>> | null = null;
   const openShelf = async () => {
     const folder = workspaces.current?.path ?? app.getPath('home');
-    return packageShelf(await packageHost(await defaultAgentDir(), folder));
+    const built = packageShelf(await packageHost(await defaultAgentDir(), folder));
+    // Every change reports itself while it happens: an install is a minute of
+    // npm, and a minute of nothing is what a person reads as broken.
+    built.watching((progress) => tell({ says: progress.says, done: progress.done }));
+    return built;
   };
   const theShelf = async () => (shelf ??= await openShelf());
 
-  handle<InStep>(CHANNEL.inStep, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return done(inStepOf(null));
-    return done(inStepOf((await followed()).for(open.path)));
-  });
+  /**
+   * Which add-ons a change landed under, per open session.
+   *
+   * Keyed by the session itself rather than by its path: a conversation opened
+   * again later is a session built after the change, which is running what is
+   * on disk and has nothing to reload.
+   */
+  const changedUnder = new WeakMap<object, Set<string>>();
 
-  handle<InStep>(CHANNEL.followDesign, async (_event, args) => {
-    const [address] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof address !== 'string' || address.trim() === '') return fail(NOTHING_OPEN);
+  /**
+   * Every conversation that was open when the add-ons changed.
+   *
+   * A session is built with the add-ons that were installed at the moment it
+   * opened — their factories ran, their tools were registered into it. Nothing
+   * about a change afterwards reaches one that is already going, so each of
+   * them is told, and each of them will be built again the next time somebody
+   * opens it.
+   */
+  function markActivationPending(says: string, id: string): void {
+    // Every open conversation in every open project: an add-on is installed for
+    // the whole app, so a session in another project is just as much built from
+    // the set of add-ons that no longer matches.
+    for (const open of workspaces.open) {
+      for (const one of open.held.sessions.open) {
+        const under = changedUnder.get(one.held) ?? new Set<string>();
+        under.add(id);
+        changedUnder.set(one.held, under);
+        one.held.markActivationPending(says);
+        send(open.path, { type: 'notice', what: says }, one.path);
+      }
+    }
+  }
 
-    const read = figmaReading();
-    if (read === null) return fail(NO_FIGMA);
+  /**
+   * Every add-on this project can see, one row each, in the eight states.
+   *
+   * Three answers that cannot be read off one another: where an add-on lives
+   * and where it came from (the disk), whether the project's own copy has been
+   * said yes to (this shell), and what each open conversation's loader did with
+   * it (only a built session knows). This is where they are joined.
+   */
+  async function addonsHere(where: Where): Promise<readonly ExtensionHere[]> {
+    const open = projectAt(where);
+    const projectRoot = open?.path ?? '';
+    const agentDir = await defaultAgentDir();
+    // A folder that cannot be read is nothing to draw, not a failure to report:
+    // the list is the answer, and an empty one says so.
+    const found = await extensionsIn(agentDir, projectRoot).catch(() => []);
+    // The project's own answer, from the store rather than from a session: with
+    // no conversation open there is still a decision, and it is this one.
+    const trusted = await trustsIn(projectRoot);
+    const npmRoot = join(agentDir, 'npm', 'node_modules');
+    const root =
+      projectRoot === '' ? '' : projectRoot.endsWith(sep) ? projectRoot : projectRoot + sep;
 
-    try {
-      const following = await follow(address, read);
-      // What is there when somebody points at it is what the work is built
-      // from. Everything after this is measured against this moment.
-      const held: HeldDesign = {
-        id: following.fileKey,
-        name: following.name,
-        url: following.url,
-        fileKey: following.fileKey,
-        design: following.design,
-        latest: following.design,
-        readAt: Date.now(),
+    const seen: SeenHere[] = found.map((one) => {
+      const mine = root !== '' && one.where.startsWith(root);
+      return {
+        id: one.id,
+        version: one.version,
+        where: one.where,
+        cameFrom: mine ? 'carried' : one.where.startsWith(npmRoot) ? 'installed' : 'loose',
+        inThisProject: mine,
+        // A folder's own copy stays off until this shell records a yes, and one
+        // it could not fingerprint is not a yes anybody could have given.
+        needsTrust: mine && !trusted(one.id),
+        filesMissing: one.missing.length > 0,
+        // The advisor keeps one setting for the whole computer, and this is the
+        // one place a person can read that. The picker that chooses it cannot
+        // say it: what the setting is doing depends on which conversation is
+        // holding it, which only the sessions in this process know.
+        limit: fromPackage(one.where, ADVISOR_PACKAGE) ? advisorScopeSaid(agentDir) : null,
       };
-      return done(inStepOf(await (await followed()).keep(open.path, held)));
-    } catch (cause) {
-      return fail(figmaTrouble(cause));
-    }
-  });
+    });
 
-  handle<InStep>(CHANNEL.lookAgain, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const file = await followed();
-    const held = file.for(open.path);
-    if (held === null) return done(inStepOf(null));
+    const sessions: SessionHere[] =
+      open === null
+        ? []
+        : [...open.held.sessions.open].map((one) => ({
+            name: one.name,
+            pending: [...(changedUnder.get(one.held) ?? [])],
+            reports: one.held.extensions(),
+          }));
 
-    const read = figmaReading();
-    if (read === null) return done(inStepOf(held, NO_FIGMA.because));
-
-    try {
-      const latest = await read({
-        fileKey: held.fileKey,
-        nodeId: parseFigmaUrl(held.url)?.nodeId ?? null,
-      });
-      const next: HeldDesign = { ...held, latest, readAt: Date.now() };
-      return done(inStepOf(await file.keep(open.path, next)));
-    } catch (cause) {
-      // The band is already on screen and can say why the look did not happen.
-      return done(inStepOf(held, saidBy(cause)));
-    }
-  });
-
-  handle<InStep>(CHANNEL.caughtUp, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    const file = await followed();
-    const held = file.for(open.path);
-    if (held === null) return done(inStepOf(null));
-    return done(inStepOf(await file.keep(open.path, { ...held, design: held.latest })));
-  });
-
-  handle<InStep>(CHANNEL.stopFollowing, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return done(inStepOf(null));
-    await (await followed()).forget(open.path);
-    return done(inStepOf(null));
-  });
+    return extensionRows(seen, sessions);
+  }
 
   handle<readonly Pack[]>(CHANNEL.packages, async (_event, args) => {
     const [term] = args;
@@ -9039,8 +9590,9 @@ function register(): void {
   handle<readonly Pack[]>(CHANNEL.addPackage, async (_event, args) => {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
-    /* Add-ons install through Pi's package manager, which shells out to npm.
-       Saying so beats letting the press fail with the shell's own words. */
+    /* The install is ours now, so the only thing that still has to be here
+       first is npm itself: no manager means no install, and saying so before
+       the press beats the installer's own words after it. */
     npmIsHere ??= await npmOnPath();
     if (!npmIsHere) {
       return fail({
@@ -9052,8 +9604,20 @@ function register(): void {
     const shelved = await theShelf();
     const added = await shelved.add(id);
     if (!added.ok) {
-      return fail({ what: 'I could not add that.', because: added.why, actionLabel: 'Got it' });
+      // Somebody pressed Stop. That is not a failure of the work: the line
+      // saying what was left on disk has already gone out, and the list is
+      // read again so the row matches the folder.
+      if (added.stopped === true) return done(await shelved.mine());
+      return fail({
+        what: 'I could not add that.',
+        because: added.why,
+        actionLabel: 'Got it',
+        // The installer's own last lines, for whoever wants them: a failure
+        // nobody can read is a failure nobody can act on.
+        ...(added.logs === undefined ? {} : { details: added.logs.join('\n') }),
+      });
     }
+    markActivationPending(reloadWords(added.change), added.change.id);
     return done(await shelved.mine());
   });
 
@@ -9061,14 +9625,42 @@ function register(): void {
     const [id] = args;
     if (typeof id !== 'string' || id === '') return fail(NOTHING_OPEN);
     const shelved = await theShelf();
-    await shelved.remove(id);
+    const change = await shelved.remove(id);
+    markActivationPending(reloadWords(change), change.id);
     return done(await shelved.mine());
+  });
+
+  /**
+   * End the change that is running, and say what it left.
+   *
+   * The sentence is the shelf's own, because the shelf is the only thing that
+   * read the folder once the installer had gone: "nothing was installed" and
+   * "1.9.0 is on disk" are different answers, and the person about to press Add
+   * again needs the true one.
+   */
+  handle<StoppedAddition>(CHANNEL.stopPackage, async () => {
+    const shelved = await theShelf();
+    const outcome = await shelved.stop();
+    // Read again so the row matches the folder. A list that cannot be read
+    // leaves the screen as it was rather than emptying it.
+    const packs = await shelved.mine().catch(() => null);
+    return done(packs === null ? { ...outcome } : { ...outcome, packs });
   });
 
   handle<readonly Conversation[]>(CHANNEL.conversations, async (_event, args) => {
     const open = projectAt(whereIn(args));
     if (open === null) return done([]);
-    return done(await listConversations(open.path, sessionsFolder()));
+    const found = await conversationsInProject(open.path);
+    if (!found.ok) {
+      // Saying "none" would be a lie about somebody's history: the list could
+      // not be read, which is a different thing and worth a different answer.
+      return fail({
+        what: 'I could not read your saved conversations.',
+        because: 'The folder they are kept in did not answer. Nothing has been changed.',
+        actionLabel: 'Try again',
+      });
+    }
+    return done(found.value);
   });
 
   handle<null>(CHANNEL.revealFolder, async (_event, args) => {
@@ -9118,7 +9710,7 @@ function register(): void {
         says: tell,
         // Every serving can be pointed at; the page only listens once the
         // address says so, which is what the button does.
-        onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
+        onPointed: sayPointed,
       });
       if (outcome.kind === 'unsure') return done({ kind: 'unsure', question: outcome.question });
       open.held.serving = outcome.serving;
@@ -9134,57 +9726,6 @@ function register(): void {
     }
   });
 
-  /* Several designs of the same thing, each served on its own address so the
-     pane can switch between them. Every folder is read and served the way a
-     single “See it” is — nothing here invents a server or opens a project wide. */
-  handle<VariationsOutcome>(CHANNEL.variationsServe, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_TO_SHOW);
-    const spec = Array.isArray(args) ? (args[0] as { subject?: unknown; variations?: unknown } ?? null) : null;
-    const subject = typeof spec?.subject === 'string' ? spec.subject : '';
-    const variations =
-      Array.isArray(spec?.variations) && subject !== ''
-        ? (spec.variations as VariationSpec[]).filter(
-            (one) => one && typeof one.folder === 'string' && one.folder !== '' &&
-              typeof one.id === 'string' && typeof one.name === 'string',
-          )
-        : [];
-    if (variations.length === 0) {
-      return fail({
-        what: 'There are no variations to look at.',
-        because: 'Tell me you want a few designs of something, and it can make them.',
-        actionLabel: 'Got it',
-      });
-    }
-
-    // Make ready the earlier set — a new set replaces the old, like “See it”.
-    for (const served of open.held.variations) await served.stop().catch(() => undefined);
-    open.held.variations = [];
-
-    const ready: { id: string; name: string; address: string }[] = [];
-    for (const one of variations) {
-      try {
-        const outcome = await makeAndServe({
-          folder: one.folder,
-          says: tell,
-          onPointed: (pointed: Pointed) => sayPointed(open.path, pointed),
-        });
-        if (outcome.kind === 'unsure') {
-          // One variation that cannot be read holds nothing up: it is skipped,
-          // and the rest still show.
-          continue;
-        }
-        open.held.variations = [...open.held.variations, outcome.serving];
-        ready.push({ id: one.id, name: one.name, address: outcome.serving.address });
-      } catch {
-        // Keep going past one that will not build. A comparison never needs
-        // every frame to be useful.
-        continue;
-      }
-    }
-    return done({ kind: 'showing', subject, variations: ready });
-  });
-
   handle<readonly Skill[]>(CHANNEL.skills, async (_event, args) => {
     const open = projectAt(whereIn(args));
     const skills = await availableSkills(open?.path ?? null, await defaultAgentDir());
@@ -9195,14 +9736,20 @@ function register(): void {
      what it needs to list them in a `/` menu and to hold the typed words. */
   handle<boolean>(CHANNEL.watchBrowser, async (_event, args) => {
     const [on] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null || typeof on !== 'boolean') return done(false);
-    stopWatching(open.path);
+    /* The folder the conversation works in: a chat in a copy drives that copy's
+       browser, and the pictures are of the browser it drives. They are sent to
+       the window under the project it asked about, which is what it subscribed
+       with — the two are the same folder until a chat works in a copy. */
+    const folder = folderFor(open, where);
+    stopWatching(folder);
     if (!on) return done(false);
     const keeps = keepsLogins(preferencesNow?.all().keptLogins ?? {}, open.path)
-      ? browserFolder(await defaultAgentDir(), open.path)
+      ? browserFolder(await defaultAgentDir(), folder)
       : null;
-    watchTheBrowser(open.path, keeps);
+    watchTheBrowser(open.path, folder, keeps, previewOf(folder));
     return done(true);
   });
 
@@ -9231,11 +9778,14 @@ function register(): void {
   });
 
   handle<readonly Workflow[]>(CHANNEL.workflows, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     const all = await availableWorkflows(open?.path ?? null, await defaultAgentDir());
-    return done(
-      all.map(({ command, name, description, hint, source }) => ({ command, name, description, hint, source })),
-    );
+    // Both kinds in one list: a `/word` nobody has to know the origin of before
+    // typing it. The add-on's commands come from the session in front, read now
+    // rather than remembered, so the row cannot outlive what offers it.
+    const session = open === null ? null : sessionAt(open, where);
+    return done(rowsForThePicker(all, session?.commands() ?? []));
   });
 
   /* One conversation, its own checkout. These run the front project's own git,
@@ -9247,7 +9797,6 @@ function register(): void {
    *  real reason not to move it: files are mid-change, and moving out from under
    *  them loses what was being written. */
   function stillWriting(held: Held): boolean {
-    if (held.waiting?.waiting.state === 'making') return true;
     return held.sessions.open.some((one) => one.held.working || one.held.listening);
   }
 
@@ -9378,7 +9927,7 @@ function register(): void {
     open.held.suppressCarry.add(address);
     try {
       await found.held.stop().catch(() => undefined);
-      open.held.sessions.close(address);
+      putDown(open.held, address);
     } finally {
       open.held.suppressCarry.delete(address);
     }
@@ -9394,11 +9943,14 @@ function register(): void {
   });
 
   /**
-   * Bring one conversation's copy home and give the copy back.
+   * Merge one conversation's copy into a target workspace and give the copy
+   * back.
    *
    * Named apart from the handler because two presses reach it: the one in the
    * conversation that owns the copy, and the one on that copy's card in the
-   * panel, which names a conversation that need not be in front.
+   * panel, which names a conversation that need not be in front. Both sides are
+   * named in what it says, because "merge the worktree back" never told anybody
+   * which folder the work would land in.
    */
   async function landTheCopy(
     open: Workspace<Held>,
@@ -9409,7 +9961,7 @@ function register(): void {
     if (entry.branch.startsWith('graphe/pr-')) {
       return fail({
         what: 'This is a pull request review checkout.',
-        because: 'Reviews are read-only. Close the tab when you are done: it will be dropped, not landed into the project.',
+        because: 'Reviews are read-only. Close the tab when you are done: it will be dropped, not merged into the project.',
         actionLabel: 'Got it',
       });
     }
@@ -9422,6 +9974,27 @@ function register(): void {
     // uncommitted with no restore point. Use the real project (or named child).
     const child = childRepoFor(open as unknown as Workspace<Held>, where);
     const repo = child?.path ?? open.path;
+    const source = basename(entry.folder);
+    const target = basename(repo);
+    if (!existsSync(entry.folder)) return fail(mergeTrouble(source, target, worktreeWords.gone));
+    // Checked before the conversation is put down: a folder holding another
+    // repository is not this copy's work, and nothing may be moved into it.
+    if (!(await sameRepository(gitRunHereFor(), repo, entry.folder))) {
+      return fail(mergeTrouble(source, target, worktreeWords.otherRepo));
+    }
+    /* A destination with work of its own in it blocks the merge, and the files
+       are named: a squash merge stages what it brings, and somebody told to
+       "save your work first" has to go looking for which of it. */
+    const blocked = await blockingChanges(gitRunHereFor(), repo);
+    if (blocked.length > 0) {
+      return fail(
+        mergeTrouble(
+          source,
+          target,
+          `${worktreeWords.dirtyAbout(blocked)} Nothing has been merged, and the copy is still there.`,
+        ),
+      );
+    }
     let history: Timeline | null = null;
     if (child !== null) {
       const existing = open.held.childTimelines.get(child.path);
@@ -9446,29 +10019,55 @@ function register(): void {
     if (history === null) return fail(SEVERAL_PROJECTS);
     await putDownCopyConversation(open, entry.address);
     if ((await reopenCheckout(repo, entry)) === null) {
-      return fail(worktreeTrouble(worktreeWords.gone));
+      return fail(mergeTrouble(source, target, worktreeWords.gone));
     }
-    // Copy work is usually uncommitted. Apply its actual files first and await
-    // that result; merging only the branch can omit those edits, while racing
-    // the settle-time Apply can remove the folder out from underneath it.
-    const carried = await bringBack(gitRunHereFor(), repo, entry.folder);
-    if (!carried.ok) return fail(worktreeTrouble(carried.because));
-    if (carried.value.conflicted.length > 0) {
-      return fail(worktreeTrouble(bringBackWords.heldBack(carried.value.conflicted)));
+    /* Work this copy has not saved is not on any branch, so git has nothing to
+       merge. Either the copy's own saves are the whole of it and git's merge
+       carries them, or the writing is still in the folder and the files are
+       carried over as they are — never both, which would apply the same work
+       twice and fight over the same paths. */
+    const unsaved = await blockingChanges(gitRunHereFor(), entry.folder);
+    if (unsaved.length > 0) {
+      // Committed and uncommitted alike, diffed against where the copy started.
+      const applied = await bringBack(gitRunHereFor(), repo, entry.folder);
+      if (!applied.ok) return fail(mergeTrouble(source, target, applied.because));
+      if (applied.value.conflicted.length > 0) {
+        return fail(
+          mergeTrouble(source, target, bringBackWords.heldBack(applied.value.conflicted)),
+        );
+      }
+      const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
+      if (!dropped.ok) return fail(mergeTrouble(source, target, dropped.because));
+    } else {
+      // All of it is on the branch, so this is git's own merge into the target
+      // workspace: one commit as the person, and the copy given back with it.
+      const landed = await landWorktree(gitRunHereFor(), repo, entry.folder);
+      if (!landed.ok) {
+        return fail(
+          mergeTrouble(
+            source,
+            target,
+            landed.paths === undefined
+              ? landed.because
+              : `${worktreeWords.dirtyAbout(landed.paths)} Nothing has been merged.`,
+          ),
+        );
+      }
     }
     try {
       await history.snapshot({ boundary: 'turn-ended' });
     } catch (cause) {
       return fail(
-        worktreeTrouble(cause instanceof Error ? cause.message : 'The project could not be saved.'),
+        mergeTrouble(
+          source,
+          target,
+          cause instanceof Error ? cause.message : 'The project could not be saved.',
+        ),
       );
     }
-    const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
-    if (dropped.ok) {
-      open.held.checkouts.delete(entry.address);
-      await saveCheckouts(open.path, open.held).catch(() => undefined);
-    }
-    return dropped.ok ? done(null) : fail(worktreeTrouble(dropped.because));
+    open.held.checkouts.delete(entry.address);
+    await saveCheckouts(open.path, open.held).catch(() => undefined);
+    return done(null);
   }
 
   handle<null>(CHANNEL.worktreeDrop, async (_event, args) => {
@@ -9629,20 +10228,49 @@ function register(): void {
 
     const repo = reviewRepo(open, where);
     const checkout = await checkoutForReview(repo, open.held, entry.address);
-    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '' });
+    if (checkout === null) return done({ entries: reviewRows(open.held), diff: '', revision: null, changed: false });
     const base = await sharedBase(gitRunHereFor(), checkout.folder, repo);
+    if (base === null) {
+      return done({ entries: reviewRows(open.held), diff: '', revision: null, changed: false });
+    }
+    /* What this diff is of, read the same way a decision is checked: the copy's
+       revision and its working tree together, since a copy's work is usually
+       uncommitted. A second look at the same entry compares, and one that has
+       moved is reported as moved rather than drawn as the change somebody
+       already read. */
+    const now = await reviewSnapshotOf(checkout.folder, repo);
+    const diff = await reviewDiff(checkout.folder, base);
+    if (now === null) {
+      return done({ entries: reviewRows(open.held), diff, revision: null, changed: false });
+    }
+    const read = reviewDiffReadings.note(diffKey(checkout.folder, base), now.source);
     return done({
       entries: reviewRows(open.held),
-      diff: base === null ? '' : await reviewDiff(checkout.folder, base),
+      diff,
+      revision: now.source,
+      changed: read.changed && entry.snapshot !== undefined && entry.snapshot.source !== now.source,
     });
   });
 
   handle<readonly ReviewEntry[]>(CHANNEL.reviewChoose, async (_event, args) => {
     const [id, path, choice] = args;
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id !== 'string' || typeof path !== 'string') return fail(NO_SUCH_ENTRY);
     if (choice !== null && !isFileVerdict(choice)) return fail(NO_SUCH_ENTRY);
+    const entry = open.held.review.find((one) => one.id === id);
+    if (entry === undefined) return fail(NO_SUCH_ENTRY);
+    // Deciding one file is deciding about the files that were read, so the same
+    // check as the whole entry's: a tick against a state that has moved is not
+    // an answer about what is there now.
+    if (choice !== null) {
+      const repo = reviewRepo(open, where);
+      const checkout = await checkoutForReview(repo, open.held, entry.address);
+      if (checkout === null) return fail(REVIEW_WORK_GONE);
+      const now = await reviewSnapshotOf(checkout.folder, repo);
+      if (staleDecision(entry, now)) return fail(await staleTrouble(open, entry, now));
+    }
     open.held.review = chooseFile(open.held.review, id, path, choice);
     await saveReviewQueue(open.path, open.held).catch(() => undefined);
     return done(reviewRows(open.held));
@@ -9671,6 +10299,11 @@ function register(): void {
     if (taking.length > 0) {
       const checkout = await checkoutForReview(repo, open.held, entry.address);
       if (checkout === null) return fail(REVIEW_WORK_GONE);
+      /* The files somebody agreed to are the files they were shown. Read again
+         here, and refuse when either side has moved since: carrying a decision
+         out against a state nobody saw is how the wrong version wins. */
+      const now = await reviewSnapshotOf(checkout.folder, repo);
+      if (staleDecision(entry, now)) return fail(await staleTrouble(open, entry, now));
       await (await timelineFor(open, { ...where, conversation: undefined }))
         ?.snapshot({ name: beforeBringingWorkIn, boundary: 'turn-ended' })
         .catch(() => undefined);
@@ -9682,7 +10315,6 @@ function register(): void {
     const after = decide(open.held.review, id, verdict);
     open.held.review = after.entries;
     await saveReviewQueue(open.path, open.held).catch(() => undefined);
-    void look(open.path, open.held);
     return done({
       entries: reviewRows(open.held),
       did: clashes.length === 0 ? after.did : `${after.did} ${reviewWords.clashed(clashes)}`,
@@ -9710,6 +10342,10 @@ function register(): void {
     const repo = reviewRepo(open, where);
     const checkout = await checkoutForReview(repo, open.held, entry.address);
     if (checkout === null) return fail(REVIEW_WORK_GONE);
+    // Landed against the state it was reviewed at, or not at all: a branch
+    // merged after the copy moved on carries work nobody agreed to.
+    const now = await reviewSnapshotOf(checkout.folder, repo);
+    if (staleDecision(entry, now)) return fail(await staleTrouble(open, entry, now));
 
     const said = asked === null || typeof asked !== 'object' ? {} : (asked as Record<string, unknown>);
     const message = typeof said['message'] === 'string' ? said['message'] : '';
@@ -9757,7 +10393,6 @@ function register(): void {
 
     open.held.review = withoutEntry(open.held.review, id);
     await saveReviewQueue(open.path, open.held).catch(() => undefined);
-    void look(open.path, open.held);
     return done({
       entries: reviewRows(open.held),
       did: clashes.length === 0 ? reviewWords.landed(entry.title) : `${reviewWords.landed(entry.title)} ${reviewWords.clashed(clashes)}`,
@@ -9812,20 +10447,6 @@ function register(): void {
     open.held.review = withoutEntry(open.held.review, id);
     await saveReviewQueue(open.path, open.held).catch(() => undefined);
     return done({ url: made.url, entries: reviewRows(open.held) });
-  });
-
-  /** The way back to how this behaved before the queue, one card at a time. */
-  handle<readonly ReviewEntry[]>(CHANNEL.reviewMirror, async (_event, args) => {
-    const [id, on] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null) return fail(NOTHING_OPEN);
-    if (typeof id !== 'string' || typeof on !== 'boolean') return fail(NO_SUCH_ENTRY);
-    const entry = open.held.review.find((one) => one.id === id);
-    const address = entry?.address ?? id;
-    if (on) open.held.mirroring.add(address);
-    else open.held.mirroring.delete(address);
-    await saveReviewQueue(open.path, open.held).catch(() => undefined);
-    return done(reviewRows(open.held));
   });
 
   /**
@@ -9914,7 +10535,6 @@ function register(): void {
       .catch(() => undefined);
     await mkdir(dirname(target), { recursive: true });
     await writeAtomically(target, text);
-    void look(open.path, open.held);
     return done(null);
   });
 
@@ -9957,8 +10577,13 @@ function register(): void {
     }
     const project = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
     let folder: string;
+    let branch = '';
     try {
-      folder = (await preparePrWorktree(project, prNumber)).folder;
+      const made = await preparePrWorktree(project, prNumber);
+      folder = made.folder;
+      // The branch carries the fetched head, so a review is pinned to the
+      // commit it was opened at rather than to whatever the PR is now.
+      branch = made.branch;
     } catch (cause) {
       const details = detailsOf(cause);
       return fail({
@@ -9996,9 +10621,9 @@ function register(): void {
       const chain = detailsOf(cause);
       return fail(knownTrouble(chain ?? '', chain) ?? noAccountConnected(cause));
     }
-    const address = addressOf(session);
+    const address = addressFor(session);
     from.address = address;
-    open.held.checkouts.set(address, { folder, branch: `graphe/pr-${String(prNumber)}` });
+    open.held.checkouts.set(address, { folder, branch });
     await saveCheckouts(open.path, open.held).catch(() => undefined);
     keepConversation(open.held, address, session);
     return done({
@@ -10245,7 +10870,7 @@ function register(): void {
    *  request that names none means the one in front. */
   function listAddress(open: Workspace<Held>, where: Where): string | null {
     const found = conversationAt(open.held, where);
-    return found === null ? null : addressOf(found.held);
+    return found === null ? null : addressOf(open.held, found.held);
   }
 
   /** A card has been answered, so the loop is no longer held back by it. A
@@ -10381,33 +11006,6 @@ function register(): void {
     });
   });
 
-  handle<readonly Flow[]>(CHANNEL.flowLoad, async (_event, args) => {
-    const open = projectAt(whereIn(args));
-    if (open === null) return done([]);
-    return done(await FlowFile.read(open.path, app.getPath('userData')));
-  });
-
-  handle<null>(CHANNEL.flowSave, async (_event, args) => {
-    const [raw] = args;
-    const open = projectAt(whereIn(args));
-    const flow = readFlow(raw);
-    if (open === null || flow === null) return fail(NOTHING_OPEN);
-    const held = await FlowFile.read(open.path, app.getPath('userData'));
-    await FlowFile.write(open.path, app.getPath('userData'), withFlow(held, flow));
-    return done(null);
-  });
-
-  /** Throw one away. Closing its tab does not come through here — a drawing
-   *  somebody put down is not a drawing they meant to lose. */
-  handle<null>(CHANNEL.flowForget, async (_event, args) => {
-    const [id] = args;
-    const open = projectAt(whereIn(args));
-    if (open === null || typeof id !== 'string') return fail(NOTHING_OPEN);
-    const held = await FlowFile.read(open.path, app.getPath('userData'));
-    await FlowFile.write(open.path, app.getPath('userData'), withoutFlow(held, id));
-    return done(null);
-  });
-
   /* Stop carrying on. Escape and the Stop beside the line it draws both land
      here: the loop is in the shell now, so the window says so rather than
      remembering it. */
@@ -10422,6 +11020,15 @@ function register(): void {
   handle<string>(CHANNEL.diagnostics, async () => done(await diagnosticsNow()));
 
   handle<string>(CHANNEL.appVersion, async () => done(app.getVersion()));
+
+  /**
+   * What this machine is missing, so a window with nothing open can say it.
+   *
+   * Asked rather than only pushed: this is found out while the window is still
+   * loading, and a notice sent into a renderer that has not subscribed is a
+   * notice nobody ever sees. The answer is the same list the push carries.
+   */
+  handle<readonly AppNotice[]>(CHANNEL.appNotices, async () => done(await whatIsMissing()));
 
   /* What a model was actually measured doing on a long job. Written by
      `scripts/long-horizon-bench.mjs`, read here, said in the model chip — so a
@@ -10446,7 +11053,8 @@ function register(): void {
   });
 
   handle<AddonReport>(CHANNEL.addons, async (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     const says: Record<string, string> = {};
     /* One entry per add-on, not per session: the same add-on loaded into three
        conversations is one thing somebody sets. */
@@ -10461,7 +11069,22 @@ function register(): void {
       process.pid,
       spawned.all().map((one) => one.pid),
     ).catch(() => 0);
-    return done({ says, each: [...each.values()], running });
+    /* Whether a change in flight can be ended is asked before it is drawn, so
+       the screen shows a line about a change nobody can stop rather than a
+       press that only ever fails. A shelf that cannot even be built is one that
+       cannot end anything. */
+    const canStop = await theShelf()
+      .then((built) => built.canStop)
+      .catch(() => false);
+    brewIsHere ??= await brewOnPath();
+    return done({
+      says,
+      each: [...each.values()],
+      running,
+      here: await addonsHere(where),
+      setup: npmSetup({ npm: await npmInReach(), brew: brewIsHere }),
+      stopping: { canStop, says: CANNOT_STOP },
+    });
   });
 
   handle<StorageNow>(CHANNEL.storage, async () => {
@@ -10518,6 +11141,50 @@ function register(): void {
       });
     },
   );
+
+  /* What the one-time move found. The record was written by the run itself and
+     only ever reached the log; this is the same reading, in front of somebody
+     who might need it. */
+  handle<MigrationNow>(CHANNEL.migration, async () => done(await migrationNow()));
+
+  /**
+   * The check again, on somebody's word.
+   *
+   * The same run the app does at launch, so it can only ever find the same
+   * folders and write the same counts. It is offered because "check again" is
+   * the first thing anybody does with a number they do not like, and a press
+   * that answers with the same number is an answer.
+   */
+  handle<MigrationNow>(CHANNEL.migrationCheck, async () => {
+    await runWorkspaceMigration();
+    return done(await migrationNow());
+  });
+
+  /** The copies the move kept, in the Finder, so a recovery is one press rather
+   *  than a path somebody has to find by hand. */
+  handle<null>(CHANNEL.showBackups, async () => {
+    const dir = app.getPath('userData');
+    const marker = await readFile(join(dir, MARKER_FILE), 'utf8').catch(() => null);
+    const named = marker === null ? null : readMarker(marker);
+    // The files themselves, when there are any: opening the profile folder and
+    // leaving somebody to guess which of forty files is the copy is not a way
+    // back. Nothing named means the folder is still the honest place.
+    const first = named?.backups?.[0];
+    if (first !== undefined && existsSync(`${first}.bak`)) {
+      shell.showItemInFolder(`${first}.bak`);
+      return done(null);
+    }
+    const trouble = await shell.openPath(dir);
+    if (trouble !== '') {
+      return fail({
+        what: 'I could not open that folder.',
+        because: 'This computer would not show it to me just now.',
+        actionLabel: 'Got it',
+        details: trouble,
+      });
+    }
+    return done(null);
+  });
 
   handle<{ ok: boolean; why?: string }>(CHANNEL.keepCredential, async (_event, args) => {
     const [name, value] = args;
@@ -10629,11 +11296,24 @@ function register(): void {
     // workflow's own prompt before it goes anywhere, so a workflow is exactly
     // the file that named it and the words somebody typed after it. Anything
     // that is not a known `/word` is left as the plain message it looks like.
+    /* A `/word` at the start is a command, not a sentence — and there are two
+       kinds. Graphe's own are files: the workflow's prompt is put together here
+       and sent as the message. An add-on's runs in Pi's command context
+       instead: the handler gets the words after the slash, and sending it as
+       prose would be the app taking a command and quietly asking a model to
+       read it out. Which one it is decided against what this session holds
+       right now, and asked again once the folder is free of whoever else was
+       working in it. */
+    let addonCommand: AddonCommand | null = null;
     const leadingSlash = /^\/([a-z][a-z0-9-]*)(?:\s|$)/i.exec(text);
     if (leadingSlash !== null) {
       const wanted = leadingSlash[1] ?? '';
+      const here = agent.commands();
       const workflow = await workflowNamed(open.path, await defaultAgentDir(), wanted);
-      if (workflow !== null) {
+      const route = routeFor(wanted, { workflows: workflow === null ? [] : [workflow], addons: here });
+      if (route === 'addon') {
+        addonCommand = here.find((one) => one.name === wanted) ?? null;
+      } else if (route === 'workflow' && workflow !== null) {
         const rest = text.slice(wanted.length + 1).trim();
         if (workflow.hint !== null && rest === '') {
           return fail({
@@ -10664,24 +11344,99 @@ function register(): void {
        itself start again from zero and whatever they stopped is behind them.
        The ceiling is there to stop a loop nobody is watching, not to ration a
        person who is. */
-    continuations.spoke(open.path, addressOf(conversation.held));
-    askingSomebody.delete(keyOf(open.path, addressOf(conversation.held)));
+    continuations.spoke(open.path, addressOf(open.held, conversation.held));
+    askingSomebody.delete(keyOf(open.path, addressOf(open.held, conversation.held)));
     // A new job, so the next apply puts a version down again, and whatever the
     // app had queued for itself is behind us.
-    open.held.snappedBeforeApply.delete(addressOf(conversation.held));
-    ours.delete(keyOf(open.path, addressOf(conversation.held)));
-    // Their own words, kept for the sentence beside the pictures. The same
-    // sentence the version timeline writes for the same moment — see
-    // src/diff/summary.ts.
-    open.held.looking.instruction = text;
+    open.held.snappedBeforeApply.delete(addressOf(open.held, conversation.held));
+    ours.delete(keyOf(open.path, addressOf(open.held, conversation.held)));
     // Their words, not the workflow's expansion of them: the branch is named
     // after what was asked for.
     await nameBranchAfter(open, conversation.path, textIn).catch(() => undefined);
+    /* One writer per folder. A second chat working in the same files waits its
+       turn here — before anything is sent, so nothing it asked for has begun —
+       and the waiting line beside the composer is where that is said. */
+    const whose = keyOf(open.path, addressOf(open.held, conversation.held));
+    const workspaceKey = canonical(folderFor(open, where));
+    const own = runsHere.get(whose);
+    const runId = `run-${String((runsSoFar += 1))}`;
+    // Whoever is ahead is a conversation, so that is what somebody waiting is
+    // told: the folder's own name says nothing about who has it.
+    const held = open.held.sessions.find(addressOf(open.held, conversation.held))?.name;
+    const admission = workspaceLocks.request(
+      { key: workspaceKey, runId, label: held === undefined || held.trim() === '' ? open.name : held },
+      own !== undefined && own.key === workspaceKey ? own.runId : undefined,
+    );
+    if (!admission.granted) {
+      // The folder is recorded as it is now, before the wait: a workspace this
+      // chat is pointed at afterwards is a different request, not this one.
+      const asking: WaitingSend = {
+        id: runId,
+        text: textIn,
+        workspace: workspaceKey,
+        ahead: admission.holder ?? '',
+      };
+      let line: readonly WaitingSend[] = [...(waitingForTheFolder.get(whose) ?? []), asking];
+      waitingForTheFolder.set(whose, line);
+      tellTheFolderLine(open, conversation.path, line);
+      // Waiting behind another chat in the same folder is its own state: the
+      // words are held, nothing of them has begun, and the window says so.
+      states.move(named(conversation.path), 'queued', Date.now());
+      const outcome = await admission.when;
+      line = drainQueued(waitingForTheFolder.get(whose) ?? [], runId);
+      if (line.length === 0) waitingForTheFolder.delete(whose);
+      else waitingForTheFolder.set(whose, line);
+      tellTheFolderLine(open, conversation.path, line);
+      if (outcome === 'cancelled') {
+        states.move(named(conversation.path), 'idle', Date.now());
+        return done(null);
+      }
+      // The folder is free, so what was waiting begins: the adapter's own `busy`
+      // says when, and `forwardTo` moves the state there.
+    }
+    if (addonCommand !== null) {
+      /* It was offered when the picker was read and it is not offered now, so
+         Pi would take `/tally` as an ordinary sentence about tallying and a
+         model would answer the words as prose. The session is asked again by
+         name rather than trusted from before the wait: a chat rebuilt while
+         this message sat behind another one is not the chat that offered it. */
+      const now = sessionAt(open, where);
+      const stillHere = now === agent && now.commands().some((one) => one.name === addonCommand.name);
+      if (!stillHere) {
+        states.move(named(conversation.path), 'idle', Date.now());
+        return fail({
+          what: `/${addonCommand.name} is not here any more.`,
+          because: `${addonCommand.from} is not loaded in this chat any more, so nothing was sent. Reload the chat to pick up what is loaded now.`,
+          actionLabel: 'Got it',
+        });
+      }
+    }
+    if (admission.granted && admission.newlyHeld) runsHere.set(whose, { key: workspaceKey, runId });
+    send(open.path, { type: 'message-started', text: textIn }, conversation.path);
     try {
+      // Written down under the profile before the message goes, by the hash of
+      // the bytes. The same picture sent twice — a retry after a refusal, the
+      // same screenshot in two chats — is then one stored copy with one id, and
+      // a row that holds it points at bytes still there next week. No ceiling is
+      // applied here: this message is already on its way, and a store that
+      // refused would be the app arguing with what somebody just sent.
+      await keep(app.getPath('userData'), whatWasAttached(attachments)).catch(() => null);
       // A PDF has become words by the time the message goes. Read here rather
       // than in the window: the extraction is Node's, and the same reader
       // already serves `webfetch`.
       const papers = await paperWords(attachments);
+      /* What the project shares with every chat in it, in front of the person's
+         own words: the model reads a brief before the request about it, and the
+         words last are the words it answers. Read off the turn rather than kept
+         here, so a project's list is the window's to edit and there is no second
+         copy of it in this process to fall out of step.
+
+         Behind the words instead when the message is an add-on's `/command`:
+         Pi dispatches a command from the start of the text, and anything in
+         front of it turns a command into a sentence about one. */
+      const shared = projectContextBlock(
+        sharedFrom(ways !== null && typeof ways === 'object' ? (ways as PromptOptions).context : null),
+      );
       // The checklist used to be appended here, to the person's own words. A
       // steer carried it, a retry after a rate limit did not, and neither did
       // anything after the conversation was tidied up — which are exactly the
@@ -10694,36 +11449,6 @@ function register(): void {
         ways !== null && typeof ways === 'object' && (ways as PromptOptions).queue === 'followUp'
           ? ('followUp' as const)
           : undefined;
-      // Checked first, when they have asked for that and nothing is already
-      // waiting. Two pieces of work waiting at once is a decision nobody made.
-      //
-      // Never a queued message: that one was asked to go behind the turn that
-      // is running, and turning it into a second piece of held work is neither
-      // what was pressed nor something the person can undo.
-      if (
-        queue === undefined &&
-        holdsBack((await preferences()).all().heldBack, open.path) &&
-        open.held.waiting === null
-      ) {
-        const askFolder = folderFor(open, where);
-        const askTimeline = await timelineFor(open, where);
-        if (await worthACopy(askFolder)) {
-          return await checkItFirst(
-            open,
-            where,
-            { address: conversation.path },
-            asked,
-            imageCards(attachments),
-            lookFirst,
-          );
-        }
-        // Nothing to show, so the work happens here and one press puts it back.
-        // The save point is the whole difference between that and losing it.
-        // Per-child when a repo is named; otherwise the project's own.
-        await askTimeline
-          ?.snapshot({ boundary: 'before-risky-change' })
-          .catch(() => null);
-      }
       // `@name` is a deliberate, per-turn selection — stronger than hoping a
       // model notices a description in the system prompt. Keep the original
       // words visible in the thread, but give the agent the selected complete
@@ -10734,10 +11459,17 @@ function register(): void {
         selected.map(async (skill) => ({ skill, text: await skillContents(skill).catch(() => '') })),
       );
       const chosen = loaded.filter((one) => one.text !== '').slice(0, 4);
+      /* What the project shares, in front of the person's own words — the model
+         reads a brief before the request about it, and the words last are the
+         words it answers. Behind them when the message is an add-on's
+         `/command`: Pi dispatches a command from the start of the text, and
+         anything in front of it turns a command into a sentence about one. */
+      const withContext =
+        shared === null ? asked : addonCommand === null ? `${shared}\n\n${asked}` : `${asked}\n\n${shared}`;
       const withSkills =
         chosen.length === 0
-          ? asked
-          : `${asked}\n\n<graphe-selected-skills>\n${chosen
+          ? withContext
+          : `${withContext}\n\n<graphe-selected-skills>\n${chosen
               .map(
                 ({ skill, text: instructions }) =>
                   `The user explicitly selected @${skill.handle}. Follow these instructions for this request:\n<skill name="${skill.name}">\n${withinBudget(instructions, SKILL_BUDGET, standingWords.skillTrimmed)}\n</skill>`,
@@ -10753,6 +11485,17 @@ function register(): void {
       // the two.
       const raw = cause instanceof Error ? cause.message : String(cause);
       return fail(plainTrouble(raw, detailsOf(cause)));
+    } finally {
+      /* The run is over — answered, stopped, or failed — so the folder is
+         somebody else's turn. Only a run that took the lock gives it up: a
+         second message that joined its own running chat never had it. */
+      const mine = runsHere.get(whose);
+      if (mine !== undefined && mine.runId === runId) {
+        runsHere.delete(whose);
+        // The folder this run took, as it was recorded then: the release goes
+        // to the lock that was actually held, not to one worked out again now.
+        workspaceLocks.release(mine.key, runId);
+      }
     }
   });
 
@@ -10777,22 +11520,36 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(null);
-    // A check running in a copy is nobody's conversation, so Stop used to reach
-    // past it to the conversation behind and leave the thing actually running.
-    await open.held.checking?.stop();
-    await sessionAt(open, where)?.stop();
+    // An add-on waiting on a person is waiting on a run that is over. Its
+    // question is settled as cancelled rather than left hanging on a screen
+    // that has moved on.
+    withdrawAsks(where);
+    const found = conversationAt(open.held, where);
+    /* Stop ends the run, so everything this app had decided to do next in it
+       ends with it: the epoch moves on, and a board piece or an add-on's ask
+       that arrives afterwards is a result to read rather than a reason to
+       start again. Told here as well as from the carrying-on Stop, because a
+       caller that only stops the run must not leave the loop able to restart
+       it. */
+    continuations.stopped(open.path, found === null ? '' : addressOf(open.held, found.held));
+    if (found === null) return done(null);
+    // Stopping is its own state, said before the run ends rather than after: a
+    // window drawing a turn being ended is not a window drawing a turn that is
+    // going. The adapter's `busy` off moves it to idle when it really is over;
+    // the move at the end is the answer for a conversation with nothing to stop.
+    states.move(named(found.path), 'stopping', Date.now());
+    await found.held.stop();
+    states.move(named(found.path), 'idle', Date.now());
     return done(null);
   });
 
-  /** Hold the run between steps, or let it go on. Both the conversation's own
-   *  session and any check running beside it, so pressing it once holds
-   *  everything the person can see. */
+  /** Hold the run between steps, or let it go on. A press holds everything the
+   *  person can see. */
   handle<null>(CHANNEL.waitForMe, (_event, args) => {
     const [on] = args;
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null || typeof on !== 'boolean') return Promise.resolve(done(null));
-    open.held.checking?.holdOn(on);
     sessionAt(open, where)?.holdOn(on);
     return Promise.resolve(done(null));
   });
@@ -10833,13 +11590,6 @@ function register(): void {
     const open = projectAt(where);
     if (open === null) return done(false);
     const picked = asAnswers(answers);
-    // Whichever session asked. A check running in a copy draws its card into
-    // the same thread, and answering it into the conversation behind would have
-    // returned quietly false and left the run waiting forever.
-    if (open.held.checking?.answerAsked(id, picked) === true) {
-      answered(open, where);
-      return done(true);
-    }
     const took = sessionAt(open, where)?.answerAsked(id, picked) ?? false;
     if (took) answered(open, where);
     return done(took);
@@ -10851,40 +11601,9 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return done(false);
-    // Same again for the Guard's own questions: the check in a copy asks them
-    // too, and it is the one that has to hear the answer.
-    if (open.held.checking?.answer(callId, decision as Decision) === true) {
-      answered(open, where);
-      return done(true);
-    }
     const took = sessionAt(open, where)?.answer(callId, decision as Decision) ?? false;
     if (took) answered(open, where);
     return done(took);
-  });
-
-  /**
-   * The full-size pair, fetched at the moment somebody opens a strip.
-   *
-   * Two pictures of a web page are the better part of a megabyte once they are
-   * text rather than bytes, and a long conversation can hold a dozen strips. So
-   * the thumbnails travel with the change and the real thing waits to be asked
-   * for — which it usually never is, because the strip stays shut unless
-   * somebody wants a closer look.
-   *
-   * Looked for across every open project rather than only the one in front: a
-   * change can arrive for a folder somebody has just switched away from, and
-   * the window is perfectly entitled to draw it when they switch back.
-   */
-  handle<VisualFrames>(CHANNEL.visualFrames, async (_event, args) => {
-    const [changeId] = args;
-    if (typeof changeId !== 'string' || changeId.trim() === '') return fail(NO_SUCH_PICTURE);
-    const held = workspaces.open.find((one) => one.held.looking.frames.has(changeId))?.held;
-    const pair = held?.looking.frames.get(changeId);
-    if (pair === undefined) return fail(NO_SUCH_PICTURE);
-
-    const [before, after] = await Promise.all([readPicture(pair.before), readPicture(pair.after)]);
-    if (before === null || after === null) return fail(NO_SUCH_PICTURE);
-    return done({ before, after });
   });
 
   handle<string | null>(CHANNEL.chooseFolder, async () => {
@@ -11202,6 +11921,12 @@ function register(): void {
     const [address, bounds] = args;
     const again = args[2] === true;
     const box = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    /* One view for the whole window, so the call says which project's page this
+       is. A call that names another one, or none, is about a page that is not
+       this one — refused rather than pointed at whichever page happens to be
+       up. */
+    const named = pageNamed(whereIn(args));
+    if (named === null) return fail(NOT_THIS_PAGE);
     // No box and no press means there is nowhere to draw it, which is how the
     // pane says it has closed. No box *with* a press means "the same place,
     // again" — the one thing the reload button asks for.
@@ -11218,9 +11943,17 @@ function register(): void {
     ) {
       return done(null);
     }
+    /* The address rule, at the one place that would load it. The window's address
+       bar hands over what somebody typed, and this view is not a way to read
+       this machine's own files: anything the rule turns down leaves the pane
+       empty rather than loading. */
+    if (asAddress(address) === null) {
+      dropPageView();
+      return done(null);
+    }
     const view = makePageView();
     if (view === null) return done(null);
-    pageProject = projectAt(whereIn(args))?.path ?? null;
+    pageProject = named;
     if (box !== null) {
       view.setBounds({
         x: Math.round(box.x as number),
@@ -11242,44 +11975,14 @@ function register(): void {
   });
 
   /* A sheet, a menu or a modal would be painted under a native view, so the
-     window says when one is open and the page steps out of the way. */
+     window says when one is open and the page steps out of the way. The call
+     names the project whose page it is: a call about another project's page is
+     refused rather than hiding the one on screen. */
   handle<null>(CHANNEL.pageHidden, (_event, args) => {
     const [hidden] = args;
+    if (pageNamed(whereIn(args)) === null) return Promise.resolve(fail(NOT_THIS_PAGE));
     pageView?.setVisible(hidden !== true);
     return Promise.resolve(done(null));
-  });
-
-  handle<null>(CHANNEL.watchStart, async (_event, args) => {
-    const [says] = args;
-    const view = pageView;
-    if (view === null) {
-      return fail({
-        what: 'There is no page open to watch.',
-        because: 'Open the project’s page first, then press it again.',
-        actionLabel: 'Got it',
-      });
-    }
-    // A window nobody can see hands back the last thing it composited, so a run
-    // started behind something else would be a run of stale pictures.
-    if (mainWindow === null || mainWindow.isDestroyed() || mainWindow.isMinimized()) {
-      return fail({
-        what: 'I can only watch a window that is on screen.',
-        because: 'Bring Graphe to the front and press it again.',
-        actionLabel: 'Got it',
-      });
-    }
-    await pageWatching?.stop().catch(() => undefined);
-    pageWatching = await watchWhileUsed(
-      view.webContents,
-      typeof says === 'string' && says.trim() !== '' ? { says } : {},
-    );
-    return done(null);
-  });
-
-  handle<Recording | null>(CHANNEL.watchStop, async () => {
-    const run = (await pageWatching?.stop().catch(() => null)) ?? null;
-    pageWatching = null;
-    return done(run);
   });
 
   handle<SpendLimit | null>(CHANNEL.spendLimit, () => Promise.resolve(done(fleet.ceiling)));
@@ -11443,6 +12146,9 @@ if (!app.requestSingleInstanceLock()) {
     applyContentPolicy();
     applyPermissionPolicy();
     watchTheCeiling();
+    // Before the window can open anything: what the last launch was in the
+    // middle of. Nothing it finds is started again.
+    readWhatWasRunning();
     register();
     createWindow();
     app.on('activate', () => {
@@ -11452,9 +12158,17 @@ if (!app.requestSingleInstanceLock()) {
     // that went away. Nothing above them to report to, nothing to stop them, and
     // they spend until they are done.
     await endStrays().catch(() => 0);
+    // And the shells this app started: they are the person's, but they are
+    // children of this process, and leaving them orphaned is not tidying up.
+    terminals.closeAll();
     // And servers. A helper is known by its filename; a server is whatever
     // somebody asked for, so it is known only because we wrote it down.
     await endStrayServers().catch(() => 0);
+    // Where every conversation's files are, written down from the copies this
+    // app already kept. Runs once, on the profile that predates the registry.
+    await migrateWorkspacesOnce().catch((cause: unknown) => {
+      log.line('warn', 'workspace migration did not finish', { cause: String(cause) });
+    });
     // And the copies of the project those conversations were working in.
     await sweepStrayCheckouts().catch(() => 0);
     /* And everything else this app leaves behind. Only the safe categories,
@@ -11467,31 +12181,23 @@ if (!app.requestSingleInstanceLock()) {
       .catch(() => undefined);
     // Add-ons install through Pi's package manager, which shells out to npm.
     // Saying so on the page beats failing on the press.
-    void npmOnPath().then((here) => {
-      npmIsHere = here;
+    void npmInReach().then((here) => {
       log.line('info', 'npm', { here });
     });
-    // And the copy kept ready for work checked before it lands. Warm is worth
-    // having for as long as the app is up, not for as long as it is installed.
-    await rm(join(workFolder(), 'kept'), { recursive: true, force: true }).catch(
-      () => undefined,
-    );
     // Work that was going when this last closed, back on its board. It starts
     // programs by name like anything else, so it waits for the shell first.
     await pathIsWide();
     await pickUpWhereWeLeftOff().catch(() => undefined);
-    // What somebody asked for over and over, picked up where it left off. One
-    // that came round while this was shut is done once — see whenNext.
-    await standingFile().catch(() => null);
-    watchTheClock();
     /* The agent runtime is 810ms of import, and it used to be paid by whoever
        opened the first project — so the slowest thing the app does was the
        first thing anybody asked of it. The window is up by now and nothing is
        being asked of the machine. */
     setImmediate(() => warmUp());
-    // A fresh Mac has no git, and finding that out inside "open folder" reads
-    // as the app failing rather than as one thing missing.
-    if (!(await probeGit())) send(null, { type: 'notice', ...GIT_MISSING, because: GIT_MISSING.because });
+    /* A fresh Mac has no git, and finding that out inside "open folder" reads
+       as the app failing rather than as one thing missing. Said app-wide rather
+       than into a conversation: on that machine there is no conversation yet,
+       and the window is the one that draws the sentence. */
+    for (const one of await whatIsMissing()) sayAppWide(one);
     readToldAboutReview();
     void sweepScratch();
     watchForANewerOne();
@@ -11510,7 +12216,7 @@ if (!app.requestSingleInstanceLock()) {
    * expect, the moment the work is done the app lets itself go.
    */
   app.on('window-all-closed', () => {
-    if (mustStayUp()) return;
+    if (stillGoing()) return;
     closeSession();
     if (process.platform !== 'darwin') app.quit();
   });

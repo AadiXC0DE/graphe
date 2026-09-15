@@ -1,12 +1,16 @@
+// @vitest-environment jsdom
 /** How far research goes, and what that actually changes. "Deeper" used to be a
  *  stronger adjective in the same sentence; these are the numbers that make it
- *  work somebody could count. */
+ *  work somebody could count.
+ *  Source text, not behaviour: the task tool's own ceiling sentence; no behavioural test can reach it — tools.ts cannot be imported under jsdom. */
 
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import HowToWork, { type Plans } from '../src/components/HowToWork';
 import { HELPER_TOTAL_MAX, MOST_AT_ONCE } from '../src/cost/fleet';
-import { MOST_APART } from '../src/agent/pi/tools';
 import {
   asResearch,
   chooseDepth,
@@ -21,6 +25,44 @@ import {
   researchWords,
 } from '../src/agent/research';
 import { capsNow } from '../src/work/capacity';
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+function close(): void {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+}
+
+/* The three rows only exist once the menu is open, so every test here presses
+   the chip first — the way somebody reaches them. */
+afterEach(() => {
+  close();
+  chooseDepth(DEFAULT_DEPTH);
+});
+
+function openTheMenu(plans: Plans): HTMLDivElement {
+  close();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => {
+    root?.render(createElement(HowToWork, { plans, onPlans: () => undefined }));
+  });
+  act(() => host?.querySelector<HTMLButtonElement>('.ways__chip')?.click());
+  return host;
+}
+
+/** How far to go, as the buttons the menu actually draws. */
+function rungs(where: HTMLElement): HTMLButtonElement[] {
+  return [...where.querySelectorAll<HTMLButtonElement>('[role="group"] [role="option"]')];
+}
 
 describe('how far it goes', () => {
   it('is three settings, and each one asks for more work than the last', () => {
@@ -95,11 +137,12 @@ describe('how far it goes', () => {
 });
 
 describe('a split that will actually start', () => {
-  /* A fan-out refused on the way out costs the turn and answers nothing, so the
-     number asked for is checked against the two ceilings that can refuse it. */
+  /* A fan-out refused on the way out costs the turn and answers nothing, so
+     what the ladder asks for is checked against what the machine admits. The
+     ladder's own numbers are static — the window cannot read the machine — and
+     the fleet does the clamping. */
   it('never asks for more helpers than are admitted at once', () => {
     expect(MOST_TOGETHER).toBeLessThanOrEqual(MOST_AT_ONCE.helper);
-    expect(DEEPEST_SPLIT).toBeLessThanOrEqual(MOST_APART);
     for (const one of DEPTHS) {
       expect(one.atOnce).toBeLessThanOrEqual(DEEPEST_SPLIT);
     }
@@ -129,7 +172,8 @@ describe('a split that will actually start', () => {
   });
 
   it('tells the helper tool what its own ceiling is', () => {
-    const tools = readFileSync(new URL('../src/agent/pi/tools.ts', import.meta.url), 'utf8');
+    // `import.meta.url` is not a file URL under jsdom, so this reads by path.
+    const tools = readFileSync('src/agent/pi/tools.ts', 'utf8');
     expect(tools).toContain('At most ${String(MOST_AT_ONCE.helper)} helpers work at once');
   });
 
@@ -139,24 +183,39 @@ describe('a split that will actually start', () => {
     // against someone re-capping `away` and stalling a second project.
     expect(MOST_AT_ONCE.helper).toBe(HELPER_TOTAL_MAX);
     expect(MOST_AT_ONCE.away).toBe(Number.POSITIVE_INFINITY);
-    expect(MOST_APART).toBe(8);
   });
 });
 
 describe('the control, where the hand already is', () => {
-  const panel = readFileSync(new URL('../src/components/HowToWork.tsx', import.meta.url), 'utf8');
-
   it('lives behind the research choice rather than in a screen somebody has to find', () => {
-    expect(panel).toContain("plans === 'research' ? (");
-    expect(panel).toContain('DEPTHS.map');
-    expect(panel).toContain('chooseDepth(one.id)');
+    const where = openTheMenu('research');
+    const rows = rungs(where);
+    expect(rows).toHaveLength(DEPTHS.length);
     // Every setting says what it does, in the same shape as the choice above it.
-    expect(panel).toContain('{one.note}');
+    rows.forEach((row, at) => {
+      expect(row.textContent).toContain(DEPTHS[at]?.name);
+      expect(row.textContent).toContain(DEPTHS[at]?.note);
+    });
+    // Pressing one is choosing it. No separate screen, no settings page.
+    act(() => rows[DEPTHS.length - 1]?.click());
+    expect(chosenDepth()).toBe(DEPTHS[DEPTHS.length - 1]?.id);
+
+    // And a conversation that is not researching has no such rows at all.
+    expect(rungs(openTheMenu('auto'))).toHaveLength(0);
   });
 
   it('names how far in plain words and only once it has been changed', () => {
-    expect(panel).toContain('howFar !== DEFAULT_DEPTH');
-    expect(researchWords.howFar).toBe('How far to go');
+    const where = openTheMenu('research');
+    expect(where.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe(
+      researchWords.howFar,
+    );
+    // The chip keeps its own words at the setting nobody had to choose…
+    expect(where.querySelector('.ways__label')?.textContent).toBe(researchWords.chip);
+    // …and wears the setting itself once somebody has.
+    act(() => rungs(where)[DEPTHS.length - 1]?.click());
+    expect(where.querySelector('.ways__label')?.textContent).toBe(
+      howDeep(DEPTHS[DEPTHS.length - 1]?.id ?? DEFAULT_DEPTH).name,
+    );
   });
 
   it('asks each helper to say what it is looking into', () => {

@@ -10,6 +10,8 @@
  *
  * The precise cases run on files made of strings; the last one runs on this
  * repository, which is a real project with a real design system in it.
+ *
+ *  Source text, not behaviour: the last case re-reads the files the graph names, to check the counts it reports; the graph's only other input is the fixtures below.
  */
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -384,8 +386,13 @@ describe('pointed at this project', () => {
     expect(line.file).toBe('src/components/ActivityLine.tsx');
     expect(line.shared).toBe(true);
     expect(line.used.length).toBeGreaterThan(1);
-    expect(line.times).toBe(
-      line.used.reduce((sum, where) => {
+    // The total is what it reports per file, and for the app's own source a
+    // plain search finds the same rows. A test file that builds one with
+    // `createElement` is a use too, which the plain search cannot see.
+    expect(line.times).toBe(line.used.reduce((sum, where) => sum + where.times, 0));
+    const source = line.used.filter((where) => where.kind === 'source');
+    expect(source.reduce((sum, where) => sum + where.times, 0)).toBe(
+      source.reduce((sum, where) => {
         const text = readFileSync(path.join(__dirname, '..', where.file), 'utf8');
         return sum + (text.match(/<ActivityLine[\s/>]/g) ?? []).length;
       }, 0),

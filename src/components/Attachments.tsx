@@ -23,8 +23,13 @@ export type Attachment = {
   name: string;
   /** The second line: "PNG · 820 KB", or "Figma file". */
   note: string;
-  /** An object URL, for images only. Revoked when the chip is removed. */
+  /** An object URL, for images only. Revoked when the chip is removed, or as
+   *  soon as the shell has written the bytes down and handed back a thumbnail. */
   preview?: string;
+  /** The shell's own small copy, once the bytes are stored under their content
+   *  id. What the chip is drawn from after the object URL is let go; the
+   *  original is never read to draw a row. */
+  thumb?: string;
   /** Where a link points. Nothing follows it yet. */
   url?: string;
   /** The bytes themselves, held for whoever ends up sending them. */
@@ -55,15 +60,28 @@ function Mark({ kind }: { kind: AttachmentKind }) {
 
 /** The thumbnail, or the mark if the picture will not draw.
  *
+ * The stored small copy comes first: it is the one the shell wrote down, so a
+ * chip keeps its picture after the object URL it arrived with has been let go —
+ * across a reload, a switch of conversation, or the tab being closed and opened
+ * again. The local address is the fallback, for the moment between dropping a
+ * file and the shell answering.
+ *
  * A file that says it is a PNG and cannot be shown is not worth a broken-image
  * icon and a question. The chip quietly becomes the same chip a PDF gets: the
  * name is still right, and the name is what somebody reads. */
-function Thumbnail({ kind, preview }: { kind: AttachmentKind; preview: string | undefined }) {
+function Thumbnail({
+  kind,
+  preview,
+  thumb,
+}: {
+  kind: AttachmentKind;
+  preview: string | undefined;
+  thumb: string | undefined;
+}) {
   const [broken, setBroken] = useState(false);
-  if (preview === undefined || broken) return <Mark kind={kind} />;
-  return (
-    <img className="chip__thumb" src={preview} alt="" onError={() => setBroken(true)} />
-  );
+  const drawn = thumb ?? preview;
+  if (drawn === undefined || broken) return <Mark kind={kind} />;
+  return <img className="chip__thumb" src={drawn} alt="" onError={() => setBroken(true)} />;
 }
 
 /**
@@ -130,7 +148,7 @@ export default function Attachments({
         return (
           <li className={`chip chip--${item.kind} ${going ? 'chip--leaving' : ''}`} key={item.id}>
             <span className="chip__mark" aria-hidden="true">
-              <Thumbnail kind={item.kind} preview={item.preview} />
+              <Thumbnail kind={item.kind} preview={item.preview} thumb={item.thumb} />
             </span>
 
             <span className="chip__text">

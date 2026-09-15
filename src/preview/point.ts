@@ -1227,6 +1227,7 @@ function pointerScript(): string {
 
     go.addEventListener('click', function (event) { swallow(event); send_(); });
     box.addEventListener('keydown', function (event) {
+      if (event.isComposing) return;
       if (event.key === 'Escape') { swallow(event); closeNote(); return; }
       if (event.key === 'Enter' && !event.shiftKey) { swallow(event); send_(); }
     });

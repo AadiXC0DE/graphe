@@ -1,35 +1,69 @@
+// @vitest-environment jsdom
 /** The panel's bands, in the two places they were worst.
  *
  * Where the project is and what is uncommitted were three stacked bands, so
  * learning one thing meant reading all three. And the goal had four numbers in
  * four places and no band at all: the objective was written to disk, the steps
  * were on the composer, the time was nowhere and the rounds were in the log.
+ *
+ *  Source text, not behaviour: the panel's markup, the App's review-queue and diff wiring, the shell's line reading and two stylesheets; no behavioural test can reach it — nothing renders the panel, jsdom never applies a stylesheet, and the shell only runs under Electron.
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { type ReactElement, act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import ActivityLine from '../src/components/ActivityLine';
+import Steps from '../src/components/Steps';
+import type { StepTurn } from '../src/lib/steps';
 import { parseNumstat } from '../src/lib/gitstatus';
+
+/** Read from the root: this file runs under jsdom, where `import.meta.url` is
+ *  not a file URL. */
+const read = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8');
+
+const hosts: HTMLElement[] = [];
+afterEach(() => {
+  for (const host of hosts.splice(0)) host.remove();
+});
+
+/** `act` only runs when this is set, and jsdom here does not set it. */
+const reactGlobals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+
+beforeAll(() => {
+  reactGlobals.IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+/** A component as it really draws. */
+async function draw(element: ReactElement): Promise<HTMLElement> {
+  const host = document.createElement('div');
+  document.body.append(host);
+  hosts.push(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(element);
+  });
+  return host;
+}
+
+/** The press. */
+async function press(where: HTMLElement, selector: string): Promise<void> {
+  const button = where.querySelector<HTMLElement>(selector);
+  expect(button, `no ${selector}`).toBeDefined();
+  await act(async () => button?.click());
+}
 
 /** The band's own wording for the two totals, read out of the panel so the
  *  test and the screen cannot say different things. */
 const GIT_LINES = (added: number, removed: number): string | null =>
   added === 0 && removed === 0 ? null : `+${String(added)} \u2212${String(removed)}`;
 
-const panel = readFileSync(
-  fileURLToPath(new URL('../src/components/Overview.tsx', import.meta.url)),
-  'utf8',
-);
-const styles = readFileSync(
-  fileURLToPath(new URL('../src/components/Overview.css', import.meta.url)),
-  'utf8',
-);
-const progress = readFileSync(
-  fileURLToPath(new URL('../src/components/BuildProgress.css', import.meta.url)),
-  'utf8',
-);
+const panel = read('src/components/Overview.tsx');
+const styles = read('src/components/Overview.css');
+const progress = read('src/components/BuildProgress.css');
 
 /** One band's markup, from its heading to the end of its section. */
 function band(heading: string): string {
@@ -58,7 +92,6 @@ describe('the Git band', () => {
      tall on any branch longer than about twelve characters. */
   it('keeps the branch name out of the button', () => {
     const git = band('GIT');
-    expect(git).not.toContain('gitband__onto');
     expect(git).toContain('title={COMMITTING.what(git.branch)}');
   });
 
@@ -112,26 +145,15 @@ describe('the checklist', () => {
 });
 
 describe('the two ways into the review queue', () => {
-  it('has a row on the shelf, with what is waiting on it', () => {
-    const shelf = readFileSync(
-      fileURLToPath(new URL('../src/components/Sidebar.tsx', import.meta.url)),
-      'utf8',
-    );
-    // One list for both states now; `tests/sidebar.test.ts` renders it.
-    expect(shelf).toContain("on: p.onReviewQueue,");
-    expect(shelf).toContain("id: 'review'");
-    expect(shelf).toContain('one.count === undefined || one.count === 0 ? null : (');
-  });
-
   it('is fed from the queue rather than from a count kept beside it', () => {
-    const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
+    const app = read('src/App.tsx');
     expect(app).toContain('reviewsWaiting={waitingToReview(reviewQ)}');
   });
 });
 
 describe('the Changes press opens the change', () => {
   it('reads the diff and hands it to the sheet', () => {
-    const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
+    const app = read('src/App.tsx');
     const at = app.indexOf('onOpenChanges={() => {');
     expect(at).toBeGreaterThan(-1);
     const block = app.slice(at, app.indexOf('}}', app.indexOf('bridge.changesLook', at)));
@@ -153,10 +175,7 @@ describe('what changed, in lines', () => {
   });
 
   it('is read only when there is something to read', () => {
-    const main = readFileSync(
-      fileURLToPath(new URL('../electron/main.ts', import.meta.url)),
-      'utf8',
-    );
+    const main = read('electron/main.ts');
     const at = main.indexOf('async function readGitStatusWithLines(');
     const block = main.slice(at, main.indexOf('\n}', at));
     expect(block).toContain('if (git === null || !git.dirty) return git;');
@@ -166,34 +185,58 @@ describe('what changed, in lines', () => {
 });
 
 describe('the two textures in the thread', () => {
-  const line = readFileSync(
-    fileURLToPath(new URL('../src/components/ActivityLine.tsx', import.meta.url)),
-    'utf8',
-  );
-  const steps = readFileSync(
-    fileURLToPath(new URL('../src/components/Steps.tsx', import.meta.url)),
-    'utf8',
-  );
+  /** One step of a run, with the command behind it recorded the way the
+   *  conversation records it. */
+  const A_STEP: StepTurn = {
+    kind: 'did',
+    id: 'c1',
+    callId: 'k1',
+    state: 'done',
+    label: 'Reading hero.css',
+    real: 'sed -n 1,40p src/hero.css',
+  };
 
   /* Both audiences get the same row shape. Which of the two texts is on it is
      the whole difference. */
-  it('leads with the command where "Show me" is on, and keeps the sentence as the tooltip', () => {
-    expect(line).toContain("const machinery = lead && real !== undefined && real !== '';");
-    expect(line).toContain('title={machinery ? label : undefined}');
-    expect(line).toContain('<code className="activity__lead">{real}</code>');
-    expect(steps).toContain('lead={showMe}');
+  it('leads with the command where "Show me" is on, and keeps the sentence as the tooltip', async () => {
+    const line = await draw(
+      createElement(ActivityLine, { state: 'done', label: A_STEP.label, real: A_STEP.real, lead: true }),
+    );
+    expect(line.querySelector('.activity__lead')?.textContent).toBe(A_STEP.real);
+    expect(line.querySelector('.activity')?.getAttribute('title')).toBe(A_STEP.label);
+    expect(line.querySelector('.activity__label')).toBeNull();
+
+    // And the steps row is what hands "Show me" down to it: closed, the head
+    // carries no command; opened, every step does.
+    const run = await draw(createElement(Steps, { steps: [A_STEP], showMe: true }));
+    await press(run, '.steps__head');
+    const step = run.querySelector('.steps__list .activity');
+    expect(step?.querySelector('.activity__lead')?.textContent).toBe(A_STEP.real);
+    expect(step?.getAttribute('title')).toBe(A_STEP.label);
   });
 
-  it('never draws the command twice', () => {
-    expect(line).toContain("real !== undefined && real !== '' && !machinery ?");
+  it('never draws the command twice', async () => {
+    // Off, the command hangs under the sentence that already said what happened.
+    const quiet = await draw(
+      createElement(ActivityLine, { state: 'done', label: A_STEP.label, real: A_STEP.real }),
+    );
+    expect(quiet.querySelector('.activity__real')?.textContent).toBe(A_STEP.real);
+    expect(quiet.querySelector('.activity__lead')).toBeNull();
+
+    // On, it is the line, and the sentence is behind it: one command, once.
+    const leading = await draw(
+      createElement(ActivityLine, { state: 'done', label: A_STEP.label, real: A_STEP.real, lead: true }),
+    );
+    expect(leading.querySelectorAll('code')).toHaveLength(1);
+    expect(leading.querySelector('.activity__real')).toBeNull();
   });
 
   /* "Failed" reads as the app announcing a disaster; a command that exited
      non-zero is usually the ordinary business of an afternoon. The row already
      names what was run, so the word only has to say how it went. */
-  it('says a step failed in a word rather than a card, and calmly', () => {
-    expect(line).toContain(
-      "{state === 'failed' ? <span className=\"activity__failed\">Did not work</span> : null}",
-    );
+  it('says a step failed in a word rather than a card, and calmly', async () => {
+    const failed = await draw(createElement(ActivityLine, { state: 'failed', label: A_STEP.label }));
+    expect(failed.querySelector('.activity')?.className).toContain('activity--failed');
+    expect(failed.querySelector('.activity__failed')?.textContent).toBe('Did not work');
   });
 });

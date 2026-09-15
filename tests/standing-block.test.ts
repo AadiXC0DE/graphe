@@ -67,6 +67,17 @@ describe('the block itself', () => {
     expect(said).toContain('and 20 more steps');
   });
 
+  /* Ticking rules travel with a checklist. A goal somebody stated, with no list
+     under it, is not a reason to tell the model how to move a list it has
+     not got. */
+  it('keeps the step-ticking rules off a goal with no list', () => {
+    const onlyAGoal = standingBlock({ list: null, goal: 'make the tests pass', notes: [] }) ?? '';
+    expect(onlyAGoal).toContain('Working toward: make the tests pass');
+    expect(onlyAGoal).not.toContain(standingWords.rules[0]);
+    const withAList = standingBlock({ list: list(0, 3), goal: null, notes: [] }) ?? '';
+    expect(withAList).toContain(standingWords.rules[0]);
+  });
+
   it('carries a bounded couple of notes, and none when there are none', () => {
     const withNotes = standingBlock({
       list: null,
@@ -131,12 +142,16 @@ describe('the budget', () => {
 
 describe('what the chip says about it', () => {
   it('says the size in characters, because a token count right for one model is wrong for the next', () => {
-    expect(saysPromptSize(48_000)).toBe('Prompt 48k');
-    expect(saysPromptSize(1_250)).toBe('Prompt 1.3k');
+    expect(saysPromptSize(48_000)).toBe('Prompt about 48k characters (a rough count)');
+    expect(saysPromptSize(1_250)).toBe('Prompt about 1.3k characters (a rough count)');
   });
 
-  it('says when it is over budget, which is the only time it matters', () => {
-    expect(saysPromptSize(PROMPT_BUDGET + 1)).toContain('over budget');
-    expect(saysPromptSize(PROMPT_BUDGET - 1)).not.toContain('over budget');
+  /* Nothing here knows the model's window, and nothing may pretend to. */
+  it('labels it as an estimate and never as a limit', () => {
+    const said = saysPromptSize(PROMPT_BUDGET + 5_000);
+    expect(said).toContain('rough count');
+    expect(said).not.toMatch(/token|limit|window|context/i);
+    // The app's own aim is named in the same units, and only when it is passed.
+    expect(standingWords.pastTheAim(PROMPT_BUDGET)).toContain('60k characters');
   });
 });

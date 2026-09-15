@@ -10,7 +10,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import Sidebar from '../src/components/Sidebar';
+import Sidebar, { CONTEXT_WORDS } from '../src/components/Sidebar';
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,8 +47,6 @@ function draw(over: Record<string, unknown> = {}): HTMLDivElement {
         open: true,
         onToggle: NOTHING,
         onAsk: NOTHING,
-        onDesign: NOTHING,
-        onCanvas: NOTHING,
         onHistory: NOTHING,
         onReviews: NOTHING,
         onReviewQueue: NOTHING,
@@ -97,11 +95,20 @@ describe('the places the shelf can go', () => {
     expect(placesIn(draw({ open: false }), '.shelf__act', 'tip').at(-1)).toBe('Settings');
   });
 
+  /* A place is drawn only where it has somewhere to go, and the retired
+     designer screens have nowhere at all — so their names must not be in the
+     list at any width. */
   it('leaves out a place with nowhere to go, in both', () => {
-    expect(placesIn(draw({ open: true, onCanvas: undefined }), '.shelf__more', 'tip')).not.toContain('Canvas');
+    expect(placesIn(draw({ open: true, onHistory: undefined }), '.shelf__more', 'tip')).not.toContain('History');
     act(() => root?.unmount());
     host?.remove();
-    expect(placesIn(draw({ open: false, onCanvas: undefined }), '.shelf__act', 'tip')).not.toContain('Canvas');
+    expect(placesIn(draw({ open: false, onHistory: undefined }), '.shelf__act', 'tip')).not.toContain('History');
+  });
+
+  it('offers no name for a screen that was retired', () => {
+    const tips = [...placesIn(draw({ open: true }), '.shelf__more', 'tip')];
+    expect(tips).not.toContain('Canvas');
+    expect(tips).not.toContain('Design');
   });
 });
 
@@ -134,5 +141,88 @@ describe('the one control that folds it', () => {
     expect(draw({ open: false }).querySelector('.shelf__mark')?.getAttribute('data-tip')).toBe(
       'Show sidebar ⌘B',
     );
+  });
+});
+
+/** Pressing, the way React hears it. */
+function press(node: Element | null): void {
+  if (node === null) throw new Error('nothing to press');
+  act(() => {
+    (node as HTMLElement).click();
+  });
+}
+
+describe('whose context each thing is', () => {
+  const MINE = [{ id: 'r1', kind: 'image' as const, name: 'the mock.png', note: 'PNG' }];
+  const SHARED = [{ id: 'p1', name: 'the brief.pdf', note: 'what the site is for' }];
+
+  function band(where: HTMLElement): HTMLElement | null {
+    return where.querySelector<HTMLElement>('.shelf__band:not(.shelf__band--scroll)');
+  }
+
+  function scopes(where: HTMLElement): readonly string[] {
+    return [...where.querySelectorAll('.shelf__scope')].map((one) => one.textContent ?? '');
+  }
+
+  function pressIn(where: HTMLElement, label: string): HTMLButtonElement | null {
+    return (
+      [...where.querySelectorAll<HTMLButtonElement>('.shelf__share')].find((one) =>
+        (one.textContent ?? '').includes(label),
+      ) ?? null
+    );
+  }
+
+  it('draws what this chat was given to work from, under its own scope', () => {
+    const where = draw({ pinned: MINE });
+    const here = band(where);
+    expect(here?.querySelector('.shelf__caption')?.textContent).toBe(CONTEXT_WORDS.title);
+    expect(scopes(where)).toEqual([CONTEXT_WORDS.mine]);
+    expect(
+      [...here!.querySelectorAll('.shelf__pin .shelf__rowname')].map((one) => one.textContent),
+    ).toEqual(['the mock.png']);
+  });
+
+  it('draws what the project offers every chat, labelled and apart', () => {
+    const where = draw({ pinned: MINE, shared: SHARED });
+    expect(scopes(where)).toEqual([CONTEXT_WORDS.mine, CONTEXT_WORDS.project]);
+    expect(
+      [...where.querySelectorAll('.shelf__scope ~ .shelf__list .shelf__pin .shelf__rowname')].map(
+        (one) => one.textContent,
+      ),
+    ).toContain('the brief.pdf');
+  });
+
+  it('draws no band at all when there is nothing to say', () => {
+    expect(band(draw({ pinned: [] }))).toBeNull();
+    expect(band(draw({ pinned: [], shared: [] }))).toBeNull();
+  });
+
+  /* The press this replaces said a reference had been given to the project
+     while nothing carried it there. Both are now real: sharing writes the
+     project's own list, which every new chat is then given, and the chat it
+     came from keeps what it was given. */
+  it('hands one of this chat’s own to the project when asked', () => {
+    const handed: string[] = [];
+    const where = draw({ pinned: MINE, onShare: (one: { id: string }) => handed.push(one.id) });
+    const share = pressIn(where, CONTEXT_WORDS.share);
+    expect(share).not.toBeNull();
+    press(share);
+    expect(handed).toEqual(['r1']);
+  });
+
+  it('takes one off the project’s list when asked', () => {
+    const stopped: string[] = [];
+    const where = draw({ shared: SHARED, onStopSharing: (id: string) => stopped.push(id) });
+    const stop = pressIn(where, CONTEXT_WORDS.unshare);
+    expect(stop).not.toBeNull();
+    press(stop);
+    expect(stopped).toEqual(['p1']);
+  });
+
+  /* A shelf with nowhere to put a shared item is a list rather than a control:
+     a press that cannot do anything is worse than no press. */
+  it('offers no press where the shelf cannot act on one', () => {
+    expect(pressIn(draw({ pinned: MINE }), CONTEXT_WORDS.share)).toBeNull();
+    expect(pressIn(draw({ shared: SHARED }), CONTEXT_WORDS.unshare)).toBeNull();
   });
 });

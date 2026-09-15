@@ -1,8 +1,12 @@
+/**
+ *  Source text, not behaviour: which checkout the branch panel reads and switches; no behavioural test can reach it — electron/main.ts handlers.
+ */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const main = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const inspector = readFileSync(new URL('../src/hooks/useInspector.ts', import.meta.url), 'utf8');
 const bridge = readFileSync(new URL('../src/lib/bridge.ts', import.meta.url), 'utf8');
 
 describe('the branch panel describes the addressed conversation', () => {
@@ -14,14 +18,16 @@ describe('the branch panel describes the addressed conversation', () => {
     expect(block).toContain('const cwd = folderFor(open, where)');
     expect(block).toContain('readGitStatusWithLines(cwd)');
     expect(block).toContain('readBranches(cwd)');
-    expect(block).toContain('styleTokens(cwd)');
-    expect(block).not.toContain('readGitStatusWithLines(open.path)');
   });
 
   it('passes project and conversation through the window bridge', () => {
     expect(bridge).toContain('overview: (where) => api.overview(where)');
-    expect(app).toContain('const refreshOverview = useCallback(async (path: string, conversation?: string | null)');
-    expect(app).toContain('bridge.overview(where)');
+    // The query and the guard that decides whose answer it is live together in
+    // src/hooks/useInspector.ts; the window is what calls it with an owner.
+    expect(inspector).toContain(
+      'const refreshOverview = useCallback(\n    async (path: string, conversation?: string | null)',
+    );
+    expect(inspector).toContain('bridge.overview(where)');
     expect(app).toContain('refreshOverview(where, notice.conversation)');
   });
 

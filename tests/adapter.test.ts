@@ -1016,13 +1016,11 @@ describe('Plan holds every write back', () => {
     expect(order).not.toContain('executed');
   });
 
-  /* Each of these changes nothing in the folder in front of you and everything
-     in a copy of it, which is why the Guard calls them read-only and why Plan
-     cannot lean on that answer alone. */
-  it('withholds work that would run in a copy of the project', async () => {
+  /* A builder changes nothing in the folder in front of you and everything in
+     a copy of it, which is why the Guard calls it read-only and why Plan cannot
+     lean on that answer alone. */
+  it('withholds a helper that would run in a copy of the project', async () => {
     const { order, runThroughPi } = harness({ planMode: true });
-    expect((await runThroughPi(call('set_going', { pieces: [{ doing: 'rewrite the app' }] })))?.block).toBe(true);
-    expect((await runThroughPi(call('try_ways', { ways: ['one', 'two'] })))?.block).toBe(true);
     expect((await runThroughPi(call('task', { task: 'redo the nav', role: 'builder' })))?.block).toBe(true);
     expect(order).not.toContain('executed');
   });

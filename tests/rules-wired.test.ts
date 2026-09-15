@@ -9,6 +9,8 @@
  * judged; and it must not be skippable by somebody turning their own questions
  * off, because the top rung is a decision about the Guard and a project's rules
  * are a decision the team made.
+ *
+ *  Source text, not behaviour: the rules layer being consulted by the live tool loop; no behavioural test can reach it — the loop needs a Pi session only the shell can build.
  */
 
 import { readFileSync } from 'node:fs';
@@ -239,9 +241,13 @@ describe('checks let go when the files move underneath them', () => {
     expect(MAIN.slice(at, at + 200)).toContain('filesMovedIn(open)');
   });
 
-  it('says so when work is taken in, one piece or a whole set', () => {
-    // Both write into the project from a copy, and neither passes a tool call
-    // through the Guard on the way.
-    expect(MAIN.split('filesMovedIn(open)').length - 1).toBeGreaterThanOrEqual(3);
+  it('says so when a piece of work is taken into the project', () => {
+    // A copy writing into the project does not pass a tool call through the
+    // Guard on the way, so the shell says the files moved instead. The whole-set
+    // press went with the board; taking one piece in is the one left.
+    const at = MAIN.indexOf('handle<Away>(CHANNEL.keepAway');
+    expect(at).toBeGreaterThan(-1);
+    const block = MAIN.slice(at, MAIN.indexOf('handle<', at + 1));
+    expect(block).toContain('filesMovedIn(open)');
   });
 });

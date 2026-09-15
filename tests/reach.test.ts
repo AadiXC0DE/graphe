@@ -8,6 +8,8 @@
  *
  * Nothing here touches a disk, an address or a process: the shelf is handed a
  * fake store and the rest is pure.
+ *
+ *  Source text, not behaviour: that no start line anywhere under src/ fetches whatever is newest; the guard is over every file at once rather than over a call a test can make.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -36,6 +38,7 @@ import {
   type ReachStore,
 } from '../src/agent/pi/reach';
 import { everything, type Pack } from '../src/agent/pi/packages';
+import { SAYS } from '../src/components/AddMore';
 
 const A_PACK: Pack = {
   id: 'pi-lens',
@@ -414,13 +417,9 @@ describe('what any of this says out loud', () => {
   });
 
   it('never names a mechanism on the screen that draws them', () => {
-    const source = readFileSync(
-      new URL('../src/components/AddMore.tsx', import.meta.url),
-      'utf8',
-    );
-    const copy = /export const SAYS = \{[\s\S]*?\n\} as const;/.exec(source)?.[0];
-    expect(copy).toBeDefined();
-    noJargon(copy ?? '', 'SAYS');
+    // The words the screen draws from, as the screen gets them, rather than a
+    // block of them cut out of the file: a nested group is checked too.
+    noJargon(JSON.stringify(SAYS), 'SAYS');
   });
 });
 

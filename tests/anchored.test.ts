@@ -4,13 +4,17 @@
  * The model chip drew its menu `absolute`, so in the composer it landed above
  * the chip and in Settings it landed at the sheet's top right, half off the
  * window. Measured from the control there is no ancestor to be wrong about.
+ *
+ *  Source text, not behaviour: the chip's portal target and its undrawn-until-placed guard, plus the stylesheet rule jsdom cannot compute; no behavioural test can reach them — jsdom has no frames and computes no CSS.
  */
 
 import { act, createElement, createRef, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import ThinkingWith from '../src/components/ThinkingWith';
 import { useAnchored, type Side } from '../src/lib/anchored';
+import type { ConnectionState } from '../src/lib/ipc';
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -117,17 +121,78 @@ describe('the model chip uses it', () => {
     expect(chip).toContain('{open && at !== null && !nothingConnected ? (');
     expect(chip).toContain('createPortal(');
     expect(chip).toContain('document.body,');
-    // Nothing left to place it against an ancestor.
-    expect(styles).not.toContain('.thinking--bare .thinking__menu {');
+    // Measured from the control, so the menu rule never places it against an
+    // ancestor. (The `.thinking--bare .thinking__menu` rule that did is gone.)
     const rule = styles.slice(styles.indexOf('.thinking__menu {'));
     expect(rule.slice(0, rule.indexOf('}'))).not.toContain('position: absolute');
   });
 
+  /** One account with one model, which is all the chip needs to have a menu. */
+  const ONE_ACCOUNT: ConnectionState = {
+    chosen: { providerId: 'anthropic', modelId: 'haiku' },
+    chosenThinking: 'off',
+    providers: [
+      {
+        providerId: 'anthropic',
+        name: 'Anthropic',
+        methods: [],
+        oauthLabel: null,
+        apiKeyLabel: null,
+        connected: true,
+        available: true,
+        subscription: false,
+        models: [
+          {
+            id: 'haiku',
+            label: 'Haiku',
+            available: true,
+            rates: { input: 0.8, output: 4 },
+            contextWindow: null,
+            takesImages: true,
+            thinking: ['off'],
+          },
+        ],
+      },
+    ],
+  };
+
+  /** The chip rendered and pressed open, its menu where the window holds it. */
+  function openChip(): void {
+    const where = document.createElement('div');
+    document.body.append(where);
+    host = where;
+    root = createRoot(where);
+    act(() => {
+      root?.render(
+        createElement(ThinkingWith, {
+          state: ONE_ACCOUNT,
+          onSelect: () => undefined,
+          onConnect: () => undefined,
+        }),
+      );
+    });
+    act(() => where.querySelector<HTMLElement>('.thinking__chip')?.click());
+  }
+
   /* A press inside the menu is a press inside the control: portalled, it is no
      longer a descendant of the chip, so the outside-click check has to say so. */
-  it('does not close itself when somebody presses inside the menu', async () => {
-    expect(await read('src/components/ThinkingWith.tsx')).toContain(
-      'menu.current?.contains(event.target as Node) === true',
-    );
+  it('does not close itself when somebody presses inside the menu', () => {
+    openChip();
+    const menu = document.querySelector('.thinking__menu');
+    expect(menu).not.toBeNull();
+
+    // A row of the menu, which is in the document rather than in the chip.
+    const row = menu?.querySelector('.thinking__menuhead') ?? null;
+    expect(row).not.toBeNull();
+    act(() => {
+      row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(document.querySelector('.thinking__menu')).not.toBeNull();
+
+    // And a press away from it still shuts it.
+    act(() => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(document.querySelector('.thinking__menu')).toBeNull();
   });
 });

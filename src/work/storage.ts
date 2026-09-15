@@ -16,6 +16,8 @@
 import { access, readdir, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, join } from 'node:path';
+import { searchPath } from '../share/run';
+import { admissionWords } from './admission';
 
 /** One folder under the app's data directory, as a Settings row reads it. */
 export type Folder = { name: string; bytes: number; files: number };
@@ -28,6 +30,10 @@ export type Sweepable = {
   at: number;
   /** True while it still holds a change nobody has brought in. */
   holdsWork: boolean;
+  /** The conversation writing in it right now, or null when nobody is. A run
+   *  holds its folder for its whole length, so this is the live writer, and a
+   *  folder with one is not finished with however old it looks. */
+  inUse: string | null;
 };
 
 /** How long each kind is kept after it stopped being used.
@@ -81,9 +87,16 @@ export function folderNamed(userData: string, name: string): string | null {
  * Which of these have been finished with long enough to go.
  *
  * Nothing holding work is ever swept, whatever its age — that is the first
- * check and there is no branch around it. `because` is the sentence to show,
- * and it says what stayed as well as what goes, because "cleared 41 folders" on
- * its own is the sort of line somebody reads twice.
+ * check and there is no branch around it. Neither is anything somebody is
+ * writing in this minute: a run holds its folder from the moment it starts to
+ * the last tool it touches, and a folder it is still in is the one folder whose
+ * removal loses work no save and no version has seen. Both are said, not
+ * silently kept, because a folder left behind without a reason is a folder
+ * somebody has to go looking for.
+ *
+ * `because` is the sentence to show, and it says what stayed as well as what
+ * goes, because "cleared 41 folders" on its own is the sort of line somebody
+ * reads twice.
  */
 export function whatToSweep(
   all: readonly Sweepable[],
@@ -92,8 +105,14 @@ export function whatToSweep(
   const sweep: Sweepable[] = [];
   const kept: Sweepable[] = [];
   let holding = 0;
+  const busy: string[] = [];
 
   for (const one of all) {
+    if (one.inUse !== null) {
+      busy.push(one.inUse);
+      kept.push(one);
+      continue;
+    }
     if (one.holdsWork) {
       holding += 1;
       kept.push(one);
@@ -104,18 +123,33 @@ export function whatToSweep(
     else kept.push(one);
   }
 
-  return { sweep, kept, because: whyThat(sweep.length, holding, kept.length - holding) };
+  return {
+    sweep,
+    kept,
+    because: whyThat(sweep.length, holding, kept.length - holding - busy.length, busy),
+  };
 }
 
-function whyThat(going: number, holding: number, recent: number): string {
-  if (going === 0) {
-    if (holding > 0) return `Nothing to clear. ${saysCount(holding)} still holding work you have not brought in.`;
-    return 'Nothing to clear. Everything here is still in use.';
-  }
+function whyThat(
+  going: number,
+  holding: number,
+  recent: number,
+  busy: readonly string[],
+): string {
   const stays: string[] = [];
-  if (holding > 0) stays.push(`${saysCount(holding)} still holding work`);
+  // The app's own sentence for a folder somebody is writing in, with who has
+  // it: a person meeting this in Settings reads what they read anywhere else,
+  // and a folder left behind without a name is one they have to go looking for.
+  const writing = [...new Set(busy)];
+  if (writing.length > 0) stays.push(`${admissionWords.workingHere}: ${writing.join(', ')}`);
+  if (holding > 0) stays.push(`${saysCount(holding)} still holding work you have not brought in`);
   if (recent > 0) stays.push(`${String(recent)} too recent to touch`);
   const tail = stays.length === 0 ? '' : ` Staying: ${stays.join(', ')}.`;
+  if (going === 0) {
+    return stays.length === 0
+      ? 'Nothing to clear. Everything here is still in use.'
+      : `Nothing to clear.${tail}`;
+  }
   return `${saysCount(going)} finished with and ready to clear.${tail}`;
 }
 
@@ -206,12 +240,16 @@ async function measure(folder: string): Promise<{ bytes: number; files: number }
  * touch work, and a caller that reached here with something holding work has
  * already gone wrong. Anything that cannot be removed is left alone and counted
  * out — a folder in use is not a failure worth stopping the rest for.
+ *
+ * A folder somebody is writing in is refused again here for the same reason,
+ * and matters more: the decision was taken a moment ago, and a run that started
+ * since is one whose files are being written this instant.
  */
 export async function sweep(picked: readonly Sweepable[]): Promise<{ removed: number; freed: number }> {
   let removed = 0;
   let freed = 0;
   for (const one of picked) {
-    if (one.holdsWork) continue;
+    if (one.holdsWork || one.inUse !== null) continue;
     const { bytes } = await measure(one.path).catch(() => ({ bytes: 0, files: 0 }));
     try {
       await rm(one.path, { recursive: true, force: true });
@@ -228,15 +266,12 @@ export async function sweep(picked: readonly Sweepable[]): Promise<{ removed: nu
 /* npm                                                                         */
 /* -------------------------------------------------------------------------- */
 
-/** Is `npm` reachable from here?
- *
- *  Add-ons install through it and `npx`-based tools need it. A Mac that has
- *  never had Node on it has neither, and the failure without this is a page
- *  that says an install went wrong rather than a page that says what is
- *  missing. Nothing is run: the file is looked for on PATH. */
-export async function npmOnPath(): Promise<boolean> {
-  const names = process.platform === 'win32' ? ['npm.cmd', 'npm.exe'] : ['npm'];
-  for (const folder of (process.env['PATH'] ?? '').split(delimiter)) {
+/** Is one of these names on PATH, and runnable? Nothing is run: the file is
+ *  looked for, which is the whole question for a program somebody may not
+ *  have installed. The path is handed in rather than read off `process.env`
+ *  so a caller can ask about the same path a child would be started with. */
+async function onPath(names: readonly string[], path: string): Promise<boolean> {
+  for (const folder of path.split(delimiter)) {
     if (folder === '') continue;
     for (const name of names) {
       const found = await access(join(folder, name), constants.X_OK)
@@ -246,4 +281,28 @@ export async function npmOnPath(): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Is `npm` reachable from here?
+ *
+ *  Add-ons install through it and `npx`-based tools need it. A Mac that has
+ *  never had Node on it has neither, and the failure without this is a page
+ *  that says an install went wrong rather than a page that says what is
+ *  missing.
+ *
+ *  Read against the same path `runHelper` searches, not the one this process
+ *  inherited: an app opened from the dock has almost no path, and answering
+ *  "no npm" about a machine whose npm is in `/opt/homebrew/bin` would refuse an
+ *  install the child could have run. */
+export async function npmOnPath(): Promise<boolean> {
+  return onPath(process.platform === 'win32' ? ['npm.cmd', 'npm.exe'] : ['npm'], searchPath());
+}
+
+/** Is Homebrew reachable from here?
+ *
+ *  The npm line on the add-ons screen offers `brew install node` to somebody
+ *  who has Homebrew and the download page alone to somebody who does not: a
+ *  command they cannot run is worse than no command at all. */
+export async function brewOnPath(): Promise<boolean> {
+  return onPath(['brew'], searchPath());
 }

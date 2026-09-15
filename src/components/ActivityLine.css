@@ -129,6 +129,20 @@
   overflow-wrap: anywhere;
 }
 
+/* Pressed open: the whole of what the step printed, at the length it was
+   written. Nothing moves above it — the row grows, the feed does not jump. */
+.activity__detail--open {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+
+.activity__count {
+  margin-left: 0.4em;
+  color: var(--text-faint);
+}
+
 /* "Show me": the real command, path or operation, under the sentence that
    already said what happened in the user's own words.
 
@@ -257,5 +271,15 @@
   margin-top: 1px;
   font-size: var(--text-2xs);
   color: var(--accent);
+  white-space: nowrap;
+}
+
+/* A step the record never saw finish. Muted rather than accented: nothing went
+   wrong with it, the conversation simply stopped where it was. */
+.activity__interrupted {
+  flex: none;
+  margin-top: 1px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
   white-space: nowrap;
 }

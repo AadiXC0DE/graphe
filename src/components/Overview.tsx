@@ -1,31 +1,24 @@
-import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import Away from './Away';
 import Waiting from './Waiting';
 import CostMeter from './CostMeter';
-import { SAYS as DESIGN, type DesignPart } from './DesignView';
 import History from './History';
 import Lines from './Lines';
-import Landing, { type Outcome } from './Landing';
-import type { Verdict } from '../design/gate';
 import Swatches from './Swatches';
 import type {
+  ReviewEntry,
   Artifact,
   Away as AwayState,
   Decision,
-  EveryKind,
   Fetched,
   GitSnapshot,
-  InStep as InStepState,
-  Landing as LandingState,
   PutBack,
   RepoOverview,
   SavedVersion,
   Money,
   SpendLimit,
-  StyleToken,
   Swatch,
 } from '../lib/ipc';
-import type { DesignReading } from '../design/reading';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import { elapsedWords } from '../work/goal';
@@ -206,8 +199,6 @@ export type OverviewView = {
   research: readonly ResearchEntry[];
   references: readonly Reference[];
   versions: readonly SavedVersion[];
-  /** What each version looked like, by id. Absent ids have no picture. */
-  pictures: Readonly<Record<string, string>>;
   /** The versions this project's owner chose to keep at the top. */
   kept: readonly string[];
   putBack: PutBack | null;
@@ -222,36 +213,9 @@ export type OverviewView = {
   /** Things the last turn made that are worth looking at. */
   artifacts: readonly Artifact[];
   swatches: readonly Swatch[];
-  /** This project's own tokens, and where they live. */
-  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
-  /** What the stylesheet says about itself, read once and shared with the
-   *  design view rather than worked out twice. */
-  reading: DesignReading;
-  /** The Figma file this project is kept in step with, and what has moved on in
-   *  it. Null until the shell has answered. */
-  inStep: InStepState | null;
-  /** What can be done with the work now it exists. Null until the shell has
-   *  answered, so the band does not flash on the way in. */
-  landing: LandingState | null;
-  /** How far the waiting work has moved from the pictures agreed to, or null
-   *  when nothing was compared. */
-  gate: Verdict | null;
-  /** Which line is in force, by id. */
-  howMuch: string;
-  /** Which of the two things that can send anywhere is going, if either is. */
-  going: 'developer' | 'online' | null;
-  /** What came of the last one that went. */
-  landed: Outcome;
-  /** What was just decided about work that was waiting, and how to undo it. */
-  decided: { letIn: boolean; undoTo: string } | null;
   /** What is happening whether or not this window is open. Null until the shell
    *  has answered. */
   away: AwayState | null;
-  /** The other folders with work of their own, so the board can show all of it
-   *  at once. Empty on the ordinary day. */
-  elsewhere: readonly { where: string; project: string; away: AwayState }[];
-  /** What the folder in front is called. */
-  project: string;
   /** Now, epoch ms, so the board draws the same twice. */
   clock: number;
 };
@@ -272,8 +236,6 @@ type Props = {
   /** Save where the project stands right now, so it can be come back to. This
    is the commit: the one thing the hand can do with the changed set as a whole. */
   onSave: (repo?: string) => void;
-  /** Open everything about how the project looks, at one of its bands. */
-  onOpenDesign: (part: DesignPart) => void;
   /** Open the whole history, drawn as lines, for one of the projects here. */
   onOpenGraph: (repo?: string) => void;
   /** Move the project onto another of its lines of work. */
@@ -285,33 +247,22 @@ type Props = {
   onFetch?: (repo?: string) => Promise<Fetched | null>;
   /** Fast-forward that branch onto its upstream. */
   onFastForward?: (repo?: string) => Promise<Fetched | null>;
-  /** Write a page of what changed, for somebody who is not you. */
-  onShare: (repo?: string) => void;
   /** Said whenever the panel changes which project it is showing. */
   onWhose?: (name: string | null) => void;
 
-  /** Let the work that is waiting in, or set it aside. */
-  onDecide: (letIn: boolean) => void;
-  /** Move the line the work has to cross before it is stopped. */
-  onHowMuch: (id: string) => void;
-  /** Write the work up and put it where a developer picks it up. */
-  onHandOver: (repo?: string) => void;
-  /** Open an address in the person's own browser. */
-  onOpenLink: (address: string) => void;
   /** Read what changed, as a diff. The band names the count and this is the
    *  press behind it; left off, the count is drawn and cannot be opened. */
   onOpenChanges?: () => void;
   /** Open the Review screen, at an entry when one is named. */
   onOpenReview?: (id?: string) => void;
+  /** What is waiting for this conversation. Owned by the app, which is the only
+   *  place that knows which conversation this panel is about. */
+  waitingHere?: readonly ReviewEntry[];
   /** Open one of the files the last turn made, in the person's editor. */
   onOpenFile: (file: string) => void;
 
   /* ---------------------------------------------- while you are not looking */
 
-  /** Get on with something whether or not this window stays open. */
-  onKeepGoing: (text: string) => void;
-  /** Ask for work that waits until another piece has finished. */
-  onStartAfter: (text: string, after: string) => void;
   /** Take one of those results into the project. */
   onKeepAway: (id: string) => void;
   /** Stop one, or let its result go. */
@@ -320,20 +271,6 @@ type Props = {
   onAnswerAway: (id: string, callId: string, decision: Decision) => void;
   /** Say something to a piece that is still going, without stopping it. */
   onSayToAway?: (id: string, text: string, where?: string) => Promise<boolean>;
-  /** Hold the several goes at one job up against each other. */
-  onCompareWays?: (named: string, where?: string) => void;
-  /** Let a waiting piece off its wait. */
-  onStopWaiting?: (id: string, where?: string) => void;
-  /** Take several finished pieces in, in the order they need. */
-  onTakeAll?: (ids: readonly string[], where?: string) => void;
-  onAddRepeat: (
-    doing: string,
-    every: EveryKind,
-    at: { hour: number; minute: number },
-    on?: number,
-  ) => void;
-  onSwitchRepeat: (id: string, on: boolean) => void;
-  onForgetRepeat: (id: string) => void;
 };
 
 /** What each thing the turn made is, as a small drawing. The icon is the only
@@ -379,48 +316,14 @@ const MADE_ICONS: Readonly<Record<Artifact['kind'], ReactElement>> = {
  *  of what the work looked like; the thread is the archive. */
 const WINDOW = 6;
 
-type TabId = 'work' | 'look' | 'history';
+type TabId = 'work' | 'history';
 
-/** Three questions, in the order they get asked: what is happening, how does it
- *  look, and what can I go back to. */
+/** Two questions, in the order they get asked: what is happening, and what can
+ *  I go back to. */
 const TABS: readonly { id: TabId; name: string }[] = [
   { id: 'work', name: 'Work' },
-  { id: 'look', name: 'Look' },
   { id: 'history', name: 'History' },
 ];
-
-/** The bands of the design view, as rows you can come at them through. Each
- *  says what it holds, because a list of six nouns down a panel is a list
- *  nobody presses. */
-const LOOKS: readonly { id: DesignPart; note: string; trouble?: boolean }[] = [
-  { id: 'styles', note: 'Colour, type, spacing (move any of them)' },
-  { id: 'motion', note: 'How long things take, and how they start and stop' },
-  { id: 'drift', note: 'Written by hand, a hair off one of yours', trouble: true },
-  { id: 'legible', note: 'Pairings nobody can read', trouble: true },
-  { id: 'widths', note: 'The same page at every size' },
-  { id: 'figma', note: 'What has moved on in the file you follow', trouble: true },
-];
-
-const DESIGN_PARTS = DESIGN.parts;
-
-/** How much is in each band. Null where a number would say nothing — nobody has
- *  asked for the pictures yet, or there is no file being followed. */
-type Counts = { styles: number; motion: number; drift: number; legible: number; figma: number };
-
-function countable(view: OverviewView): Counts {
-  return {
-    styles: view.styles?.tokens.length ?? 0,
-    motion: view.reading.motion?.moves.length ?? 0,
-    drift: view.reading.drifted.length,
-    legible: view.reading.unreadable.length,
-    figma: view.inStep?.moved.length ?? 0,
-  };
-}
-
-function countOf(part: DesignPart, counts: Counts): number | null {
-  if (part === 'widths') return null;
-  return counts[part];
-}
 
 /**
  * The panel on the right: what is going on, what changed, what can be gone back
@@ -440,36 +343,23 @@ export default function Overview({
   onShowSplit,
   onLimit,
   onSave,
-  onOpenDesign,
   onOpenGraph,
   onSwitchBranch,
   onCreateBranch,
   onFetch,
   onFastForward,
-  onShare,
   onWhose,
 
-  onDecide,
-  onHowMuch,
-  onHandOver,
-  onOpenLink,
   onOpenChanges,
+  waitingHere = [],
   onOpenReview,
   onOpenFile,
-  onKeepGoing,
-  onStartAfter,
   onKeepAway,
   onDropAway,
   onAnswerAway,
   onSayToAway,
-  onCompareWays,
-  onStopWaiting,
-  onTakeAll,
-  onAddRepeat,
-  onSwitchRepeat,
-  onForgetRepeat,
 }: Props) {
-  const { now, git, research, references, versions, pictures, kept, putBack, spent, onAPlan, ceiling, busy, showMe } =
+  const { now, git, research, references, versions, kept, putBack, spent, onAPlan, ceiling, busy, showMe } =
     view;
   const { artifacts, swatches } = view;
   /** A folder holding several projects is the one case the rest of this panel
@@ -542,12 +432,8 @@ export default function Overview({
     } catch { /* private mode */ }
   }, [lookedUpOpen]);
 
-  /* A dot on the tab, not a number: the count matters once you are looking, and
-     before that it is only worth knowing there is something. */
-  const look = useMemo(() => countable(view), [view]);
-  const trouble = look.drift + look.legible + look.figma;
-  /* The same dot on Work, for the one thing on this panel that cannot move
-     without a person: something that carried on and then stopped to ask. */
+  /* A dot on Work, for the one thing on this panel that cannot move without a
+     person: something that carried on and then stopped to ask. */
   const asking = (view.away?.pieces ?? []).some((one) => one.question !== null);
 
   const shownResearch = research.slice(-WINDOW);
@@ -578,7 +464,7 @@ export default function Overview({
             }}
           >
             {one.name}
-            {(one.id === 'look' && trouble > 0) || (one.id === 'work' && asking) ? (
+            {one.id === 'work' && asking ? (
               <span className="overview__tabmark" aria-hidden="true" />
             ) : null}
           </button>
@@ -754,7 +640,7 @@ export default function Overview({
 
       {/* What has finished and is waiting. One press per row into the Review
           screen, which is the one place work is decided about. */}
-      {several ? null : <Waiting onOpen={onOpenReview} clock={view.clock} />}
+      {several ? null : <Waiting entries={waitingHere} onOpen={onOpenReview} clock={view.clock} />}
 
       {/* A folder holding several projects keeps its own commit press: the band
           above is one project's, and there is no folder-level branch to be on. */}
@@ -899,65 +785,15 @@ export default function Overview({
       <section className="overview__block">
         <Away
           away={view.away}
-          elsewhere={view.elsewhere}
-          project={view.project}
           now={view.clock}
           busy={busy}
-          onKeepGoing={onKeepGoing}
-          onStartAfter={onStartAfter}
           onKeep={onKeepAway}
           onDrop={onDropAway}
           onAnswer={onAnswerAway}
           onSay={onSayToAway}
-          onAgainst={onCompareWays}
-          onStopWaiting={onStopWaiting}
-          onTakeAll={onTakeAll}
-          onAddRepeat={onAddRepeat}
-          onSwitchRepeat={onSwitchRepeat}
-          onForgetRepeat={onForgetRepeat}
         />
       </section>
 
-      </div>
-
-      <div role="tabpanel" id="overview-panel-look" aria-labelledby="overview-tab-look" hidden={tab !== 'look'}>
-      {/* A way in rather than the thing itself. All of this used to stack up in
-          a 328px column: a palette four squares to a row, and a list of every
-          movement in the project underneath it. It opens over the work now,
-          with the width to be read. */}
-      <section className="overview__block">
-        <h2 className="overview__title">How it looks</h2>
-        <ul className="overview__ways">
-          {LOOKS.map((one) => {
-            const found = countOf(one.id, look);
-            return (
-              <li key={one.id}>
-                <button
-                  type="button"
-                  className="overview__way"
-                  onClick={() => onOpenDesign(one.id)}
-                >
-                  <span className="overview__waytext">
-                    <span className="overview__wayname">{DESIGN_PARTS[one.id]}</span>
-                    <span className="overview__waynote">{one.note}</span>
-                  </span>
-                  {found === null || found === 0 ? null : (
-                    <span
-                      className={`overview__waycount ${one.trouble && found > 0 ? 'overview__waycount--wrong' : ''}`}
-                    >
-                      {found}
-                    </span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        <button type="button" className="overview__do" onClick={() => onOpenDesign('styles')}>
-          Open it
-          <kbd className="overview__key">⌘D</kbd>
-        </button>
-      </section>
       </div>
 
       <div role="tabpanel" id="overview-panel-history" aria-labelledby="overview-tab-history" hidden={tab !== 'history'}>
@@ -981,7 +817,6 @@ export default function Overview({
         )}
         <History
           versions={whose === null ? versions : (view.repoVersions[whose.name] ?? [])}
-          pictures={pictures}
           kept={kept}
           putBack={putBack}
           onPutBack={(versionId) => onPutBack(versionId, whose?.name)}
@@ -997,25 +832,6 @@ export default function Overview({
         />
       </div>
 
-      </div>
-
-      <div className="overview__foot">
-        <Landing
-          state={view.landing}
-          busy={busy}
-          showMe={showMe}
-          going={view.going}
-          outcome={view.landed}
-          decided={view.decided}
-          gate={view.gate}
-          howMuch={view.howMuch}
-          onDecide={onDecide}
-          onHowMuch={onHowMuch}
-          onUndo={(versionId) => onPutBack(versionId, whose?.name)}
-          onHandOver={() => onHandOver(whose?.name)}
-          onShare={() => onShare(whose?.name)}
-          onOpenLink={onOpenLink}
-        />
       </div>
 
       {spent === null ? null : (

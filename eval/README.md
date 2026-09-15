@@ -6,13 +6,12 @@ This folder is the held-out task set. `tasks.json` is **pinned** — never chang
 
 ## What is in the set
 
-20 tasks. Not 2,294 (SWE-bench) and not 500 (Verified). Those cost ~$0.75/instance and a day to run 50; this is the harness's own "day's work" set: unit tests that already describe the loop's invariants, plus three integration checks that only pass once the loop is closed.
+17 tasks. Not 2,294 (SWE-bench) and not 500 (Verified). Those cost ~$0.75/instance and a day to run 50; this is the harness's own "day's work" set: unit tests that already describe the loop's invariants, plus three integration checks that only pass once the loop is closed.
 
 Each task maps to a real test file we already run, so the runner can report without a new harness:
 
 - `R-01`, `R-04`, `R-06`, `gate`, `gate-wired`, `boundary`, `guard`, `checks` — loop invariants
 - `afterCall-wired`, `repair-cap`, `reviewer-one-file` — items 1–2 of #13
-- `try-ways-taste`, `auto-selection` — item 3
 - `gate-drift` — item 5 (the ahead bet)
 - `handling`, `landing`, `history`, `cost` — safety/undo/meter that SWE-bench does not measure and that will **cost points** against a harness that just runs
 

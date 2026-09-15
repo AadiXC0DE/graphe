@@ -9,14 +9,14 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-462 packages, generated 2026-09-04 from package-lock.json ecd5ed2154f0d88e.
+471 packages, generated 2026-09-15 from package-lock.json f3f37c90d97d8e7a.
 
 ## Summary
 
 | Package | Version | Licence |
 | --- | --- | --- |
 | [@antfu/install-pkg](https://github.com/antfu/install-pkg#readme) | 1.1.0 | MIT |
-| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.91.1 | MIT |
+| [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | 0.123.0 | MIT |
 | [@aws-crypto/crc32](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/crc32) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/sha256-browser](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/sha256-browser) | 5.2.0 | Apache-2.0 |
 | [@aws-crypto/sha256-js](https://github.com/aws/aws-sdk-js-crypto-helpers/tree/master/packages/sha256-js) | 5.2.0 | Apache-2.0 |
@@ -45,13 +45,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@babel/runtime](https://babel.dev/docs/en/next/babel-runtime) | 7.29.2 | MIT |
 | [@braintree/sanitize-url](https://github.com/braintree/sanitize-url#readme) | 7.1.2 | MIT |
 | [@chevrotain/types](https://chevrotain.io/documentation/) | 11.1.2 | Apache-2.0 |
-| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-client](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-protocol](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
-| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.84.3 | MIT |
+| [@earendil-works/chord](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-agent-core](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-ai](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-coding-agent](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-telemetry](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@earendil-works/pi-tui](https://github.com/earendil-works/pi) | 0.85.1 | MIT |
+| [@esbuild/darwin-arm64](https://github.com/evanw/esbuild) | 0.28.1 | MIT |
 | [@google/genai](https://github.com/googleapis/js-genai#readme) | 1.52.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.1 | MIT |
 | [@huggingface/jinja](https://github.com/huggingface/huggingface.js) | 0.5.9 | MIT |
@@ -66,7 +66,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [@mariozechner/clipboard](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mariozechner/clipboard-darwin-arm64](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
 | [@mariozechner/clipboard-darwin-universal](https://github.com/badlogic/clipboard) | 0.3.9 | MIT |
-| [@mermaid-js/parser](https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme) | 1.2.0 | MIT |
+| [@mermaid-js/parser](https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme) | 1.2.1 | MIT |
 | [@modelcontextprotocol/sdk](https://modelcontextprotocol.io) | 1.30.0 | MIT |
 | [@nodable/entities](https://github.com/nodable/val-parsers) | 2.1.0 | MIT |
 | [@protobufjs/aspromise](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
@@ -78,13 +78,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@protobufjs/path](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/pool](https://github.com/dcodeIO/protobuf.js) | 1.1.0 | BSD-3-Clause |
 | [@protobufjs/utf8](https://github.com/protobufjs/protobuf.js) | 1.1.2 | BSD-3-Clause |
-| [@shikijs/core](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/engine-javascript](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/langs](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/primitive](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/themes](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
-| [@shikijs/types](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
+| [@shikijs/core](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/engine-javascript](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/langs](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/primitive](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/themes](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
+| [@shikijs/types](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
 | [@shikijs/vscode-textmate](https://github.com/shikijs/vscode-textmate) | 10.0.2 | MIT |
 | [@silvia-odwyer/photon-node](https://silvia-odwyer.github.io/photon/) | 0.3.4 | Apache-2.0 |
 | [@smithy/core](https://github.com/smithy-lang/smithy-typescript/tree/main/packages/core) | 3.24.3 | Apache-2.0 |
@@ -96,6 +96,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [@smithy/types](https://github.com/smithy-lang/smithy-typescript/tree/main/packages/types) | 4.14.2 | Apache-2.0 |
 | [@smithy/util-buffer-from](https://github.com/awslabs/smithy-typescript/tree/main/packages/util-buffer-from) | 2.2.0 | Apache-2.0 |
 | [@smithy/util-utf8](https://github.com/awslabs/smithy-typescript/tree/main/packages/util-utf8) | 2.3.0 | Apache-2.0 |
+| [@stablelib/base64](https://github.com/StableLib/stablelib/tree/master/packages/base64) | 1.0.1 | MIT |
 | [@types/d3](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3) | 7.4.3 | MIT |
 | [@types/d3-array](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-array) | 3.2.2 | MIT |
 | [@types/d3-axis](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-axis) | 3.0.6 | MIT |
@@ -130,12 +131,13 @@ not modified their source. Their names and marks belong to their respective owne
 | [@types/geojson](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/geojson) | 7946.0.16 | MIT |
 | [@types/hast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast) | 3.0.5 | MIT |
 | [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdast) | 4.0.4 | MIT |
-| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.1 | MIT |
+| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.2 | MIT |
 | [@types/retry](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.12.0 | MIT |
 | [@types/trusted-types](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types) | 2.0.7 | MIT |
 | [@types/unist](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist) | 3.0.3 | MIT |
-| [@ungap/structured-clone](https://github.com/ungap/structured-clone#readme) | 1.3.3 | ISC |
+| [@ungap/structured-clone](https://github.com/ungap/structured-clone#readme) | 1.4.0 | ISC |
 | [@upsetjs/venn.js](https://github.com/upsetjs/venn.js) | 2.0.0 | MIT |
+| [@xterm/xterm](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
 | [abbrev](http://github.com/isaacs/abbrev-js) | 1.1.1 | ISC |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
 | [adm-zip](https://github.com/cthackers/adm-zip) | 0.5.18 | MIT |
@@ -244,6 +246,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [es-object-atoms](https://github.com/ljharb/es-object-atoms#readme) | 1.1.2 | MIT |
 | [es-toolkit](https://es-toolkit.dev) | 1.50.0 | MIT |
 | [es6-error](https://github.com/bjyoungblood/es6-error) | 4.1.1 | MIT |
+| [esbuild](https://github.com/evanw/esbuild) | 0.28.1 | MIT |
 | [escape-html](https://github.com/component/escape-html) | 1.0.3 | MIT |
 | [escape-string-regexp](https://github.com/sindresorhus/escape-string-regexp) | 4.0.0 | MIT |
 | [etag](https://github.com/jshttp/etag) | 1.8.1 | MIT |
@@ -253,9 +256,11 @@ not modified their source. Their names and marks belong to their respective owne
 | [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) | 8.6.2 | MIT |
 | [extend](https://github.com/justmoon/node-extend) | 3.0.2 | MIT |
 | [fast-deep-equal](https://github.com/epoberezkin/fast-deep-equal#readme) | 3.1.3 | MIT |
+| [fast-sha256](https://github.com/dchest/fast-sha256-js) | 1.3.0 | Unlicense |
 | [fast-uri](https://github.com/fastify/fast-uri) | 3.1.5 | BSD-3-Clause |
 | [fast-xml-builder](https://github.com/NaturalIntelligence/fast-xml-builder) | 1.2.0 | MIT |
 | [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) | 5.7.3 | MIT |
+| [fastdom](https://github.com/wilsonpage/fastdom) | 1.0.12 | MIT |
 | [fetch-blob](https://github.com/node-fetch/fetch-blob#readme) | 3.2.0 | MIT |
 | [finalhandler](https://github.com/pillarjs/finalhandler) | 2.1.1 | MIT |
 | [flatbuffers](https://google.github.io/flatbuffers/) | 25.9.23 | Apache-2.0 |
@@ -326,14 +331,14 @@ not modified their source. Their names and marks belong to their respective owne
 | [lru-cache](https://github.com/isaacs/node-lru-cache) | 11.4.0 | BlueOak-1.0.0 |
 | [make-dir](https://github.com/sindresorhus/make-dir) | 3.1.0 | MIT |
 | [marked](https://marked.js.org) | 16.4.2 | MIT |
+| [marked](https://marked.js.org) | 18.0.13 | MIT |
 | [marked](https://marked.js.org) | 18.0.5 | MIT |
-| [marked](https://marked.js.org) | 18.0.9 | MIT |
 | [matcher](https://github.com/sindresorhus/matcher) | 3.0.0 | MIT |
 | [math-intrinsics](https://github.com/es-shims/math-intrinsics#readme) | 1.1.0 | MIT |
 | [mdast-util-to-hast](https://github.com/syntax-tree/mdast-util-to-hast) | 13.2.1 | MIT |
 | [media-typer](https://github.com/jshttp/media-typer) | 1.1.1 | MIT |
 | [merge-descriptors](https://github.com/sindresorhus/merge-descriptors) | 2.0.0 | MIT |
-| [mermaid](https://github.com/mermaid-js/mermaid) | 11.16.1 | MIT |
+| [mermaid](https://github.com/mermaid-js/mermaid) | 11.17.2 | MIT |
 | [micromark-util-character](https://github.com/micromark/micromark/tree/main/packages/micromark-util-character) | 2.1.1 | MIT |
 | [micromark-util-encode](https://github.com/micromark/micromark/tree/main/packages/micromark-util-encode) | 2.0.1 | MIT |
 | [micromark-util-sanitize-uri](https://github.com/micromark/micromark/tree/main/packages/micromark-util-sanitize-uri) | 2.0.1 | MIT |
@@ -351,9 +356,11 @@ not modified their source. Their names and marks belong to their respective owne
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [nan](https://github.com/nodejs/nan) | 2.28.0 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.0.0 | MIT |
+| [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
 | [node-domexception](https://github.com/jimmywarting/node-domexception#readme) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/bitinn/node-fetch) | 2.7.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
+| [node-pty](https://github.com/microsoft/node-pty) | 1.1.0 | MIT |
 | [nopt](https://github.com/npm/nopt) | 5.0.0 | ISC |
 | [npmlog](https://github.com/npm/npmlog) | 5.0.1 | ISC |
 | [object-assign](https://github.com/sindresorhus/object-assign) | 4.1.1 | MIT |
@@ -388,8 +395,8 @@ not modified their source. Their names and marks belong to their respective owne
 | [qs](https://github.com/ljharb/qs) | 6.15.3 | BSD-3-Clause |
 | [range-parser](https://github.com/jshttp/range-parser) | 1.3.0 | MIT |
 | [raw-body](https://github.com/stream-utils/raw-body) | 3.0.2 | MIT |
-| [react](https://react.dev/) | 19.2.8 | MIT |
-| [react-dom](https://react.dev/) | 19.2.8 | MIT |
+| [react](https://react.dev/) | 19.3.0 | MIT |
+| [react-dom](https://react.dev/) | 19.3.0 | MIT |
 | [react-icons](https://github.com/react-icons/react-icons#readme) | 5.7.0 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 3.6.2 | MIT |
 | [regex](https://github.com/slevithan/regex) | 6.1.0 | MIT |
@@ -406,7 +413,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [rw](https://github.com/mbostock/rw) | 1.3.3 | BSD-3-Clause |
 | [safe-buffer](https://github.com/feross/safe-buffer) | 5.2.1 | MIT |
 | [safer-buffer](https://github.com/ChALkeR/safer-buffer) | 2.1.2 | MIT |
-| [scheduler](https://react.dev/) | 0.27.0 | MIT |
+| [scheduler](https://react.dev/) | 0.28.0 | MIT |
 | [semver](https://github.com/npm/node-semver) | 6.3.1 | ISC |
 | [semver](https://github.com/npm/node-semver) | 7.8.0 | ISC |
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
@@ -419,7 +426,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [sharp](https://sharp.pixelplumbing.com) | 0.34.5 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
-| [shiki](https://github.com/shikijs/shiki#readme) | 4.4.2 | MIT |
+| [shiki](https://github.com/shikijs/shiki#readme) | 4.4.3 | MIT |
 | [side-channel](https://github.com/ljharb/side-channel#readme) | 1.1.1 | MIT |
 | [side-channel-list](https://github.com/ljharb/side-channel-list#readme) | 1.0.1 | MIT |
 | [side-channel-map](https://github.com/ljharb/side-channel-map#readme) | 1.0.1 | MIT |
@@ -430,7 +437,9 @@ not modified their source. Their names and marks belong to their respective owne
 | [space-separated-tokens](https://github.com/wooorm/space-separated-tokens) | 2.0.2 | MIT |
 | [sprintf-js](https://github.com/alexei/sprintf.js) | 1.1.3 | BSD-3-Clause |
 | [sql.js](http://github.com/sql-js/sql.js) | 1.14.2 | MIT |
+| [standardwebhooks](https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript) | 1.1.1 | MIT |
 | [statuses](https://github.com/jshttp/statuses) | 2.0.2 | MIT |
+| [strictdom](https://github.com/wilsonpage/strictdom) | 1.0.1 | MIT |
 | [string_decoder](https://github.com/nodejs/string_decoder) | 1.3.0 | MIT |
 | [string-width](https://github.com/sindresorhus/string-width) | 4.2.3 | MIT |
 | [stringify-entities](https://github.com/wooorm/stringify-entities) | 4.0.4 | MIT |
@@ -447,7 +456,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [tslib](https://www.typescriptlang.org/) | 2.8.1 | 0BSD |
 | [type-fest](https://github.com/sindresorhus/type-fest) | 0.13.1 | (MIT OR CC0-1.0) |
 | [type-is](https://github.com/jshttp/type-is) | 2.1.0 | MIT |
-| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.12 | MIT |
+| [typebox](https://github.com/sinclairzx81/typebox) | 1.3.31 | MIT |
 | [typebox](https://github.com/sinclairzx81/typebox) | 1.3.7 | MIT |
 | [undici](https://undici.nodejs.org) | 8.9.0 | MIT |
 | [undici-types](https://undici.nodejs.org) | 6.21.0 | MIT |
@@ -483,6 +492,31 @@ not modified their source. Their names and marks belong to their respective owne
 Optional dependencies for other platforms. They are not in this build, so nothing of theirs
 is redistributed by it — listed only so the absence is deliberate rather than a gap.
 
+- `@esbuild/aix-ppc64`
+- `@esbuild/android-arm`
+- `@esbuild/android-arm64`
+- `@esbuild/android-x64`
+- `@esbuild/darwin-x64`
+- `@esbuild/freebsd-arm64`
+- `@esbuild/freebsd-x64`
+- `@esbuild/linux-arm`
+- `@esbuild/linux-arm64`
+- `@esbuild/linux-ia32`
+- `@esbuild/linux-loong64`
+- `@esbuild/linux-mips64el`
+- `@esbuild/linux-ppc64`
+- `@esbuild/linux-riscv64`
+- `@esbuild/linux-s390x`
+- `@esbuild/linux-x64`
+- `@esbuild/netbsd-arm64`
+- `@esbuild/netbsd-x64`
+- `@esbuild/openbsd-arm64`
+- `@esbuild/openbsd-x64`
+- `@esbuild/openharmony-arm64`
+- `@esbuild/sunos-x64`
+- `@esbuild/win32-arm64`
+- `@esbuild/win32-ia32`
+- `@esbuild/win32-x64`
 - `@img/sharp-darwin-x64`
 - `@img/sharp-libvips-darwin-x64`
 - `@img/sharp-libvips-linux-arm`
@@ -526,7 +560,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @anthropic-ai/sdk 0.91.1
+### @anthropic-ai/sdk 0.123.0
 
 <https://github.com/anthropics/anthropic-sdk-typescript>
 
@@ -813,7 +847,7 @@ Licence: Apache-2.0
 [object Object]
 ```
 
-### @earendil-works/pi-agent-core 0.84.3
+### @earendil-works/chord 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -822,7 +856,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-ai 0.84.3
+### @earendil-works/pi-agent-core 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -831,7 +865,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-client 0.84.3
+### @earendil-works/pi-ai 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -840,7 +874,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-coding-agent 0.84.3
+### @earendil-works/pi-coding-agent 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -849,7 +883,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-protocol 0.84.3
+### @earendil-works/pi-telemetry 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -858,7 +892,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-telemetry 0.84.3
+### @earendil-works/pi-tui 0.85.1
 
 <https://github.com/earendil-works/pi>
 
@@ -867,9 +901,9 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @earendil-works/pi-tui 0.84.3
+### @esbuild/darwin-arm64 0.28.1
 
-<https://github.com/earendil-works/pi>
+<https://github.com/evanw/esbuild>
 
 Licence: MIT
 
@@ -1012,7 +1046,7 @@ Licence: MIT
 > No licence file is published in this package. The declared licence above is the whole
 > of what its author provided.
 
-### @mermaid-js/parser 1.2.0
+### @mermaid-js/parser 1.2.1
 
 <https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme>
 
@@ -1131,7 +1165,7 @@ Licence: BSD-3-Clause
 [object Object]
 ```
 
-### @shikijs/core 4.4.2
+### @shikijs/core 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1141,7 +1175,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/engine-javascript 4.4.2
+### @shikijs/engine-javascript 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1151,7 +1185,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/engine-oniguruma 4.4.2
+### @shikijs/engine-oniguruma 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1161,7 +1195,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/langs 4.4.2
+### @shikijs/langs 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1171,7 +1205,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/primitive 4.4.2
+### @shikijs/primitive 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1181,7 +1215,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/themes 4.4.2
+### @shikijs/themes 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1191,7 +1225,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @shikijs/types 4.4.2
+### @shikijs/types 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -1306,6 +1340,16 @@ Licence: Apache-2.0
 <https://github.com/awslabs/smithy-typescript/tree/main/packages/util-utf8>
 
 Licence: Apache-2.0
+
+```
+[object Object]
+```
+
+### @stablelib/base64 1.0.1
+
+<https://github.com/StableLib/stablelib/tree/master/packages/base64>
+
+Licence: MIT
 
 ```
 [object Object]
@@ -1651,7 +1695,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @types/node 22.20.1
+### @types/node 22.20.2
 
 <https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node>
 
@@ -1691,7 +1735,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @ungap/structured-clone 1.3.3
+### @ungap/structured-clone 1.4.0
 
 <https://github.com/ungap/structured-clone#readme>
 
@@ -1704,6 +1748,16 @@ Licence: ISC
 ### @upsetjs/venn.js 2.0.0
 
 <https://github.com/upsetjs/venn.js>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
+### @xterm/xterm 6.0.0
+
+<https://github.com/xtermjs/xterm.js>
 
 Licence: MIT
 
@@ -2794,6 +2848,16 @@ Licence: MIT
 [object Object]
 ```
 
+### esbuild 0.28.1
+
+<https://github.com/evanw/esbuild>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
 ### escape-html 1.0.3
 
 <https://github.com/component/escape-html>
@@ -2884,6 +2948,16 @@ Licence: MIT
 [object Object]
 ```
 
+### fast-sha256 1.3.0
+
+<https://github.com/dchest/fast-sha256-js>
+
+Licence: Unlicense
+
+```
+[object Object]
+```
+
 ### fast-uri 3.1.5
 
 <https://github.com/fastify/fast-uri>
@@ -2913,6 +2987,15 @@ Licence: MIT
 ```
 [object Object]
 ```
+
+### fastdom 1.0.12
+
+<https://github.com/wilsonpage/fastdom>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
 
 ### fetch-blob 3.2.0
 
@@ -3608,7 +3691,7 @@ Licence: MIT
 [object Object]
 ```
 
-### marked 18.0.5
+### marked 18.0.13
 
 <https://marked.js.org>
 
@@ -3618,7 +3701,7 @@ Licence: MIT
 [object Object]
 ```
 
-### marked 18.0.9
+### marked 18.0.5
 
 <https://marked.js.org>
 
@@ -3678,7 +3761,7 @@ Licence: MIT
 [object Object]
 ```
 
-### mermaid 11.16.1
+### mermaid 11.17.2
 
 <https://github.com/mermaid-js/mermaid>
 
@@ -3856,6 +3939,16 @@ Licence: MIT
 [object Object]
 ```
 
+### node-addon-api 7.1.1
+
+<https://github.com/nodejs/node-addon-api>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
 ### node-domexception 1.0.0
 
 <https://github.com/jimmywarting/node-domexception#readme>
@@ -3879,6 +3972,16 @@ Licence: MIT
 ### node-fetch 3.3.2
 
 <https://github.com/node-fetch/node-fetch>
+
+Licence: MIT
+
+```
+[object Object]
+```
+
+### node-pty 1.1.0
+
+<https://github.com/microsoft/node-pty>
 
 Licence: MIT
 
@@ -4222,7 +4325,7 @@ Licence: MIT
 [object Object]
 ```
 
-### react 19.2.8
+### react 19.3.0
 
 <https://react.dev/>
 
@@ -4232,7 +4335,7 @@ Licence: MIT
 [object Object]
 ```
 
-### react-dom 19.2.8
+### react-dom 19.3.0
 
 <https://react.dev/>
 
@@ -4400,7 +4503,7 @@ Licence: MIT
 [object Object]
 ```
 
-### scheduler 0.27.0
+### scheduler 0.28.0
 
 <https://react.dev/>
 
@@ -4530,7 +4633,7 @@ Licence: MIT
 [object Object]
 ```
 
-### shiki 4.4.2
+### shiki 4.4.3
 
 <https://github.com/shikijs/shiki#readme>
 
@@ -4640,6 +4743,15 @@ Licence: MIT
 [object Object]
 ```
 
+### standardwebhooks 1.1.1
+
+<https://github.com/standard-webhooks/standard-webhooks/tree/main/libraries/javascript>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
+
 ### statuses 2.0.2
 
 <https://github.com/jshttp/statuses>
@@ -4649,6 +4761,15 @@ Licence: MIT
 ```
 [object Object]
 ```
+
+### strictdom 1.0.1
+
+<https://github.com/wilsonpage/strictdom>
+
+Licence: MIT
+
+> No licence file is published in this package. The declared licence above is the whole
+> of what its author provided.
 
 ### string_decoder 1.3.0
 
@@ -4809,7 +4930,7 @@ Licence: MIT
 [object Object]
 ```
 
-### typebox 1.3.12
+### typebox 1.3.31
 
 <https://github.com/sinclairzx81/typebox>
 

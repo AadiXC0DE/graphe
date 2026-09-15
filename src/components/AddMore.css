@@ -467,3 +467,87 @@
   font-size: 0.75rem;
   color: var(--text-quiet, #6b7280);
 }
+
+/* What installing one needs from this computer, said before the press. An
+   enclosure rather than a bare line: it is about every row below it. */
+.addmore__setup {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) var(--space-5) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__setupso {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+/* The way out of it. Set as a control rather than as a link: one opens the
+   page and the other copies the command, and neither is a place to go. */
+.addmore__setuplink {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* What the last stop left, in the shelf's own words. */
+.addmore__stopped {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* The state of one add-on, in the plan's own one word. */
+.addmore__state {
+  flex: none;
+  margin-left: auto;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  white-space: nowrap;
+}
+
+/* Which chats have it loaded, and what it cannot do. Both plain sentences: this
+   is the part somebody reads before deciding to take an add-on off. */
+.addmore__chats,
+.addmore__limit {
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.addmore__limit {
+  color: var(--text-faint);
+}
+
+/* The loader's own output, kept behind the press that asks for it. */
+.addmore__logtext {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

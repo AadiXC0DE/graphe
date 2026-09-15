@@ -1,39 +1,19 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useStickToBottom } from "use-stick-to-bottom";
-import ActivityLine from "./components/ActivityLine";
-import { Shown } from "./components/Shown";
-import AskFirst from "./components/AskFirst";
 import type { Attachment } from "./components/Attachments";
-import BuildProgress from "./components/BuildProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Composer from "./components/Composer";
-import ConfirmChange from "./components/ConfirmChange";
 import CostMeter from "./components/CostMeter";
-import type { DesignPart } from "./components/DesignView";
-import ReviewsView, { reviewPrompt } from "./components/ReviewsView";
 import ErrorCard from "./components/ErrorCard";
-import HelperRail from "./components/HelperRail";
-import InLine from "./components/InLine";
-import Message from "./components/Message";
-import type { Outcome } from "./components/Landing";
 import Overview from "./components/Overview";
-import PlanCard from "./components/PlanCard";
-import ReviewCard from "./components/ReviewCard";
 import WorkingMark from "./components/WorkingMark";
-import ProjectMenu from "./components/ProjectMenu";
 import ProjectPicker from "./components/ProjectPicker";
-import EvidenceReel from "./components/EvidenceReel";
-import Running from "./components/Running";
-import Commands from "./components/Commands";
-import { asksAbout } from "./preview/point";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
 import type { Answers } from "./agent/asking";
 import { PLAN_WORDS, decidedMessage, type PlanDecision } from "./agent/plan";
-import { reviewAsMarkdown } from "./agent/pi/review";
-import { saysUseYours } from "./design/drift";
-import { gateOf, howMuchBy } from "./design/gate";
-import { holdsBack } from "./projects/heldback";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
+import { liveFrames } from "./preview/live";
+import { whenHidden } from "./lib/onscreen";
 import { keepsLogins } from "./projects/logins";
 import { defaultComputerUse } from "./work/computeruse";
 import { actionAt, chordFor, readActions, type Bindings, type Chord } from "./lib/actions";
@@ -43,37 +23,39 @@ import { draftWith } from "./lib/mentions";
 import { cssFor, defaultAppearance, type Appearance } from "./design/appearance";
 import { lookFirstStore } from "./lib/lookfirst";
 import { escapeMeans } from "./lib/escape";
-import { heldWrites } from "./lib/heldwrites";
 import { drainStarted } from "./lib/queue";
-import { AT_FIRST, foldEvents, lastTurns } from "./lib/hydrate";
-import FindInThread from "./components/FindInThread";
-import { threadWords } from "./lib/threadview";
+import { AT_FIRST, foldEvents } from "./lib/hydrate";
+import { drawnFrom, threadWords } from "./lib/threadview";
 import { capsNow, saysCaps } from "./work/capacity";
-import type { ReviewVerdict, RunningPiece } from "./agent/types";
-import type { AddonHere, AgentNotice, ComputerStatus, ConnectedState, ContinuationNotice } from "./lib/ipc";
+import type { ReviewVerdict, RunningPiece, WaitingSend } from "./agent/types";
+import type {
+  AddonHere,
+  AddonSetup,
+  AgentNotice,
+  ComputerStatus,
+  ConnectedState,
+  ContinuationNotice,
+  ExtensionHere,
+  Stopping,
+} from "./lib/ipc";
 import {
   asOpenTo,
   asShelfAtLaunch,
-  settingsCommands,
   type OpenTo,
   type ShelfAtLaunch,
 } from "./work/settingspages";
 import type { Telling } from "./work/notify";
 import type { SettingsLink } from "./components/Settings";
-import { CHANGE_WORDS } from "./components/DiffView";
-import { parseDiff, undoOf } from "./diff/hunks";
-import { REACHABLE, alreadyReached, asServer } from "./agent/pi/reach";
 import Sidebar from "./components/Sidebar";
 import Tabs, { type Tab } from "./components/Tabs";
 import Steps from "./components/Steps";
+import { ThreadRows } from "./components/ThreadRows";
 import ThinkingWith from "./components/ThinkingWith";
 import Welcome from "./components/Welcome";
 import AskAnything from "./components/AskAnything";
 import type { Found, Things } from "./lib/anything";
 import type { Task } from "./cost/estimate";
 import {
-  busyService,
-  longConversation,
   meter,
   nothingSpentYet,
   retryHonesty,
@@ -88,12 +70,15 @@ import {
   stepsFromReport,
   lookingInto,
 } from "./agent/research";
-import { asBuildRequest } from "./work/buildbrief";
 import { goalElapsed, withElapsed } from "./work/goal";
 import { keyOf, ownerOf } from "./work/owner";
+import { trashActions } from "./work/trash";
+import { migrationActions } from "./work/migration";
 import { useResearch } from "./hooks/useResearch";
 import { useGoalChip } from "./hooks/useGoalChip";
 import { useBoard } from "./hooks/useBoard";
+import { useConversationActions } from "./hooks/useConversationActions";
+import { useInspector, type HeldPlan } from "./hooks/useInspector";
 import { useConnect } from "./hooks/useConnect";
 import { useRunLedger } from "./hooks/useRunLedger";
 import { usePreview } from "./hooks/usePreview";
@@ -101,27 +86,10 @@ import { useProjectFiles } from "./hooks/useProjectFiles";
 import { useTabRow } from "./hooks/useTabRow";
 import { useWhichProject } from "./hooks/useWhichProject";
 import { ADVISOR_PACKAGE } from "./agent/advisor";
-import {
-  asksOf,
-  canStart,
-  carryOnWords,
-  isGate,
-  ROUNDS as CANVAS_ROUNDS,
-  newFlow,
-  nextUp,
-  withFlow,
-  withoutFlow,
-  type Block,
-  type BlockSaid,
-  type Flow,
-} from "./work/canvas";
 import type { Plans } from "./components/HowToWork";
-import { readDesign } from "./design/reading";
-import { writeToken } from "./design/tokens";
 import { bridge } from "./lib/bridge";
-import { isAdvisor, lastSaid, opening } from "./lib/describe";
+import { isAdvisor } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
-import { rows } from "./lib/steps";
 import { durationInWords } from "./lib/when";
 import {
   showWords,
@@ -130,10 +98,6 @@ import {
   type Decision,
   type ModelChoice,
   type Conversation,
-  type InStep as InStepState,
-  type Landing as LandingState,
-  type Look,
-  type Move,
   type Pack,
   type Fetched,
   type Page,
@@ -149,48 +113,56 @@ import {
   type Workflow,
   type HowFar,
   type Money,
+  type OpenedProject,
+  type WorkspaceTrouble,
   type AlwaysDoes,
   type AlwaysRow,
   type SavedVersion,
-  type Overview as OverviewNow,
   type ShowProgress,
   type SpendLimit,
   type StorageNow,
+  type MigrationNow,
   type ThinkingLevel,
+  type TrashView,
   type Trouble,
+  type ExtensionRequest as AddonAskRequest,
   type Where,
   type HowItLands,
   type ReviewDecided,
   type ReviewEntry,
+  type AppNotice,
+  type ProjectItem,
+  type PromptOptions,
 } from "./lib/ipc";
 import { modelKey } from "./lib/ipc";
-import { conflictWords } from "./diff/conflict";
 import { reviewWords, waiting as waitingToReview, type FileVerdict, type Verdict as QueueVerdict } from "./work/reviewqueue";
 import { usePrefersReducedMotion } from "./lib/motion";
 import { keeping } from "./projects/kept";
-import { behind } from "./lib/showme";
-import { ownCopyWhere } from "./lib/owncopy";
 import {
-  changeCurrent,
   changeDesk,
+  changeTheFront,
+  changeThread,
   closeDesk,
+  conversationIn,
   parkThread,
   threadsIn,
   currentDesk,
   helpersRunning,
-  intoTheBox,
+  inFront,
   moveThread,
   noDesks,
   nowDoing,
   openDesk,
   receive,
   researchLog,
+  showThread,
+  spokenIn,
   tookBack,
-  withoutTakenBack,
+  type Conversation as Chat,
   type Desk,
   type Desks,
+  type Owned,
   type Reference,
-  folderCalled,
 } from "./lib/projects";
 import {
   askingYou,
@@ -202,19 +174,44 @@ import {
   type SentPicture,
   type Turn,
 } from "./lib/thread";
-import { asMarkdown, wordsOf, COPY_WORDS } from "./lib/transcript";
+import { NOTHING_SAID } from "./state/conversations";
+import {
+  addPane,
+  closePane,
+  focusPane,
+  focusedConversation,
+  focusedPane,
+  inspectorPane,
+  isPinned,
+  onePane,
+  paneAt,
+  pin,
+  pinnedWords,
+  showIn,
+  type Panes,
+  type ViewId,
+} from "./domain/views";
+import { asMarkdown, COPY_WORDS } from "./lib/transcript";
 import { copyText } from "./lib/copying";
-import { markFor, themeFrom, type Theme } from "./lib/theme";
+import { markFor, showing, themeFrom, type Theme } from "./lib/theme";
+import { gitIsMissing, keptAppWide, stillShowing } from "./lib/app-wide";
+import { keepShared, keptShared, onlyInThisChat, sharingWithProject } from "./lib/shared-context";
+import AppWide from "./components/AppWide";
 import "./App.css";
 
 /* Reached from one place each, and none of them is on screen when the window
    opens — so none of them belongs in the bundle somebody waits for. */
 /* Reached by a press and none of them on screen at launch, so none of them
    is in the bundle anybody waits for. */
+/* The band that says where the hand is, and the band that says a folder is
+   gone. Both are reached by a press or by a state nothing is in on a fresh
+   launch, so neither is in the bundle anybody waits for. */
+const Turnstile = lazy(() => import("./components/Turnstile"));
+const PaneBand = lazy(() => import("./components/Panes"));
+const Recovery = lazy(() => import("./components/Recovery"));
 const ReviewQueue = lazy(() => import("./components/ReviewQueue"));
 const Conflict = lazy(() => import("./components/Conflict"));
 const Changes = lazy(() => import("./components/Changes"));
-const Against = lazy(() => import("./components/Against"));
 const Connected = lazy(() => import("./components/Connected"));
 const Skills = lazy(() => import("./components/Skills"));
 const Files = lazy(() => import("./components/Files"));
@@ -222,21 +219,43 @@ const FileView = lazy(() => import("./components/FileView"));
 const Palette = lazy(() => import("./components/Palette"));
 const BrowserPane = lazy(() => import("./components/BrowserPane"));
 const Settings = lazy(() => import("./components/Settings"));
-const DesignView = lazy(() => import("./components/DesignView"));
-const CanvasView = lazy(() => import("./components/CanvasView"));
 const HistoryView = lazy(() => import("./components/HistoryView"));
 const AddMore = lazy(() => import("./components/AddMore"));
+const NewWorktree = lazy(() => import("./components/NewWorktree"));
+const AddonAsk = lazy(() => import("./components/ExtensionRequest"));
 const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
 const Usage = lazy(() => import("./components/Usage"));
+/* Panels that open over the conversation rather than in it, and one that only
+   appears over a build. None is drawn until a press or a running build asks. */
+const Commands = lazy(() => import("./components/Commands"));
+const ReviewsView = lazy(() => import("./components/ReviewsView"));
+const ProjectMenu = lazy(() => import("./components/ProjectMenu"));
+const BuildProgress = lazy(() => import("./components/BuildProgress"));
+const FindInThread = lazy(() => import("./components/FindInThread"));
+/* The three cards a conversation only sometimes carries — a question before any
+   file is touched, a plan to agree to, a review to answer. Each is fetched the
+   first time a turn of that kind is actually drawn. */
+/* Bands and cards that exist only once there is something to say: a question
+   waiting on an answer, a run in flight, helpers at work. Nothing draws until
+   one of them does. */
+const HelperRail = lazy(() => import("./components/HelperRail"));
+const InLine = lazy(() => import("./components/InLine"));
+const Running = lazy(() => import("./components/Running"));
+
+/** What "explain this" and "fix this" say about a change. A static import would
+ *  put the whole diff panel in the bundle every launch pays for, and it is only
+ *  up while somebody is reading a change. */
+async function wordsAboutChanges() {
+  const { CHANGE_WORDS } = await import("./components/DiffView");
+  return CHANGE_WORDS;
+}
 
 /* The screens a press reaches most often. Fetched once the first paint is over
    so the press finds the code already there. */
 const VIEWS = [
   () => import("./components/Settings"),
-  () => import("./components/DesignView"),
-  () => import("./components/CanvasView"),
   () => import("./components/HistoryView"),
   () => import("./components/ReviewQueue"),
   () => import("./components/Skills"),
@@ -248,9 +267,14 @@ const VIEWS = [
   () => import("./components/HelpersView"),
   () => import("./components/Connected"),
   () => import("./components/Palette"),
-  () => import("./components/Against"),
   () => import("./components/Conflict"),
 ];
+
+/** What is fetched first when the app goes idle, in the order a sitting is
+ *  likely to reach for it. Everything else waits for its own press: fetching
+ *  every screen at idle spends a laptop's idle time on panels that may never
+ *  be opened, and the ones people do open are the first few here. */
+const WARM_FIRST = 4;
 
 /** A sheet-coloured rectangle where the sheet will be, rather than nothing, for
  *  the frame or two a chunk still on its way costs. */
@@ -281,21 +305,16 @@ const OPEN_TO_STORE = 'graphe:openTo';
 const SHELF_STORE = 'graphe:shelfAtLaunch';
 const SHELF_WAS_STORE = 'graphe:shelfWas';
 
-/** Asked before a conversation with a turn in flight is closed. */
-const STILL_WORKING =
-  'This conversation is still working. Closing it now stops the turn it is in the middle of. Close it anyway?';
-
-/** Whether one conversation still has a turn in flight, whether it is the one
- *  in front or one already put down. */
-function stillWorkingIn(desk: Desk, address: string): boolean {
-  const here = desk.address === address;
-  const parked = desk.parked[address];
-  if ((here ? desk.busy : parked?.busy) === true) return true;
-  return (here ? desk.turns : (parked?.turns ?? [])).some(
-    (turn) =>
-      (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming === true) ||
-      ((turn.kind === 'did' || turn.kind === 'tidying') && turn.state === 'running'),
-  );
+/** A name for one press, so every request that press makes answers with the
+ *  same conversation — and so the window knows the id of the chat it is
+ *  starting before the shell has answered. Two presses carry two names and are
+ *  two chats, which is what somebody who pressed New twice asked for; the shell
+ *  forgets a name after a minute, so a stale one cannot come back as somebody's
+ *  new chat. */
+let pressesMade = 0;
+function newPress(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ?? `press-${Date.now().toString(36)}-${(pressesMade += 1).toString(36)}`;
 }
 const showGallery =
   inDevelopment && new URLSearchParams(window.location.search).has("gallery");
@@ -311,15 +330,33 @@ const openOnLoad = new URLSearchParams(window.location.search).get("open");
  *  and covering it would be the flash rather than the fix. */
 let viewsWarm = false;
 
-/** The one fetch of every screen's code. Started at idle, and again by the
- *  first press if that has not happened yet; the same promise either way, so a
- *  handful of presses in a row wait on one fetch rather than starting several. */
+/** The first fetch of the screens most likely to be pressed. Started at idle,
+ *  and again by the first press if that has not happened yet; the same promise
+ *  either way, so a handful of presses in a row wait on one fetch rather than
+ *  starting several.
+ *
+ * `viewsWarm` is set by every screen being here, so the first press (which
+ *  fetches the rest) still needs one place to ask for the whole set. */
 let warming: Promise<void> | null = null;
 function warmViews(): Promise<void> {
-  warming ??= Promise.all(VIEWS.map((load) => load())).then(() => {
-    viewsWarm = true;
-  });
-  return warming;
+  warming ??= Promise.all(VIEWS.slice(0, WARM_FIRST).map((load) => load()))
+    .then(() => undefined)
+    // A chunk that fails to arrive is not a reason to keep a rejected promise
+    // forever: the next press tries again. Uncaught, it also became an
+    // unhandled rejection with nothing on screen to explain it.
+    .catch(() => undefined);
+  return warming ?? Promise.resolve();
+}
+
+/** Every screen's code, for the press that needs something not fetched yet. */
+let fetchingAll: Promise<void> | null = null;
+function fetchAllViews(): Promise<void> {
+  fetchingAll ??= Promise.all(VIEWS.map((load) => load()))
+    .then(() => {
+      viewsWarm = true;
+    })
+    .catch(() => undefined);
+  return fetchingAll ?? Promise.resolve();
 }
 
 export default function App() {
@@ -381,8 +418,9 @@ const NO_FOLDER_YET =
  *  are rather than a second thread to read. */
 function lastSaidIn(desk: Desk | null): string | null {
   if (desk === null) return null;
-  for (let index = desk.turns.length - 1; index >= 0; index -= 1) {
-    const turn = desk.turns[index];
+  const turns = inFront(desk).turns;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
     if (turn?.kind !== 'said') continue;
     const words = turn.text.trim().replace(/\s+/g, ' ');
     if (words === '') continue;
@@ -395,12 +433,17 @@ function lastSaidIn(desk: Desk | null): string | null {
  *
  * The first thing the person said, which is what they would call it themselves.
  * A conversation nobody has spoken in yet has no name to take, and saying so is
- * better than borrowing the folder's. */
+ * better than borrowing the folder's.
+ *
+ * Long enough that two asks which begin alike are still two names: at 40
+ * characters a pair differing past that point read, tooltipped and announced
+ * identically. The tab itself ellipsises to whatever width it has; this is only
+ * the point past which a name stops being a name. */
 function titleOf(turns: readonly Turn[]): string {
   const first = turns.find((turn) => turn.kind === 'said' && turn.from === 'you');
   if (first === undefined || first.kind !== 'said') return 'New conversation';
   const words = first.text.trim().replace(/\s+/g, ' ');
-  return words.length > 40 ? `${words.slice(0, 39)}…` : words;
+  return words.length > 120 ? `${words.slice(0, 119)}…` : words;
 }
 
 /** Recent-project storage is ordered by last use, which is useful for a picker
@@ -444,40 +487,6 @@ function pictureBytes(file: File): Promise<string | null> {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Design edits held in the window                                             */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The stylesheet with the window's unsaved design edits laid over it.
- *
- * The design view reads the stylesheet from disk, so with a draft held in the
- * window that reading needs a copy with the draft values substituted in — the
- * sliders and the readings describe what is being tested, not only what the
- * project already is. Nothing is written; the project only changes when
- * `commitDesign` files the draft.
- */
-function withDesignDraft(
-  styles: { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null,
-  draft: { tokens: Record<string, string> } | undefined,
-): { file: string; tokens: readonly import("./lib/ipc").StyleToken[]; text: string } | null {
-  if (styles === null || draft === undefined) return styles;
-  const names = Object.keys(draft.tokens);
-  if (names.length === 0) return styles;
-  let text = styles.text;
-  for (const name of names) {
-    const value = draft.tokens[name];
-    if (value === undefined) continue;
-    const next = writeToken(text, name, value);
-    if (next !== text) text = next;
-  }
-  const tokens = styles.tokens.map((token) => {
-    const value = draft.tokens[token.name];
-    return value === undefined ? token : { ...token, value };
-  });
-  return { file: styles.file, text, tokens };
-}
-
-/* -------------------------------------------------------------------------- */
 /* The app                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -492,6 +501,27 @@ function Conversation() {
    */
   const [desks, setDesks] = useState<Desks>(noDesks);
   const desk = currentDesk(desks);
+  /* The conversation on screen, whole. Everything this window draws belongs to
+     one conversation, and it is that one's record the screen reads — not a
+     handful of fields copied onto the project when it came forward, which is
+     how a chat used to lose its draft or its mode on the way to the front.
+     See src/lib/projects.ts and src/state/conversations.ts. */
+  const chat = inFront(desk);
+  /**
+   * The panes this window is showing, and which one the hand is in.
+   *
+   * One pane is the ordinary window and two is the most that fits a transcript
+   * worth reading. A pane carries a view id of its own and the conversation it
+   * shows; the focused pane is the one the composer, the keyboard and the
+   * inspector address. Two panes showing one chat are two views of one
+   * conversation, and the shell keeps one runtime because both ask for it by
+   * the same address — which is what the plan means by "opening the same chat in
+   * another pane does not create a session".
+   */
+  const [panes, setPanes] = useState<Panes>(() => onePane());
+  /* The conversation this window's controls act on. With one pane it is the
+     desk's, which is why the ordinary case does not change shape at all. */
+  const aimedAt = focusedConversation(panes);
   /* The folder in front, as a plain value. `openProject` is a field on the
      state and not a ref, but a hook list cannot tell those apart by name, so
      every list that wanted it read as a ref nobody should be listing. */
@@ -527,26 +557,23 @@ function Conversation() {
   /** Whether a running row is already on screen carrying the motion — a
    *  streaming reply, a step in progress, a tidy. The quiet mark only fills
    *  the silent gaps of a run, so the two never speak at once. */
-  const runningNow =
-    desk !== null &&
-    desk.turns.some(
+  const runningNow = chat.turns.some(
+    (turn) =>
+      (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+      (turn.kind === 'did' && turn.state === 'running') ||
+      (turn.kind === 'tidying' && turn.state === 'running'),
+  );
+  const frontBusy =
+    chat.turns.some(
       (turn) =>
         (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
         (turn.kind === 'did' && turn.state === 'running') ||
         (turn.kind === 'tidying' && turn.state === 'running'),
-    );
-  const frontBusy =
-    (desk !== null &&
-      desk.turns.some(
-        (turn) =>
-          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
-          (turn.kind === 'did' && turn.state === 'running') ||
-          (turn.kind === 'tidying' && turn.state === 'running'),
-      )) ||
+    ) ||
     (desk !== null && (sendsInTheAir[keyOf(desk.path, desk.address ?? '')] ?? 0) > 0) ||
     // A turn nobody typed has no shape to read until its first token. The shell
     // says when one is in flight, and that is what the composer answers to.
-    (desk !== null && desk.busy);
+    (desk !== null && chat.busy);
 
   /** What this computer remembers. Null until the shell has been asked — which
    *  is not the same as an empty list, and the two states look different: one is
@@ -571,17 +598,24 @@ function Conversation() {
    *  Only the shell knows, and only about the one it just put in front, so this
    *  is replaced on every swap rather than accumulated. */
   const [ownCopyHere, setOwnCopyHere] = useState(false);
-  /** Every size the project designs at, once somebody has asked for them. */
-  const [looks, setLooks] = useState<{ looks: readonly Look[]; says: string }>({
-    looks: [],
-    says: '',
-  });
-  const [checkingWidths, setCheckingWidths] = useState(false);
-  /** The size being worked at. It lasts as long as the window does: it is what
-   *  somebody is looking at now, not a setting about the project. */
-  const [workingAt, setWorkingAt] = useState<string | null>(null);
+  /**
+   * Why the conversation on screen cannot be written to, or null when it can.
+   *
+   * Set only by the shell, and only for a conversation whose recorded folder is
+   * gone: the transcript is shown and nothing is built behind it, because there
+   * is no working directory for a session to run in. The band above the thread
+   * is what says so, and the box below it is refused — a composer that accepted
+   * a sentence nothing could carry out would be the one dishonest thing here.
+   */
+  const [unavailable, setUnavailable] = useState<WorkspaceTrouble | null>(null);
+  /** True while the folder for a relink is being chosen. */
+  const [relinking, setRelinking] = useState(false);
   /** The screen where more can be added to Graphe, and what it is showing. */
   const [addMore, setAddMore] = useState(false);
+  /** The New worktree card, which is the one deliberate way to make a copy. */
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
+  /** Something an add-on is waiting on an answer to. Null when nothing is. */
+  const [addonAsk, setAddonAsk] = useState<AddonAskRequest | null>(null);
   const [packs, setPacks] = useState<readonly Pack[]>([]);
   const packsNow = useRef<readonly Pack[]>([]);
   packsNow.current = packs;
@@ -591,11 +625,33 @@ function Conversation() {
   const [packBusy, setPackBusy] = useState<string | null>(null);
   /** Whether a message gets a looking-around pass before anything is touched.
    *  `auto` decides from the sentence, which is what almost everybody wants;
-   *  the other two are for somebody who has an opinion about this one. */
-  const [plans, setPlans] = useState<Plans>('auto');
+   *  the other two are for somebody who has an opinion about this one.
+   *
+   * Kept per conversation, like everything else about one: a chat left in
+   * research or plan does not set the mode for the tab beside it. Before there
+   * is a conversation to keep it in — the first screen's composer is drawn with
+   * no folder open — it is the window's own, so its chips are not dead. */
+  const [loosePlans, setLoosePlans] = useState<Plans>('auto');
+  const plans = desk === null ? loosePlans : chat.plans;
   /* Read inside callbacks that were built before the last change to it. */
   const plansNow = useRef(plans);
   plansNow.current = plans;
+  /** Write it where it belongs, whichever conversation is in front when a
+   *  delayed answer lands — or to the window itself, before there is one. */
+  const setPlans = useCallback((next: SetStateAction<Plans>) => {
+    const here = currentDesk(desksNow.current);
+    if (here === null) {
+      setLoosePlans((was) => (typeof next === "function" ? next(was) : next));
+      return;
+    }
+    const owner: Owned = { project: here.path, address: here.address };
+    setDesks((current) =>
+      changeThread(current, owner, (one) => ({
+        ...one,
+        plans: typeof next === "function" ? next(one.plans ?? "auto") : next,
+      })),
+    );
+  }, []);
   /** Research is a one-message choice, and only that one reply is read for the
    *  plan it may end with. See src/hooks/useResearch.ts. */
   const researchRuns = useResearch();
@@ -634,13 +690,10 @@ function Conversation() {
     thinking: {},
     kept: {},
     showFiles: false,
-    heldBack: {},
     keptLogins: {},
-    howMuch: null,
     ceiling: null,
     theme: 'system',
     nameConversations: true,
-    askBeforeClosing: true,
     snapBeforeApply: true,
     replyLanguage: '',
     whenRunFinishes: 'system',
@@ -775,7 +828,9 @@ function Conversation() {
         return;
       }
       setCovering(true);
-      void warmViews().then(() => {
+      // A press the idle fetch has not covered waits for the whole set, not
+      // for the first few: the screen being opened may be any of them.
+      void fetchAllViews().then(() => {
         if (pressAt.current !== token) return;
         setCovering(false);
         swap();
@@ -803,23 +858,14 @@ function Conversation() {
 
 
 
-  /** "Take more time": how long the chosen model thinks before it answers,
-   *  remembered per model and applied to the conversation in front of us now,
-   *  not only to the next one. */
-  /* A block's model is not always the one the composer is on, so writing its
-     depth must not claim the chosen model's did. */
-  const setBlockThinking = useCallback(
-    (choice: ModelChoice, level: ThinkingLevel) => {
-      void bridge.setThinking(choice, level).then((answer) => {
-        if (answer.ok) setPreferences(answer.value);
-      });
-    },
-    [],
-  );
-
   const changeThinking = useCallback(
     (choice: ModelChoice, level: ThinkingLevel) => {
-      void bridge.setThinking(choice, level).then((answer) => {
+      const desk = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(desk === null ? {} : { project: desk.path }),
+        ...(desk?.address == null ? {} : { conversation: desk.address }),
+      };
+      void bridge.setThinking(choice, level, where).then((answer) => {
         if (!answer.ok) return;
         setPreferences(answer.value);
         setConnection((current) =>
@@ -830,31 +876,79 @@ function Conversation() {
     [setConnection],
   );
 
-  /**
-   * The before-and-afters, per project, each pinned to the moment it belongs to
-   * (BACKLOG F2).
-   *
-   * Pictures are taken after a turn has already settled and can take a while to
-   * arrive — a project that has to be built first is half a minute of work — so
-   * by the time one lands the conversation may well have moved on. Pinning it to
-   * the last thing that had been said when the turn ended is what keeps it under
-   * the change it describes rather than at the bottom of whatever is happening
-   * now.
-   */
-  /** What each version looked like, per project. Asked for whenever the
-   *  timeline is, and never per row: the rail draws a card for every moment of
-   *  the afternoon and reading a picture inside one would be a disk on hover. */
-  const [versionPictures, setVersionPictures] = useState<
-    Readonly<Record<string, Readonly<Record<string, string>>>>
-  >({});
   /** Read inside the listener below, which is subscribed once and must not be
    *  torn down and rebuilt every time somebody says something. */
   const desksNow = useRef(desks);
   desksNow.current = desks;
+
+  /** What this machine is missing, if anything. Kept here rather than on a desk
+   *  because it is true with nothing open: on a first launch there is no
+   *  conversation and no project for a missing git to be said in. */
+  const [appFacts, setAppFacts] = useState<readonly AppNotice[]>([]);
+  /** The ones somebody has read and put away, by id. Away for this sitting
+   *  only: the machine is still missing whatever it was missing. */
+  const [appAway, setAppAway] = useState<readonly string[]>([]);
+
+  /** What the project on screen offers every chat in it, and what this chat
+   *  was given as the project's own list. Read at the moment of sending off a
+   *  ref, so a send never carries a list from before somebody edited it. */
+  const [sharedContext, setSharedContext] = useState<readonly ProjectItem[]>([]);
+  const sharedNow = useRef(sharedContext);
+  sharedNow.current = sharedContext;
+
+  /* What this machine is missing, asked for as soon as there is a window to
+     draw it in. Being told is not enough on its own: the shell finds this out
+     while the window is still loading, and a push into a renderer that has not
+     subscribed yet is a push nobody ever sees. */
+  useEffect(() => {
+    const stop = bridge.onAppNotice((one) => setAppFacts((was) => keptAppWide(was, one)));
+    void bridge.appNotices().then((answer) => {
+      if (!answer.ok) return;
+      setAppFacts((was) => answer.value.reduce<readonly AppNotice[]>(keptAppWide, was));
+    });
+    return stop;
+  }, []);
+
+  /* The project's own list, read the moment a folder comes to the front: two
+     projects must never show each other's, and a project must not inherit the
+     one before it. */
+  useEffect(() => {
+    setSharedContext(openProject === null ? [] : keptShared(openProject));
+  }, [openProject]);
+
+  /** Share one thing this chat was given with every chat in the project. The
+   *  chat keeps it either way — it was given it — and the project's list is the
+   *  half that travels to the rest. */
+  const shareWithProject = useCallback((one: Reference) => {
+    const project = desksNow.current.current;
+    if (project === null) return;
+    const next = sharingWithProject(sharedNow.current, {
+      id: one.id,
+      name: one.name,
+      note: one.note,
+    });
+    if (next === sharedNow.current) return;
+    sharedNow.current = next;
+    keepShared(project, next);
+    setSharedContext(next);
+  }, []);
+
+  /** Take one thing off the project's list. It does not become this chat's own
+   *  reference by doing so: whether this chat was ever given it is the chat's
+   *  record, and writing one here would be the app claiming a file was sent
+   *  that never was. */
+  const stopSharing = useCallback((id: string) => {
+    const project = desksNow.current.current;
+    if (project === null) return;
+    const next = onlyInThisChat(sharedNow.current, id);
+    if (next === sharedNow.current) return;
+    sharedNow.current = next;
+    keepShared(project, next);
+    setSharedContext(next);
+  }, []);
   /** Last project/conversation navigation request. Only its response may change
    *  what is in front; IPC replies can arrive out of order. */
   const navigation = useRef(0);
-
   /** The row of tabs as it is drawn, published so the keys can act on the row
    *  somebody is looking at. See src/hooks/useTabRow.ts. */
   const tabRow = useTabRow();
@@ -891,6 +985,7 @@ function Conversation() {
     }
   }, [shelfOpen]);
 
+
   /** Light, dark, or whatever the computer is set to. Kept on this computer
    *  rather than per project — it is about the person, not the work. */
   const [theme, setTheme] = useState<Theme>(() =>
@@ -900,17 +995,31 @@ function Conversation() {
   /* The appearance, as a stylesheet. Written last in the head and matched at
      the same weight as the theme's own block, because `:root[data-theme]` beats
      a bare `:root` and a token that loses a specificity tie is a control that
-     does nothing. */
+     does nothing.
+
+     It lands after the stylesheet, so its own `prefers-color-scheme` block
+     never gets to decide: following the computer means writing the palette the
+     computer asks for, and writing it again when the computer changes. */
   useEffect(() => {
-    const showingNow = markFor(theme);
-    const on = showingNow === null || showingNow === 'light' ? 'light' : 'dark';
-    let sheet = document.getElementById('appearance');
-    if (sheet === null) {
-      sheet = document.createElement('style');
-      sheet.id = 'appearance';
-      document.head.append(sheet);
-    }
-    sheet.textContent = cssFor(preferences.appearance, on);
+    const darkNow = (): boolean =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const write = (): void => {
+      let sheet = document.getElementById('appearance');
+      if (sheet === null) {
+        sheet = document.createElement('style');
+        sheet.id = 'appearance';
+        document.head.append(sheet);
+      }
+      sheet.textContent = cssFor(preferences.appearance, showing(theme, darkNow()));
+    };
+    write();
+    if (theme !== 'system' || typeof window === 'undefined') return;
+    if (typeof window.matchMedia !== 'function') return;
+    const computer = window.matchMedia('(prefers-color-scheme: dark)');
+    computer.addEventListener('change', write);
+    return () => computer.removeEventListener('change', write);
   }, [preferences.appearance, theme]);
 
   /* And whatever somebody wrote themselves, after it. Read once on the way in
@@ -987,6 +1096,10 @@ function Conversation() {
   const [filesOpen, setFilesOpen] = useState(true);
   /** The drawer along the bottom. Shut until somebody asks for it. */
   const [commandsOpen, setCommandsOpen] = useState(false);
+  /** Whether the drawer is showing a shell of somebody's own rather than the
+   *  record of what the agent ran. Off until they ask for it: the drawer is a
+   *  log first, and a terminal nobody opened must not start a process. */
+  const [terminalOpen, setTerminalOpen] = useState(false);
   /* Once a project has earned its right rail, keep that shell mounted for the
      sitting. Snapshot and status refreshes arrive independently of agent events;
      deriving the rail directly from each one made it blink out for a frame and
@@ -996,6 +1109,13 @@ function Conversation() {
   /** What is waiting behind the run, as pi holds it. Keyed by conversation, so
    *  a second tab's line is never drawn under this one's. */
   const [queued, setQueued] = useState<Readonly<Record<string, readonly string[]>>>({});
+  /** What the shell is holding for the workspace: sends from this conversation
+   *  that have not begun because another chat holds the folder. Keyed by
+   *  conversation, so a wait belonging to one chat is never drawn under
+   *  another, and carrying the folder each was queued for. */
+  const [queuedForFolder, setQueuedForFolder] = useState<
+    Readonly<Record<string, readonly WaitingSend[]>>
+  >({});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   /** The change in the folder, read when the view opens. Null while reading. */
@@ -1023,7 +1143,6 @@ function Conversation() {
      panel, the reviews screen, and a press with nothing else to go on. See
      src/hooks/useWhichProject.ts. */
   const {
-    panelRepo,
     setPanelRepo,
     panelRepoNow,
     reviewsRepo,
@@ -1032,10 +1151,8 @@ function Conversation() {
     actingRepoNow,
   } = useWhichProject();
 
-  /** Which band of the design view is open, or null when it is not. Both of the
-   *  surfaces that take the whole width live here rather than inside a panel:
-   *  they cover the conversation, and the conversation belongs to this file. */
-  const [designAt, setDesignAt] = useState<DesignPart | null>(null);
+  /** Which of the whole-width screens is open. They cover the conversation,
+   *  and the conversation belongs to this file. */
   const [graphOpen, setGraphOpen] = useState(false);
   /** The github pull requests and issues of the project in front. */
   const [reviewsOpen, setReviewsOpen] = useState(false);
@@ -1084,13 +1201,7 @@ function Conversation() {
   const [foundAt, setFoundAt] = useState<number | null>(null);
   /** The turn a search landed on, by its own id, so the row can be marked and
    *  brought into view once it has been drawn. */
-  const foundId = foundAt === null ? null : (desk?.turns[foundAt]?.id ?? null);
-  useEffect(() => {
-    if (foundId === null) return;
-    document
-      .querySelector(`.thread [data-turn="${CSS.escape(foundId)}"]`)
-      ?.scrollIntoView({ block: 'center' });
-  }, [foundId, drawing]);
+  const foundId = foundAt === null ? null : (chat.turns[foundAt]?.id ?? null);
   const shownConversation = `${openProject ?? ''}\u0000${desk?.address ?? ''}`;
   // Asking for more of one conversation must not draw all of the next.
   useEffect(() => {
@@ -1107,17 +1218,6 @@ function Conversation() {
   });
   const [clashPath, setClashPath] = useState<string | null>(null);
   const [clashText, setClashText] = useState<string | null>(null);
-  /** The pairing whose colour is on its way to being changed. Cleared the
-   *  moment new values arrive, which is what finishing looks like from here. */
-  const [fixing, setFixing] = useState<string | null>(null);
-  /** Design edits being tested but not yet saved, per project. Nothing here
-   *  has touched the project — a slider moves in the view, and only "Save
-   *  changes" writes it. Keyed by token name, and appended to for motion. */
-  const [designDraft, setDesignDraft] = useState<
-    Readonly<
-      Record<string, { tokens: Record<string, string>; motions: readonly { places: readonly unknown[]; change: unknown }[] }>
-    >
-  >({});
 
   /** True while a turn is still running. */
   const [busyCount, setBusyCount] = useState(0);
@@ -1134,11 +1234,11 @@ function Conversation() {
      must not clear the busy another tab is still using. Counted, not a flag. */
   const goBusy = (): void => setBusyCount((count) => count + 1);
   const goQuiet = (): void => setBusyCount((count) => Math.max(0, count - 1));
-  /** How full the conversation on screen is, and whether it is being shortened
-   *  right now. Asked for rather than counted here: the number is the model's
-   *  own reckoning, and only the shell can see it. */
-  const [room, setRoom] = useState<RoomState | null>(null);
   const [tidying, setTidying] = useState(false);
+  /** How full the conversation on screen is. Asked for rather than counted
+   *  here: the number is the model's own reckoning, and only the shell can see
+   *  it. Held by the window because the shell also reports it unsolicited. */
+  const [room, setRoom] = useState<RoomState | null>(null);
   /** Whether the Guard is stopping to ask. Never remembered across launches:
    *  the shell holds it on the session, and a new session asks again. */
   /** How far it may go on its own. Four rungs rather than a switch; it lasts as
@@ -1150,9 +1250,10 @@ function Conversation() {
   const [progress, setProgress] = useState<ShowProgress | null>(null);
 
   /** Attachments before there is a project to attach them to. Once a folder is
-   *  open they live on its desk, like everything else. */
+   *  open they live on the conversation that holds them, like everything else
+   *  about it. */
   const [loose, setLoose] = useState<readonly Attachment[]>([]);
-  const attachments = desk?.attachments ?? loose;
+  const attachments = desk === null ? loose : chat.attachments;
 
   /** Attachments, read inside `deliver` the same way `desksNow` is read inside
    *  the listener: `deliver` is rebuilt whenever the desk in front changes,
@@ -1160,6 +1261,9 @@ function Conversation() {
    *  moment it runs. */
   const attachmentsNow = useRef(attachments);
   attachmentsNow.current = attachments;
+
+  /** Everything a press on a conversation does, bound to the conversation it
+   *  was pressed in. See src/hooks/useConversationActions.ts. */
 
   /** The pictures in the box, for the message about to carry them. Object URLs
    *  rather than bytes: the File already holds those, so a conversation full of
@@ -1174,42 +1278,35 @@ function Conversation() {
     [],
   );
 
-  /** Take everything out of the box. Called the moment its contents have been
-   *  sent, wherever they were sent from. */
-  const emptyTheBox = useCallback(() => {
-    setLoose([]);
-    setDesks((current) =>
-      current.current === null ? current : changeCurrent(current, (one) => ({ ...one, attachments: [] })),
-    );
-  }, []);
+  /** A sentence in the box before there is a project to write it in. Once a
+   *  folder is open the sentence is the conversation's. */
+  const [looseDraft, setLooseDraft] = useState("");
+  const actions = useConversationActions({
+    desksNow,
+    setDesks,
+    front: desk === null ? null : { project: desk.path, address: desk.address },
+    setLooseDraft,
+    emptyLoose: () => {
+      setLoose([]);
+    },
+    fillLoose: setLoose,
+  });
+  const {
+    boxOwner,
+    writeDraft,
+    handIn,
+    keepDraftAt,
+    emptyTheBox,
+    fillBox,
+    putBack: putBackInBox,
+    takeBack: takeBackTheLine,
+  } = actions;
 
-  /** An example from the welcome screen, put in the box ready to be edited.
-   *  Never sent on anybody's behalf — a click that spends money on a sentence
-   *  the user did not write is exactly the surprise this product exists to
-   *  avoid. */
-  const [draft, setDraft] = useState("");
+  const draft = desk === null ? looseDraft : chat.draft;
 
   /** A native page must yield to renderer popovers; it cannot be stacked under
      them with CSS alone. */
   const [composerPopoverOpen, setComposerPopoverOpen] = useState(false);
-  /** Servers and watchers this conversation has kept up. Drawn from what the
-   *  shell last said rather than asked for on a clock. */
-  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
-  /** A set of designs being compared, each served on its own address. Null until
-   *  somebody asks for variations. */
-  const [variations, setVariations] = useState<{
-    subject: string;
-    members: readonly { id: string; name: string; address: string }[];
-    inFront: string | null;
-  } | null>(null);
-  /** The build plan for the project in front, as the tracker draws it. Null
-   *  until a document-to-build has produced one. Kept with the folder it came
-   *  from, so a plan is never drawn under another project's conversation. */
-  const [buildPlan, setBuildPlan] = useState<{
-    path: string;
-    plan: import('./lib/ipc').BuildPlan;
-  } | null>(null);
-
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Read from the shell once, and again whenever it is changed here. */
   const [ceiling, setCeiling] = useState<SpendLimit | null>(null);
@@ -1247,12 +1344,16 @@ function Conversation() {
      paragraph of measurements to check we knew which button, was the whole of
      what made this feel like work. */
   useEffect(() => {
-    return bridge.onPointed((at) => {
+    return bridge.onPointed((pointed) => {
       // A note with nothing in it is not a message. Nothing is written into the
       // box either: somebody writing on the page is not writing in the box, and
       // finding a paragraph about an element in there is how this felt broken.
-      if ((at.pointed.said ?? '').trim() === '') return;
-      handNow.current(asksAbout(at.pointed));
+      if ((pointed.said ?? '').trim() === '') return;
+      // How a note is worded belongs to the page it was written on, which is a
+      // chunk nobody needs until one comes back.
+      void import("./preview/point").then(({ asksAbout }) => {
+        handNow.current(asksAbout(pointed));
+      });
     });
   }, []);
 
@@ -1308,10 +1409,7 @@ function Conversation() {
    *  a sentence with nowhere to go is a sentence nobody reads. */
   const say = useCallback((text: string) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
-        ...one,
-        turns: [...one.turns, said("graphe", text)],
-      })),
+      changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("graphe", text)] })),
     );
   }, []);
 
@@ -1322,22 +1420,25 @@ function Conversation() {
   /** Hold a project read-only, or let it go again. Plan is a gate rather than a
    *  prompt, so the shell has to be told: nothing else can withhold a write. */
   const holdWrites = useCallback((on: boolean, project?: string) => {
-    const path = project ?? desksNow.current.current;
+    const desk = currentDesk(desksNow.current);
+    const path = project ?? desk?.path ?? null;
     if (path === null) return;
-    void bridge.setPlanMode(on, { project: path });
+    /* The conversation on screen, not the folder. Plan withholds writes from
+       the chat it was turned on in; a second chat in the same project carries
+       on working, which is what somebody with two chats open expects. */
+    void bridge.setPlanMode(on, {
+      project: path,
+      ...(desk?.address == null ? {} : { conversation: desk.address }),
+    });
   }, []);
 
-  /* The chip belongs to the window and the gate belongs to a folder, so
-     switching projects would otherwise leave the chip saying Plan over a folder
-     that was never told, and the folder behind holding writes back with nothing
-     on screen to say so. The gate follows the chip to wherever you are. */
-  const heldProject = useRef<string | null>(null);
+  /* The gate is the shell's, and it belongs to a conversation — the same one the
+     chip beside it belongs to. The shell knows nothing about a chat until it is
+     told, so a folder opening is where a chat that was closed and comes back
+     saying Plan says so again. Nothing is said for the folder being left: its
+     chats keep the gate they were given, and the chip follows each of them. */
   useEffect(() => {
     const path = openProject;
-    const was = heldProject.current;
-    if (was === path) return;
-    if (was !== null) holdWrites(false, was);
-    heldProject.current = path;
     if (path !== null && plansNow.current === 'plan') holdWrites(true, path);
   }, [openProject, holdWrites]);
 
@@ -1348,7 +1449,7 @@ function Conversation() {
     }
     if ((next === 'plan') !== (plans === 'plan')) holdWrites(next === 'plan');
     setPlans(next);
-  }, [plans, say, holdWrites]);
+  }, [plans, say, holdWrites, setPlans]);
 
   /** Which project a review call is about. The panel's own child, when the
    *  folder holds several, so a review lands in the project it came out of. */
@@ -1375,16 +1476,13 @@ function Conversation() {
       return;
     }
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
-        ...one,
-        turns: withTrouble(one.turns, trouble),
-      })),
+      changeTheFront(current, (one) => ({ ...one, turns: withTrouble(one.turns, trouble) })),
     );
   }, [connectTroubled]);
 
   /** The project's own page beside the conversation, and everything the window
    *  can say about it. See src/hooks/usePreview.ts. */
-  const preview = usePreview({ desksNow, troubleHere });
+  const preview = usePreview({ desksNow });
   const {
     pane,
     paneNow,
@@ -1394,10 +1492,6 @@ function Conversation() {
     setPageAt,
     pageAtNow,
     movedPage,
-    recording,
-    recorded,
-    setRecorded,
-    record,
     opensItself,
   } = preview;
 
@@ -1412,17 +1506,24 @@ function Conversation() {
     setDesks((current) =>
       changeDesk(current, where.project!, (one) => {
         const conversation = where.conversation;
-        if (conversation === undefined || conversation === one.address) {
-          return { ...one, turns: withTrouble(one.turns, trouble) };
+        // No conversation named is the one on screen, and a card that names one
+        // belongs to that chat whether or not it is the one in front.
+        if (conversation !== undefined && conversation !== (one.address ?? '')) {
+          const parked = one.conversations[conversation];
+          if (parked === undefined) return one;
+          return {
+            ...one,
+            conversations: {
+              ...one.conversations,
+              [conversation]: { ...parked, turns: withTrouble(parked.turns, trouble) },
+            },
+          };
         }
-        const parked = one.parked[conversation];
-        if (parked === undefined) return one;
+        const here = one.address ?? '';
+        const was = one.conversations[here] ?? NOTHING_SAID;
         return {
           ...one,
-          parked: {
-            ...one.parked,
-            [conversation]: { ...parked, turns: withTrouble(parked.turns, trouble) },
-          },
+          conversations: { ...one.conversations, [here]: { ...was, turns: withTrouble(was.turns, trouble) } },
         };
       }),
     );
@@ -1430,7 +1531,9 @@ function Conversation() {
 
   const selectModel = useCallback(
     (choice: ModelChoice) => {
-      void bridge.selectModel(choice).then((answer) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = here === null ? {} : { project: here.path };
+      void bridge.selectModel(choice, where).then((answer) => {
         // Said, not swallowed: a chip naming one model while the conversation
         // answers as another is the thing this reports.
         if (!answer.ok) {
@@ -1469,13 +1572,17 @@ function Conversation() {
      depth: the same model can be doing the work in one place and advising in
      another, and those are different answers. */
   const setAdvisorThinking = useCallback((_choice: ModelChoice, level: ThinkingLevel) => {
-    void bridge.setAdvisorThinking(level).then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.setAdvisorThinking(level, where).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
 
   const setAdvisorGate = useCallback((which: 'completionGate' | 'loopGate', on: boolean) => {
-    void bridge.setAdvisorGate(which, on).then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.setAdvisorGate(which, on, where).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, []);
@@ -1488,6 +1595,8 @@ function Conversation() {
 
   const selectAdvisor = useCallback(
     (choice: ModelChoice | null) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = here === null ? {} : { project: here.path };
       void (async () => {
         if (choice !== null && !packsNow.current.some((one) => one.id === ADVISOR_PACKAGE)) {
           const added = await bridge.addPackage(ADVISOR_PACKAGE);
@@ -1497,7 +1606,7 @@ function Conversation() {
           }
           setPacks(added.value);
         }
-        const answer = await bridge.selectAdvisor(choice);
+        const answer = await bridge.selectAdvisor(choice, where);
         if (answer.ok) setPreferences(answer.value);
         else troubleHere(answer.trouble);
       })();
@@ -1510,7 +1619,12 @@ function Conversation() {
    *  list as it stands afterwards. */
   const trustCarried = useCallback(
     (id: string, trust: boolean) => {
-      void bridge.trustCarried(id, trust).then((answer) => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = {
+        ...(here === null ? {} : { project: here.path }),
+        ...(here?.address == null ? {} : { conversation: here.address }),
+      };
+      void bridge.trustCarried(id, trust, where).then((answer) => {
         if (answer.ok) setCarried(answer.value);
         else troubleHere(answer.trouble);
       });
@@ -1518,68 +1632,26 @@ function Conversation() {
     [troubleHere],
   );
 
-  /* ---------------------------------------------------------------- versions */
-
-  /** Ask for the timeline of the project in front, and put it on that desk.
-   *  Applied only if it is still the one in front by the time the answer comes
-   *  back — the shell answers about whatever is current, so a switch mid-flight
-   *  would otherwise write one project's history onto another's desk. */
-  const refreshVersions = useCallback(async (path: string) => {
-    const [answer, seen] = await Promise.all([bridge.versions(), bridge.versionPictures()]);
-    // The pictures are answered about whatever project is in front of the
-    // shell, exactly as the timeline is, so they stand on the same guard: a
-    // switch mid-flight must not file one project's pictures under another.
-    if (seen.ok && desksNow.current.current === path) {
-      setVersionPictures((current) => ({ ...current, [path]: seen.value }));
-    }
-    // A folder holding several projects has no timeline of its own. Each
-    // project answers where it lives, and the panel shows whichever is chosen.
-    const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
-    const each = await Promise.all(
-      several.map(
-        async (one) =>
-          [one.name, await bridge.versions({ project: path, repo: one.name })] as const,
-      ),
-    );
-    if (desksNow.current.current !== path) return;
-    const perRepo: Record<string, readonly SavedVersion[]> = {};
-    for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
-    if (!answer.ok && several.length === 0) return;
-    setDesks((current) =>
-      current.current === path
-        ? changeDesk(current, path, (one) => ({
-            ...one,
-            versions: answer.ok ? answer.value : one.versions,
-            ...(several.length === 0 ? {} : { repoVersions: perRepo }),
-          }))
-        : current,
-    );
-  }, []);
-
   /** How full the conversation on screen is. Asked for after anything that
    *  could change it, and never on a timer. */
   /** Anything that puts a conversation on screen puts the conversation on
-   *  screen. The two full-width surfaces cover it, so asking for a different
-   *  one while the design view is up would otherwise change something nobody
-   *  can see. */
+   *  screen. The full-width surfaces cover it, so asking for a different one
+   *  while one is up would otherwise change something nobody can see. */
   const toChat = useCallback(() => {
-    setDesignAt(null);
     setGraphOpen(false);
     setReviewsOpen(false);
     setHelpersAt(null);
   }, []);
 
   /** The screens that take the whole work over the conversation, so that
-   *  opening one closes the rest. "Design", "History", the shelf and the
-   *  others all live on flags that could otherwise stay set side by side, and
-   *  two full-width surfaces on top of each other hide one entirely. */
+   *  opening one closes the rest. "History", the shelf and the others all live
+   *  on flags that could otherwise stay set side by side, and two full-width
+   *  surfaces on top of each other hide one entirely. */
   const goToScreen = useCallback(
     (
       screen:
         | 'chat'
-        | 'design'
         | 'graph'
-        | 'canvas'
         | 'reviews'
         | 'review'
         | 'skills'
@@ -1592,11 +1664,10 @@ function Conversation() {
       /* Marked as the closing half of the press, so it happens a frame after
          the new screen is up rather than in the same breath. */
       startScreen(() => {
-        /* Each of these names its own screen. Design named the chat's, which
-           was invisible while the close and the open ran in one breath and the
-           open came second; a frame apart, it closed the design view it had
-           just opened and the press did nothing. */
-        if (screen !== 'design') setDesignAt(null);
+        /* Each of these names its own screen. Naming the chat's was invisible
+           while the close and the open ran in one breath and the open came
+           second; a frame apart, it closed the screen it had just opened and
+           the press did nothing. */
         if (screen !== 'graph') setGraphOpen(false);
         if (screen !== 'reviews') setReviewsOpen(false);
         if (screen !== 'review') setReviewQueueOpen(false);
@@ -1605,10 +1676,6 @@ function Conversation() {
         if (screen !== 'usage') setUsageOpen(false);
         if (screen !== 'add-more') setAddMore(false);
         if (screen !== 'helpers') setHelpersAt(null);
-        /* The canvas is a whole surface like the rest of them. It was left
-           mounted behind whatever opened over it, which is a second screen
-           nobody closed and the conversation still hidden underneath. */
-        if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);
       }, true);
     },
     [startScreen],
@@ -1635,98 +1702,26 @@ function Conversation() {
     });
   }, []);
 
-  /** What is already up. The band is kept in step by events afterwards, but a
-   *  window that has just opened has heard none of them yet. The destination is
-   *  required: an old conversation settling must never clear the project that
-   *  is on screen now. */
-  const refreshRunning = useCallback((where?: Where) => {
-    const desk = currentDesk(desksNow.current);
-    const asked: Where = where ?? {
-      ...(desk === null ? {} : { project: desk.path }),
-      ...(desk?.address == null ? {} : { conversation: desk.address }),
-    };
-    void bridge.running(asked).then((answer) => {
-      if (!answer.ok) return;
-      const current = currentDesk(desksNow.current);
-      if (asked.project !== undefined && current?.path !== asked.project) return;
-      setRunning(answer.value);
-    });
-  }, []);
+  /** Servers and watchers this conversation has kept up. Drawn from what the
+   *  shell last said rather than asked for on a clock. */
+  const [running, setRunning] = useState<readonly RunningPiece[]>([]);
+  /** The build plan for the project in front, as the tracker draws it. Null
+   *  until a document-to-build has produced one. Kept with the folder it came
+   *  from, so a plan is never drawn under another project's conversation. */
+  const [buildPlan, setBuildPlan] = useState<HeldPlan | null>(null);
 
-  const refreshRoom = useCallback((where?: Where) => {
-    const desk = currentDesk(desksNow.current);
-    const asked: Where = where ?? {
-      ...(desk === null ? {} : { project: desk.path }),
-      ...(desk?.address == null ? {} : { conversation: desk.address }),
-    };
-    void bridge.room(asked).then((answer) => {
-      if (!answer.ok) return;
-      const current = currentDesk(desksNow.current);
-      if (asked.project !== undefined && current?.path !== asked.project) return;
-      if (asked.conversation !== undefined && current?.address !== asked.conversation) return;
-      setRoom(answer.value);
-    });
-  }, []);
-
-  /* How much a conversation can hold is the model's own number, so the ring is
-     read again whenever somebody changes model. */
-  useEffect(() => {
-    refreshRoom();
-  }, [connection?.chosen, refreshRoom]);
-
-  /** Ask for the git state of the project in front, for the overview. Applied
-   *  only if it is still the one in front by the time the answer comes back —
-   *  the same guard `refreshVersions` stands on, for the same reason. */
-  const refreshOverview = useCallback(async (path: string, conversation?: string | null) => {
-    const here = desksNow.current.byPath[path];
-    const address = conversation === undefined ? here?.address : conversation;
-    const where: Where = {
-      project: path,
-      ...(address == null ? {} : { conversation: address }),
-    };
-    const answer = await bridge.overview(where);
-    if (!answer.ok) return;
-    setDesks((current) =>
-      current.current === path
-        ? changeDesk(current, path, (one) => ({
-            ...one,
-            overview: answer.value,
-          }))
-        : current,
-    );
-    // Which projects a folder holds is only known once this has answered, so
-    // the first ask for their timelines has to be here rather than earlier —
-    // otherwise the panel says "nothing saved yet" about a project that has.
-    const held = answer.value.repos ?? [];
-    const already = desksNow.current.byPath[path]?.repoVersions ?? {};
-    if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path);
-    if (held.length === 0) return;
-    const styled = await Promise.all(
-      held.map(
-        async (one) =>
-          [one.name, await bridge.overview({ ...where, repo: one.name })] as const,
-      ),
-    );
-    if (desksNow.current.current !== path) return;
-    const perRepo: Record<string, OverviewNow['styles']> = {};
-    for (const [name, got] of styled) if (got.ok) perRepo[name] = got.value.styles;
-    setDesks((current) =>
-      current.current === path
-        ? changeDesk(current, path, (one) => ({ ...one, repoStyles: perRepo }))
-        : current,
-    );
-  }, [refreshVersions]);
-
-  /** Read the build plan for the project in front, for the tracker above the
-   *  box. Same in-front guard as everything else that answers about a folder. */
-  const refreshBuildPlan = useCallback(async (path: string) => {
-    const answer = await bridge.buildPlan();
-    if (!answer.ok) return;
-    setBuildPlan((current) => {
-      if (desksNow.current.current !== path) return current;
-      return answer.value === null ? null : { path, plan: answer.value };
-    });
-  }, []);
+  /* The panels beside the conversation, and where their answers go. See
+     src/hooks/useInspector.ts — one query per panel, each named for the
+     conversation it is about so a slow answer cannot land under another. */
+  const inspector = useInspector({
+    desksNow,
+    setDesks,
+    setRunning,
+    setRoom,
+    setPlan: setBuildPlan,
+  });
+  const { refreshVersions, refreshOverview, refreshRunning, refreshRoom, refreshBuildPlan } =
+    inspector;
 
   /* ------------------------------------------ everything in this project */
 
@@ -1795,6 +1790,7 @@ function Conversation() {
       // marked, and pressing the row you are already in looks like a dead button.
       setInConversation(opened.value.conversation);
       setOwnCopyHere(opened.value.ownCopy === true);
+      setUnavailable(opened.value.unavailable ?? null);
       // The shelf and running band are about the project in front. Clear the old
       // project's rows while this project's readings are on their way so they
       // can never briefly appear under the wrong project.
@@ -1802,28 +1798,23 @@ function Conversation() {
       setRunning([]);
       setDesks((current) => {
         const next = openDesk(current, opened.value);
-        const desk = next.byPath[opened.value.path];
+        const was = next.byPath[opened.value.path];
         // Only the first time. A folder reopened in this sitting comes back
         // exactly as it was left; one with a conversation saved on disk gets
         // that conversation back, folded through the same reducer the live
         // stream runs. A folder where nothing was ever said stays empty, and
         // the first screen is the one that asks what you want to make.
-        if (desk === undefined) return next;
-        const named = changeDesk(next, opened.value.path, (one) => ({
-          ...one,
-          address: opened.value.address ?? one.address,
-          order:
-            opened.value.address == null || one.order.includes(opened.value.address)
-              ? one.order
-              : [...one.order, opened.value.address],
-        }));
-        if (desk.turns.length > 0) return named;
+        if (was === undefined) return next;
+        const address = opened.value.address ?? was.address;
+        const known = conversationIn(was, address);
         // One fold with one accumulator. Folding event by event copied the
         // whole array each time, so a ten-thousand-event transcript took
         // seconds to open with the window doing nothing else.
-        const revived = foldEvents(opened.value.history);
-        if (revived.length === 0) return named;
-        return changeDesk(named, opened.value.path, (one) => ({ ...one, turns: revived }));
+        const turns = known.turns.length > 0 ? known.turns : foldEvents(opened.value.history);
+        // The one way a conversation is shown. The shell has just read this one
+        // for us, so it arrives whole; a second hand-written field list here is
+        // how a field comes to be dropped by one of the two.
+        return showThread(next, opened.value.path, address, { turns });
       });
 
       void refreshVersions(opened.value.path);
@@ -1884,6 +1875,54 @@ function Conversation() {
   }, [open]);
 
   /**
+   * Everything a conversation the shell has just handed back puts on screen.
+   *
+   * The desk is emptied and refilled from what came back, because a thread half
+   * from one conversation and half from another is worse than either. What is
+   * known about this conversation alone — whether it works in a copy of the
+   * project, how far it may go — is set from the same answer, so no two callers
+   * can disagree about it. The versions and the spend belong to the project,
+   * not the conversation, so they stay.
+   *
+   * False when nothing was shown, and then the reason has been said.
+   */
+  const showOpened = useCallback(
+    (opened: OpenedProject): boolean => {
+      // Another tab or project choice won the race while this one was opening.
+      // It is live in the shell, but must not replace the newer choice.
+      if (desksNow.current.current !== opened.path) return false;
+      const turns = foldEvents(opened.history);
+      // A conversation that was written down but reads back as nothing is a
+      // fault, not an empty conversation. Blanking the desk would look like the
+      // conversation had been lost, so the desk stays and the reason is said.
+      if (opened.history.length > 0 && turns.length === 0) {
+        troubleHere(swapWords.unreadable);
+        return false;
+      }
+      setInConversation(opened.conversation);
+      setOwnCopyHere(opened.ownCopy === true);
+      setUnavailable(opened.unavailable ?? null);
+      setDesks((current) => showThread(current, opened.path, opened.address ?? null, { turns }));
+      refreshRoom({
+        project: opened.path,
+        ...(opened.address == null ? {} : { conversation: opened.address }),
+      });
+      refreshRunning({
+        project: opened.path,
+        ...(opened.address == null ? {} : { conversation: opened.address }),
+      });
+      setHowFarHere(opened.howFar ?? 'asking');
+      const project = desksNow.current.current;
+      if (project !== null) setConversations([]);
+      void bridge.conversations(project === null ? undefined : { project }).then((answer) => {
+        if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
+      });
+      return true;
+    },
+    [refreshRoom, refreshRunning, troubleHere],
+  );
+
+  /**
    * Put a different conversation on screen, or start a fresh one.
    *
    * The desk is emptied first and refilled from what comes back, because a
@@ -1892,7 +1931,7 @@ function Conversation() {
    * conversation, so they stay.
    */
   const swapConversation = useCallback(
-    async (path: string | null) => {
+    async (path: string | null, force = false) => {
       // Already here. Silent, because pressing the row you are on is a person
       // checking where they are, not asking for anything. A conversation
       // nothing has been said in yet is the same case: "new" from an empty
@@ -1904,11 +1943,14 @@ function Conversation() {
       // would have caught the two up.
       // Whatever screen is over the conversation, the new tab is the thing
       // being asked for, so the way out of it comes first.
-      setCanvasAt(null);
       goToScreen('chat');
       const showing = desksNow.current.byPath[desksNow.current.current ?? '']?.address ?? null;
       if (path !== null && path === inConversation && path === showing) return;
-      if (path === null && (desk?.turns.length ?? 0) === 0) {
+      // `force` is for the one caller that has just thrown the conversation on
+      // screen away: whatever the desk still holds belongs to a transcript that
+      // no longer exists, and the empty-thread guard read that as "already
+      // looking at a new one" and left the window with nothing.
+      if (!force && path === null && chat.turns.length === 0) {
         // Already looking at an empty one. Still worth getting out of the way
         // of it, since that is what was pressed.
         toChat();
@@ -1924,8 +1966,13 @@ function Conversation() {
       // turn only stops if somebody presses Stop on it.
       const projectAtStart = desksNow.current.current;
       const request = ++navigation.current;
+      // A new chat is one press, and this is its name. Two requests for the
+      // same name are one conversation; pressing New again is a second press
+      // and a second chat.
       const opened = await bridge.openConversation(
         path,
+        null,
+        path === null ? newPress() : null,
         projectAtStart === null ? undefined : { project: projectAtStart },
       );
       if (request !== navigation.current) return;
@@ -1933,72 +1980,9 @@ function Conversation() {
         troubleAt(projectAtStart === null ? {} : { project: projectAtStart }, opened.trouble);
         return;
       }
-      // Another tab/project choice won the race while this conversation was
-      // opening. It is live in the shell, but must not replace the newer choice.
-      if (desksNow.current.current !== opened.value.path) return;
-      const turns = foldEvents(opened.value.history);
-      // A conversation that was written down but reads back as nothing is a
-      // fault, not an empty conversation. Blanking the desk would look like the
-      // conversation had been lost, so the desk stays and the reason is said.
-      if (opened.value.history.length > 0 && turns.length === 0) {
-        troubleHere(swapWords.unreadable);
-        return;
-      }
-      setInConversation(opened.value.conversation);
-      setOwnCopyHere(opened.value.ownCopy === true);
-      setDesks((current) =>
-        changeDesk(current, opened.value.path, (one) => {
-          // The one being left goes down whole, so coming back to it finds it
-          // as it was rather than as something to be read off disk again.
-          const incoming =
-            opened.value.address == null ? undefined : one.parked[opened.value.address];
-          const withoutIncoming =
-            opened.value.address == null
-              ? one.parked
-              : Object.fromEntries(
-                  Object.entries(one.parked).filter(([address]) => address !== opened.value.address),
-                );
-          const parked =
-            one.address === null || one.address === opened.value.address
-              ? withoutIncoming
-              : {
-                  ...withoutIncoming,
-                  [one.address]: {
-                    turns: one.turns,
-                    doing: one.doing,
-                    counted: one.counted,
-                  },
-                };
-          return {
-            ...one,
-            turns,
-            doing: incoming?.doing ?? null,
-            counted: incoming?.counted ?? 0,
-            address: opened.value.address ?? null,
-            parked,
-            order:
-              opened.value.address == null || one.order.includes(opened.value.address)
-                ? one.order
-                : [...one.order, opened.value.address],
-          };
-        }),
-      );
-      refreshRoom({
-        project: opened.value.path,
-        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
-      });
-      refreshRunning({
-        project: opened.value.path,
-        ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
-      });
-      setHowFarHere(opened.value.howFar ?? 'asking');
-      const project = desksNow.current.current;
-      if (project !== null) setConversations([]);
-      void bridge.conversations(project === null ? undefined : { project }).then((answer) => {
-        if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
-      });
+      showOpened(opened.value);
     },
-    [inConversation, desk?.turns.length, refreshRoom, refreshRunning, toChat, troubleHere, troubleAt, goToScreen],
+    [inConversation, chat.turns.length, showOpened, toChat, troubleAt, goToScreen],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -2021,9 +2005,161 @@ function Conversation() {
         return;
       }
       setConversations(answer.value);
-      if (wasHere) await swapConversation(null);
+      /* Every view of it goes, not only the one that was in front: a tab left
+         pointing at a transcript that is not there any more is a tab that
+         fails the moment it is pressed. */
+      const project = here?.path;
+      if (project !== undefined) setDesks((current) => parkThread(current, project, path));
+      if (wasHere) await swapConversation(null, true);
     },
     [busy, inConversation, swapConversation, troubleHere],
+  );
+
+  /**
+   * Start another conversation out of one this project already has.
+   *
+   * Continue carries one editable note about where it got to; Fork carries the
+   * history itself — all of it, or as far as the exchange `said` names when a
+   * message is the thing that was pressed. Either way the shell hands back a
+   * whole conversation, and it goes on screen the way any other one does — the
+   * note it comes with is put in the box as a draft below, never sent.
+   *
+   * A row nobody has opened this sitting is only a file on disk, and both the
+   * note and the history are read from the session the shell is holding, so it
+   * is opened first — quietly, because what was asked for is the new
+   * conversation, not that one.
+   */
+  const startFrom = useCallback(
+    async (path: string, how: "continue" | "fork", said?: number): Promise<void> => {
+      const here = currentDesk(desksNow.current);
+      if (here === null) return;
+      const where: Where = { project: here.path };
+      if (!here.order.includes(path)) {
+        // Carrying a saved conversation on is idempotent by its own address, so
+        // there is no press to name.
+        const opened = await bridge.openConversation(path, null, null, where);
+        if (!opened.ok) {
+          troubleAt(where, opened.trouble);
+          return;
+        }
+      }
+      // The new conversation is the thing being asked for, so whatever screen
+      // is over the old one comes out of the way first.
+      goToScreen("chat");
+      const request = ++navigation.current;
+      const answer =
+        how === "continue"
+          ? await bridge.continueConversation(path, where)
+          : await bridge.forkConversation(path, said ?? null, where);
+      if (request !== navigation.current) return;
+      if (!answer.ok) {
+        troubleAt(where, answer.trouble);
+        return;
+      }
+      setTidying(false);
+      setRoom(null);
+      if (!showOpened(answer.value)) return;
+      // The note is the shell's words about work that happened, and it lands in
+      // the box for the person to cut down or throw away. Editing it and
+      // pressing send is their press, so nothing is sent from here.
+      if (how === "continue" && answer.value.handoff !== undefined) {
+        writeDraft(
+          { project: answer.value.path, address: answer.value.address ?? null },
+          () => answer.value.handoff ?? "",
+        );
+      }
+    },
+    [showOpened, troubleAt, goToScreen, writeDraft],
+  );
+
+  /**
+   * Point this conversation at the folder its work is in now.
+   *
+   * The repair for a conversation whose recorded folder is gone. The folder is
+   * chosen with the same picker everything else uses, and the shell does the
+   * rest: the record moves, the same transcript carries on, and the band above
+   * the thread goes away because there is nothing left to say. A folder that is
+   * not there, or is not a checkout of this project, is refused by the shell and
+   * the reason lands where a failure always does.
+   */
+  const relinkConversation = useCallback(async (): Promise<void> => {
+    const here = currentDesk(desksNow.current);
+    if (here === null || here.address === null) return;
+    const where: Where = { project: here.path, conversation: here.address };
+    const picked = await bridge.chooseFolder();
+    if (!picked.ok) {
+      troubleAt(where, picked.trouble);
+      return;
+    }
+    // Cancelled. Nothing was chosen, so nothing is changed and nothing is said:
+    // a sentence about a press nobody completed is noise.
+    if (picked.value === null) return;
+    setRelinking(true);
+    try {
+      const answer = await bridge.relinkConversation(picked.value, where);
+      if (!answer.ok) {
+        troubleAt(where, answer.trouble);
+        return;
+      }
+      setTidying(false);
+      setRoom(null);
+      showOpened(answer.value);
+    } finally {
+      setRelinking(false);
+    }
+  }, [showOpened, troubleAt]);
+
+  /**
+   * Start somewhere new, carrying a note about what was said here.
+   *
+   * The other half of the plan's offer, and deliberately a new conversation
+   * rather than a repair: nothing is written where the missing folder used to
+   * be, and the note lands in the box for somebody to edit before it is sent.
+   */
+  const continueFromHere = useCallback((): void => {
+    const here = currentDesk(desksNow.current);
+    if (here === null || here.address === null) return;
+    void startFrom(here.address, "continue");
+  }, [startFrom]);
+
+  /**
+   * Fork the conversation on screen at one of its messages.
+   *
+   * The message is named by how many things the person had said by then, which
+   * is the one coordinate this window and the record share: both count the
+   * things said off the same transcript. What comes back is a conversation of
+   * its own holding the history up to that exchange; the files are the same
+   * files, because a fork branches the conversation and never the folder.
+   */
+  const forkHere = useCallback(
+    (said: number): void => {
+      const here = currentDesk(desksNow.current);
+      if (here === null || here.address === null) return;
+      void startFrom(here.address, "fork", said);
+    },
+    [startFrom],
+  );
+
+  /**
+   * Out of the list, or back into it.
+   *
+   * Archive is not close and not delete: the tab, the run and the files are
+   * untouched, and only the shelf stops drawing the row among the days. The
+   * list that comes back carries that on every row, so the window keeps no
+   * second copy of it to fall out of step.
+   */
+  const archiveConversation = useCallback(
+    async (path: string, on: boolean): Promise<void> => {
+      const here = currentDesk(desksNow.current);
+      const where: Where = here === null ? {} : { project: here.path };
+      const answer = await bridge.archiveConversation(path, on, where);
+      if (!answer.ok) {
+        troubleAt(where, answer.trouble);
+        return;
+      }
+      setConversations(answer.value);
+    },
+    [troubleAt],
   );
 
   /**
@@ -2037,6 +2173,7 @@ function Conversation() {
    */
   const bringWorkBack = useCallback(
     async (path: string) => {
+      const { ownCopyWhere } = await import("./lib/owncopy");
       const answer = await bridge.worktreeLand(ownCopyWhere(path));
       if (!answer.ok) {
         troubleHere(answer.trouble);
@@ -2054,6 +2191,7 @@ function Conversation() {
 
   const throwWorkAway = useCallback(
     async (path: string) => {
+      const { ownCopyWhere } = await import("./lib/owncopy");
       const answer = await bridge.worktreeDrop(ownCopyWhere(path));
       if (!answer.ok) {
         troubleHere(answer.trouble);
@@ -2070,9 +2208,15 @@ function Conversation() {
   const letFigmaIn = useCallback(async (): Promise<string | null> => {
     const already = (connected?.tools ?? []).some((one) => one.name === 'figma');
     if (!already) {
+      const { REACHABLE, asServer } = await import("./agent/pi/reach");
       const figma = REACHABLE.find((one) => one.id === 'figma');
       if (figma !== undefined) {
-        const saved = await bridge.connectedSave([...(connected?.tools ?? []), asServer(figma)]);
+        const here = currentDesk(desksNow.current);
+        const where: Where = here === null ? {} : { project: here.path };
+        const saved = await bridge.connectedSave(
+          [...(connected?.tools ?? []), asServer(figma)],
+          where,
+        );
         if (saved.ok) setConnected(saved.value);
         else troubleHere(saved.trouble);
       }
@@ -2169,6 +2313,14 @@ function Conversation() {
   const [addonSays, setAddonSays] = useState<Readonly<Record<string, string>>>({});
   const [addonsHere, setAddonsHere] = useState<readonly AddonHere[]>([]);
   const [addonsRunning, setAddonsRunning] = useState<number | null>(null);
+  /** Every add-on this project can see, in the eight states, and what installing
+   *  one needs from this computer. Same read, same moment. */
+  const [extensionsHere, setExtensionsHere] = useState<readonly ExtensionHere[]>([]);
+  const [addonSetup, setAddonSetup] = useState<AddonSetup | null>(null);
+  const [addonStopping, setAddonStopping] = useState<Stopping | null>(null);
+  /** What the last stop left on disk, in the shelf's own words. Cleared when
+   *  the next change starts, so it is never read as news about that one. */
+  const [stoppedSays, setStoppedSays] = useState<string | null>(null);
 
   /** What the chosen model was measured doing on a long job, or null for one
    *  nothing has measured — which is most of them. */
@@ -2184,217 +2336,15 @@ function Conversation() {
   /** How much room this app is taking. Asked when the sheet opens: it walks
    *  folders, and the sheet is open for seconds. */
   const [storage, setStorage] = useState<StorageNow | null>(null);
+  /** What has been deleted, and the rule it is kept under. Listing it walks the
+   *  trash folder, so it is asked with the folders above rather than at launch. */
+  const [trash, setTrash] = useState<TrashView | null>(null);
+  /** What the one-time move of older chats found. Read with the two above, so
+   *  the screen somebody opens to ask "what happened to my chat" has it. */
+  const [migration, setMigration] = useState<MigrationNow | null>(null);
   /** What this Mac reports about Computer use, or null before it is asked. */
   const [computerStatus, setComputerStatus] = useState<ComputerStatus | null>(null);
 
-
-  /* The canvases this project has. Drawing one changes nothing until Start. */
-  const [flows, setFlows] = useState<readonly Flow[]>([]);
-  const flowsNow = useRef(flows);
-  flowsNow.current = flows;
-  /* Which canvas is in front, or null when a conversation is. A canvas is a tab
-     like a conversation is a tab, and only one thing is in front at a time. */
-  const [canvasAt, setCanvasAt] = useState<string | null>(null);
-  const canvasNow = useRef<string | null>(null);
-  canvasNow.current = canvasAt;
-  /* Whether the one in front is filling the window. */
-  const [canvasFull, setCanvasFull] = useState(false);
-
-  /* Read on the way into a folder, and never under one somebody has switched
-     away from while the answer was in the air. */
-  useEffect(() => {
-    const project = openProject;
-    setCanvasAt(null);
-    setCanvasFull(false);
-    if (project === null) {
-      setFlows([]);
-      return;
-    }
-    void bridge.flowLoad({ project }).then((answer) => {
-      if (desksNow.current.current !== project) return;
-      setFlows(answer.ok ? answer.value : []);
-    });
-  }, [openProject]);
-
-  /* On screen at once, on disk a moment later. Typing what a block should do is
-     a keystroke at a time, and a file written per keystroke is a file written
-     for nothing.
-     
-     One timer per canvas, not one for all of them: a single timer meant a touch
-     on the second canvas cancelled the first one's write, and that edit was
-     gone until something else happened to it. */
-  /* One held write per canvas. One shared timer looked like the same thing and
-     was not: touching a second canvas cancelled the first one's write. */
-  const savingFlows = useRef(heldWrites());
-  useEffect(() => () => savingFlows.current.now(), []);
-
-  const changeFlow = useCallback((next: Flow) => {
-    setFlows((held) => withFlow(held, next));
-    const path = desksNow.current.current;
-    if (path === null) return;
-    savingFlows.current.soon(next.id, () => {
-      void bridge.flowSave(next, { project: path });
-    });
-  }, []);
-
-  /** A canvas of its own, in front. */
-  const newCanvas = useCallback(() => {
-    goToScreen('canvas');
-    const made = newFlow();
-    changeFlow(made);
-    startScreen(() => setCanvasAt(made.id));
-  }, [changeFlow, goToScreen, startScreen]);
-
-  /** The one somebody last drew on, or a new one. What the shelf's row does. */
-  /* A canvas is a tab rather than a sheet, so opening one has to put away
-     whatever sheet is in front of it — history over the canvas was history
-     that could not be left. */
-  const openCanvas = useCallback(() => {
-    goToScreen('canvas');
-    const held = flowsNow.current;
-    if (held.length === 0) {
-      newCanvas();
-      return;
-    }
-    startScreen(() => setCanvasAt(held[held.length - 1]!.id));
-  }, [newCanvas, goToScreen, startScreen]);
-
-  const forgetCanvas = useCallback((id: string) => {
-    setFlows((held) => withoutFlow(held, id));
-    setCanvasAt((was) => (was === id ? null : was));
-    const path = desksNow.current.current;
-    if (path !== null) void bridge.flowForget(id, { project: path });
-  }, []);
-
-  /**
-   * Send one block, as an ordinary turn.
-   *
-   * A block is not a second kind of agent and not background work: it is a
-   * message in this canvas's own conversation, with the same tools, the same
-   * Guard and the same rung a person typing there would get. What makes it a
-   * flow is only that the next one is sent when this one settles.
-   */
-  const sendBlock = useCallback(
-    async (flow: Flow, block: Block): Promise<void> => {
-      const path = desksNow.current.current;
-      if (path === null || flow.conversation === null) return;
-      const where: Where = {
-        project: path,
-        conversation: flow.conversation,
-        ...(flow.repo === null ? {} : { repo: flow.repo }),
-      };
-      await bridge.goAsFarAs(flow.howFar, where);
-      // Pictures go the way a message's do; text a block carries is already in
-      // what it is asked, put there by asksOf.
-      const shown = (block.files ?? [])
-        .filter((one) => one.kind === 'image')
-        .map((one) => ({
-          kind: 'image' as const,
-          name: one.name,
-          mimeType: one.mimeType,
-          bytes: one.bytes,
-        }));
-      const answer = await bridge.prompt(
-        asksOf(block),
-        shown.length === 0 ? undefined : shown,
-        block.lookFirst === true ? { lookFirst: true } : undefined,
-        where,
-      );
-      if (!answer.ok) {
-        troubleAt(where, answer.trouble);
-        changeFlow({ ...flow, running: null });
-      }
-    },
-    [troubleAt, changeFlow],
-  );
-
-  /** Open the conversation this canvas drives, making one the first time. */
-  const conversationForFlow = useCallback(
-    async (flow: Flow): Promise<string | null> => {
-      if (flow.conversation !== null) return flow.conversation;
-      const path = desksNow.current.current;
-      if (path === null) return null;
-      // Its own conversation, opened but not switched to: the canvas stays in
-      // front, and what the flow says is readable afterwards like anything else
-      // said in this project.
-      const opened = await bridge.openConversation(null, {
-        project: path,
-        ...(flow.repo === null ? {} : { repo: flow.repo }),
-      });
-      if (!opened.ok) {
-        troubleHere(opened.trouble);
-        return null;
-      }
-      return opened.value.address ?? null;
-    },
-    [troubleHere],
-  );
-
-  /** The last thing said in a conversation, and how many turns it took. Read
-   *  off the thread rather than reconstructed: it is what is on the screen. */
-  const cameTo = useCallback((project: string, conversation: string, since: number): BlockSaid => {
-    const desk = desksNow.current.byPath[project];
-    const turns =
-      desk === undefined
-        ? []
-        : conversation === desk.address
-          ? desk.turns
-          : (desk.parked[conversation]?.turns ?? []);
-    const words = turns.filter((one) => one.kind === 'said' && one.from === 'graphe');
-    const last = words[words.length - 1];
-    return {
-      text: last !== undefined && last.kind === 'said' ? last.text.trim() : '',
-      turns: Math.max(1, words.length - since),
-      at: Date.now(),
-    };
-  }, []);
-
-  /** Take the flow to the next block, sending it unless it is a gate. */
-  const goOn = useCallback(
-    (flow: Flow, from: Flow) => {
-      void from;
-      const next = nextUp(flow);
-      const moved: Flow = next === null ? flow : { ...flow, running: next.id, rounds: 1 };
-      changeFlow(moved);
-      // A gate sends nothing. It stops here and waits to be opened.
-      if (next !== null && !isGate(next)) void sendBlock(moved, next);
-    },
-    [changeFlow, sendBlock],
-  );
-
-  const startFlow = useCallback(() => {
-    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
-    if (flow === undefined || !canStart(flow)) return;
-    void (async () => {
-      const conversation = await conversationForFlow(flow);
-      if (conversation === null) return;
-      const clean: Flow = { ...flow, conversation, startedAt: Date.now(), running: null, rounds: 0, done: [] };
-      const first = nextUp(clean);
-      if (first === null) return;
-      const going: Flow = { ...clean, running: first.id, rounds: 1 };
-      changeFlow(going);
-      if (!isGate(first)) await sendBlock(going, first);
-    })();
-  }, [changeFlow, conversationForFlow, sendBlock]);
-
-  /** Open a gate: mark it done and carry on to whatever follows. */
-  const openGate = useCallback(() => {
-    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
-    if (flow === undefined || flow.running === null) return;
-    goOn({ ...flow, done: [...flow.done, flow.running], running: null }, flow);
-  }, [goOn]);
-
-  const stopFlow = useCallback(() => {
-    const path = desksNow.current.current;
-    const flow = flowsNow.current.find((one) => one.id === canvasNow.current);
-    if (flow === undefined) return;
-    // The turn in flight is stopped the way any turn is; what has finished
-    // stays finished, because it happened.
-    if (path !== null && flow.conversation !== null) {
-      void bridge.stop({ project: path, conversation: flow.conversation });
-    }
-    changeFlow({ ...flow, running: null });
-  }, [changeFlow]);
 
   /* Everything the agent does, in order. Subscribed once for the life of the
      window: the bridge outlives any one prompt, and re-subscribing per send
@@ -2430,9 +2380,16 @@ function Conversation() {
              it — so the app began executing a plan nobody had said yes to. */
           const found = stepsFromReport(report);
           const project = notice.project;
-          if (project !== null && found.steps.length > 0) {
-            setDesks((current) =>
-              changeDesk(current, project, (one) => ({
+          if (found.steps.length > 0) {
+            /* The card belongs to the conversation whose report produced it, not
+               to whatever is in front: a look-around runs while somebody may be
+               reading another chat, and a checklist that appears under the wrong
+               one is a list they never asked for. */
+            setDesks((current) => {
+              const owner = spokenIn(current, notice);
+              // A notice about no folder at all has nowhere to file it.
+              if (owner === null) return current;
+              return changeThread(current, owner, (one) => ({
                 ...one,
                 turns: [
                   ...one.turns,
@@ -2446,8 +2403,8 @@ function Conversation() {
                     answered: null,
                   },
                 ],
-              })),
-            );
+              }));
+            });
           }
           // Whether "now build it" gets a checklist depends on what came back.
           // Research that laid out steps leaves a card to say yes to. Research
@@ -2546,57 +2503,6 @@ function Conversation() {
             }
           }
 
-          // A canvas moves on when its turn settles. The whole of what makes a
-          // flow a flow: one block, then the next, in the same conversation.
-          if (notice.conversation != null) {
-            const going = flowsNow.current.find(
-              (one) => one.conversation === notice.conversation && one.running !== null,
-            );
-            const block = going?.blocks.find((one) => one.id === going.running) ?? null;
-            if (going !== undefined && block !== null) {
-              // A goal block asks the project whether it is there yet, and goes
-              // round again while it is not — that is the whole of what makes it
-              // a goal rather than one more turn.
-              if (block.kind === 'goal' && going.rounds < CANVAS_ROUNDS) {
-                void bridge
-                  .goalVerify({ project: where })
-                  .then((checked) => {
-                    const still = flowsNow.current.find((one) => one.id === going.id);
-                    if (still === undefined || still.running !== block.id) return;
-                    const passed = checked.ok && checked.value.passed;
-                    if (passed) {
-                      const came = cameTo(where, notice.conversation as string, 0);
-                      goOn(
-                        {
-                          ...still,
-                          done: [...still.done, block.id],
-                          running: null,
-                          said: { ...still.said, [block.id]: came },
-                        },
-                        still,
-                      );
-                      return;
-                    }
-                    const why = checked.ok ? checked.value.reason : 'the checks did not answer.';
-                    const again: Flow = { ...still, rounds: still.rounds + 1 };
-                    changeFlow(again);
-                    void sendBlock(again, { ...block, says: carryOnWords(block.says, why) });
-                  })
-                  .catch(() => undefined);
-              } else {
-                const came = cameTo(where, notice.conversation, 0);
-                goOn(
-                  {
-                    ...going,
-                    done: [...going.done, block.id],
-                    running: null,
-                    said: { ...going.said, [block.id]: came },
-                  },
-                  going,
-                );
-              }
-            }
-          }
         }
 
         // Pi tidies on its own as well as when asked, and the ring says the
@@ -2613,6 +2519,20 @@ function Conversation() {
           // The app's own messages are already out of this: the shell takes
           // them out on the way, because the shell is what queued them.
           setQueued((was) => ({ ...was, [owner]: words }));
+        }
+        /* Sends waiting for the folder, taken whole from the shell that holds
+           them. Added and removed by that one message rather than one event
+           each: the window cannot pair a wait with its own start by the words,
+           and two sends of the same sentence are two waits. */
+        if (notice.event.type === 'queued-for-folder') {
+          const waiting = notice.event.waiting;
+          const owner = keyOf(notice.project ?? '', notice.conversation ?? '');
+          setQueuedForFolder((was) => {
+            if (waiting.length > 0) return { ...was, [owner]: waiting };
+            if (!(owner in was)) return was;
+            const { [owner]: _gone, ...rest } = was;
+            return rest;
+          });
         }
         // The agent has begun on one of the queued messages, so it is not
         // waiting any more. Pi reports this drain through its own bookkeeping
@@ -2692,10 +2612,6 @@ function Conversation() {
       refreshRunning,
       refreshBuildPlan,
       lookAround,
-      cameTo,
-      changeFlow,
-      goOn,
-      sendBlock,
       movePane,
       opensItself,
       pageAtNow,
@@ -2730,8 +2646,20 @@ function Conversation() {
       setAddonSays(answer.value.says);
       setAddonsHere(answer.value.each);
       setAddonsRunning(answer.value.running);
+      setExtensionsHere(answer.value.here);
+      setAddonSetup(answer.value.setup);
+      setAddonStopping(answer.value.stopping);
     });
   }, [addMore, settingsOpen]);
+
+  /** The trash's two presses, wired to the shell. Every press that lands lists
+   *  the trash again: what is left in the list is the proof it worked. */
+  const trashHere = useMemo(() => trashActions(bridge, setTrash, say), [say]);
+
+  /** The move's two presses: the check again, and showing the copies it kept.
+   *  The check is the same run the app does at launch, so what comes back is
+   *  the shell's answer and not a hope. */
+  const movedHere = useMemo(() => migrationActions(bridge, setMigration, say), [say]);
 
   /* Only while the sheet is open, and once each time it opens. */
   useEffect(() => {
@@ -2739,7 +2667,9 @@ function Conversation() {
     void bridge.storage().then((answer) => {
       if (answer.ok) setStorage(answer.value);
     });
-  }, [settingsOpen]);
+    trashHere.reload();
+    movedHere.reload();
+  }, [settingsOpen, trashHere, movedHere]);
 
   /* The moments the targets are written against, so "under 400ms to first
      paint" is a number somebody can read rather than a hope. */
@@ -2790,51 +2720,55 @@ function Conversation() {
   const [watchAt, setWatchAt] = useState<string | null>(null);
   const [watched, setWatched] = useState<Watched>(NOTHING_WATCHED);
 
+  /* Who is watching, and whether anybody is, lives in `preview/live.ts`: one
+     stream per project however many things look at it, nothing at all while the
+     window is minimised or behind another one, and frames nobody asked for
+     dropped. This side only says what it wants and draws what arrives. */
+  const live = useMemo(
+    () =>
+      liveFrames({
+        watch: (project, on) => {
+          void bridge.watchBrowser(on, { project }).then((answer) => {
+            // A refused start is not a stream. Saying so beats a pane waiting
+            // for a picture that is never coming.
+            if (on && !(answer.ok && answer.value)) {
+              setWatchAt((was) => (was === project ? null : was));
+            }
+          });
+        },
+      }),
+    [],
+  );
+
   /* The pictures arrive from the shell, which is the only side of the app that
      can reach a service on this machine. */
+  useEffect(() => bridge.onBrowserFrame((frame) => live.deliver(frame)), [live]);
+
+  /* Nothing is asked for while there is nothing to draw it on. */
+  useEffect(() => whenHidden((hidden) => live.hidden(hidden)), [live]);
+
+  /* Looking is what asks for the stream, and looking away gives it back. The
+     stream belongs to the project, so turning it off reaches the one that
+     turned it on even after somebody has switched to another. */
   useEffect(() => {
-    return bridge.onBrowserFrame((frame) => {
-      setWatched((was) => (frame.project === watchAt ? watching(was, frame.bytes) : was));
+    if (watchAt === null) return;
+    return live.subscribe(watchAt, (frame) => {
+      setWatched((was) => watching(was, frame.bytes));
     });
-  }, [watchAt]);
+  }, [live, watchAt]);
 
-  /** Which ask for the stream is the live one. A second press while the first
-   *  is still travelling must not have its answer arrive afterwards and turn
-   *  watching back on. */
-  const watchAsked = useRef(0);
-
-  /** Whose browser is being watched. Kept apart from whichever project is in
-   *  front: turning a stream off has to reach the project that turned it on,
-   *  and by the time somebody switches, that is no longer the one in front. */
-  const watchedProject = useRef<string | null>(null);
-
-  const watchTheBrowser = useCallback((want: boolean, project?: string | null) => {
-    const path = project === undefined ? desksNow.current.current : project;
-    const mine = watchAsked.current + 1;
-    watchAsked.current = mine;
+  /** Watch the browser of whichever project is in front, or stop watching. */
+  const watchTheBrowser = useCallback((want: boolean) => {
     setWatched(NOTHING_WATCHED);
-    if (!want) {
-      setWatchAt(null);
-      watchedProject.current = null;
-      void bridge.watchBrowser(false, path === null ? undefined : { project: path });
-      return;
-    }
-    watchedProject.current = path;
-    void bridge
-      .watchBrowser(true, path === null ? undefined : { project: path })
-      .then((answer) => {
-        if (watchAsked.current !== mine) return;
-        setWatchAt(answer.ok && answer.value ? path : null);
-      });
+    setWatchAt(want ? desksNow.current.current : null);
   }, []);
 
   /* A browser nobody is watching should not be drawing itself. Switching
-     project, or closing the pane, is nobody watching — and the stream is turned
-     off on the project that started it, not on whichever is now in front. */
+     project, or closing the pane, is nobody watching. */
   useEffect(() => {
     if (watchAt === null) return;
-    if (openProject === watchedProject.current && pane !== 'off') return;
-    watchTheBrowser(false, watchedProject.current);
+    if (openProject === watchAt && pane !== 'off') return;
+    watchTheBrowser(false);
   }, [openProject, pane, watchAt, watchTheBrowser]);
 
   /** Whether each conversation's run is waiting for somebody, by its owner. */
@@ -2866,7 +2800,7 @@ function Conversation() {
         return rest;
       });
       setDesks((current) =>
-        changeDesk(current, desk.path, (one) => ({
+        changeThread(current, { project: desk.path, address: desk.address }, (one) => ({
           ...one,
           turns: one.turns.map((t) => (t.kind === 'said' && (t as { streaming: boolean }).streaming ? { ...t, streaming: false } : t)),
         })),
@@ -2985,14 +2919,18 @@ function Conversation() {
    *  behind it is litter. */
   const openInEditor = useCallback(() => {
     setSwitching(false);
-    void bridge.openInEditor().then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.openInEditor(undefined, where).then((answer) => {
       if (!answer.ok) troubleHere(answer.trouble);
     });
   }, [troubleHere]);
 
   const revealFolder = useCallback(() => {
     setSwitching(false);
-    void bridge.revealFolder().then((answer) => {
+    const here = currentDesk(desksNow.current);
+    const where: Where = here === null ? {} : { project: here.path };
+    void bridge.revealFolder(where).then((answer) => {
       if (!answer.ok) troubleHere(answer.trouble);
     });
   }, [troubleHere]);
@@ -3015,6 +2953,8 @@ function Conversation() {
       skillsOpen ||
       connectedOpen ||
       addMore ||
+      worktreeOpen ||
+      addonAsk !== null ||
       paletteOpen ||
       graphOpen ||
       reviewsOpen ||
@@ -3022,8 +2962,7 @@ function Conversation() {
       clashPath !== null ||
       changesOpen ||
       asking ||
-      helpersAt !== null ||
-      designAt !== null;
+      helpersAt !== null;
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -3092,17 +3031,6 @@ function Conversation() {
           return;
         case 'open':
           void browse();
-          return;
-        case 'design':
-          // Design toggles on and off on the same key, like the shelf. Only a
-          // switch from another screen clears the rest.
-          startScreen(() => {
-            setDesignAt((was) => {
-              if (was !== null) return null;
-              goToScreen("design");
-              return "styles";
-            });
-          });
           return;
         case 'next':
         case 'previous': {
@@ -3190,7 +3118,8 @@ function Conversation() {
     changesOpen,
     asking,
     helpersAt,
-    designAt,
+    addonAsk,
+    worktreeOpen,
   ]);
 
   /* ----------------------------------------------------------------- saying */
@@ -3204,11 +3133,7 @@ function Conversation() {
    * estimate from a guess into a measurement (COST-DESIGN §2).
    */
   const deliver = useCallback(
-    async (text: string, task: Task, ways?: { lookFirst?: boolean; queue?: 'followUp' }) => {
-      /* A recorded walkthrough is a brief handoff from the page. Once somebody
-         sends their next message, it has done its job; leaving its “Look” row
-         parked above the composer makes it read as still recording. */
-      setRecorded(null);
+    async (text: string, task: Task, ways?: PromptOptions) => {
       // Ownership is captured before reading attachments: a large image can
       // take long enough to decode for somebody to switch tabs meanwhile.
       const desk = currentDesk(desksNow.current);
@@ -3217,13 +3142,16 @@ function Conversation() {
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       };
       const owner = desk === null ? null : keyOf(desk.path, desk.address ?? '');
-      /* Somebody has said something, so the run that was working a list down
-         starts its rounds again from zero, and whatever they stopped is behind
-         them. The shell holds both — it is what sends the rounds. */
-      void owner;
-      // What is in the box at the moment of sending — never a snapshot from
-      // whenever this callback was last rebuilt (see `attachmentsNow`).
-      const inTheBox = attachmentsNow.current;
+      /* The conversation this message belongs to, as an address rather than a
+         key. What was said in it, what it brought in and the mode it is working
+         in all go there, whether or not it is still the one on screen. */
+      const mine: Owned | null =
+        desk === null ? null : { project: desk.path, address: desk.address };
+      // What is in the box at the moment of sending: the box of the
+      // conversation in front now — the one this message belongs to — read off
+      // the desk here rather than from whenever this callback was last rebuilt
+      // (see `attachmentsNow`).
+      const inTheBox = desk === null ? attachmentsNow.current : chat.attachments;
       // A model that cannot read pictures never gets sent one, whichever door
       // the message came through. The composer stops this at the box; a note
       // drawn on the page goes straight to here, and used to carry the picture
@@ -3231,12 +3159,7 @@ function Conversation() {
       // pre-empt. The pictures stay put, so the line explaining why is still
       // on screen beside them.
       const blind = readsPictures(connection) === false;
-      // And the box is empty afterwards. It used to keep them: a picture
-      // attached once went out again with every message after it, so a model
-      // that could not read pictures failed on the next message too, and the
-      // one after that, and nothing on screen said why.
       const held = blind && inTheBox.some((one) => one.kind === "image");
-      if (inTheBox.length > 0 && !held) emptyTheBox();
 
       // The pictures go along for the ride: read into the base64 the shell
       // expects, and — the same moment — recorded in the overview as the
@@ -3245,6 +3168,8 @@ function Conversation() {
       // the agent is still a reference somebody meant it to have.
       const reference: Reference[] = [];
       const pictures: PromptAttachment[] = [];
+      // The ones the window itself could not read, named if the send fails.
+      const unread: string[] = [];
       // Pasting a Figma address turns it into a chip and takes it out of the
       // box, so unless it is put back here the agent never hears the link at
       // all — it sees a message about a design it was never given.
@@ -3267,7 +3192,8 @@ function Conversation() {
         const travels = attached.kind === "document" || (attached.kind === "image" && !blind);
         if (travels && attached.file !== undefined) {
           const bytes = await pictureBytes(attached.file);
-          if (bytes !== null) {
+          if (bytes === null) unread.push(attached.name);
+          else
             pictures.push({
               kind: attached.kind === "document" ? "document" : "image",
               name: attached.name,
@@ -3277,48 +3203,61 @@ function Conversation() {
               mimeType: pictureType(attached.name, attached.file.type),
               bytes,
             });
-          }
         }
       }
 
       setDesks((current) => {
-        const update = (one: Desk): Desk => {
-          const started = { task, startedAt: Date.now() };
-          const conversation = target.conversation;
-          if (conversation !== undefined && conversation !== one.address) {
-            const parked = one.parked[conversation];
-            if (parked === undefined) return one;
-            return {
-              ...one,
-              references: [...one.references, ...reference],
-              parked: {
-                ...one.parked,
-                [conversation]: { ...parked, doing: parked.doing ?? started },
-              },
-            };
-          }
-          return {
-            ...one,
-            // Never over the top of a job already in flight. Queueing a second
-            // message used to replace the running one's task and start time.
-            doing: one.doing ?? started,
-            references: [...one.references, ...reference],
-          };
-        };
-        return target.project === undefined
-          ? changeCurrent(current, update)
-          : changeDesk(current, target.project, update);
+        const started = { task, startedAt: Date.now() };
+        const began = (one: Chat) => ({
+          ...one,
+          // Never over the top of a job already in flight. Queueing a second
+          // message used to replace the running one's task and start time.
+          doing: one.doing ?? started,
+          references: [...one.references, ...reference],
+        });
+        return mine === null ? changeTheFront(current, began) : changeThread(current, mine, began);
       });
+      /* The sentence and its pictures come back to the box only when the shell
+         has refused the message, so it is put back below rather than here. */
+      const putBack = (): void => {
+        if (mine === null) writeDraft(null, () => text);
+        else putBackInBox(mine, text);
+      };
       goBusy();
       if (owner !== null) holdSend(owner);
       try {
         const said =
           links.length === 0 ? text : `${text}\n\n${ATTACH_WORDS.alsoLook(links)}`;
-        const reply = await bridge.prompt(said, pictures, ways, target);
-        if (!reply.ok) troubleAt(target, reply.trouble);
+        /* What the project shares goes with every message, including the first
+           one in a chat nobody has sent in yet — which is the case this is for.
+           A new chat carries the project's context and none of another chat's
+           attachments, output or questions; those are the other chat's. Read at
+           the moment of sending, so a list somebody has just edited travels. */
+        const shared = sharedNow.current;
+        const carried: PromptOptions =
+          shared.length === 0 ? { ...ways } : { ...ways, context: shared };
+        const reply = await bridge.prompt(said, pictures, carried, target);
+        if (!reply.ok) {
+          // Kept, not thrown away: what somebody wrote is theirs, and asking
+          // them to write it again because the provider was busy is the app
+          // arguing with them. The pictures were never taken, so they are still
+          // in the box beside it.
+          putBack();
+          troubleAt(
+            target,
+            unread.length === 0
+              ? reply.trouble
+              : { ...reply.trouble, because: `${reply.trouble.because} ${ATTACH_WORDS.notRead(unread)}` },
+          );
+          return;
+        }
+        // Taken now, and only from the conversation that sent: a box somebody
+        // has added to since had a second thought in it, and that stays.
+        if (!held) emptyTheBox(mine, inTheBox);
       } catch (cause) {
         // The bridge is not supposed to throw. If it ever does, the window says
         // something calm rather than turning white.
+        putBack();
         troubleAt(target, {
           what: STOPPED_PART_WAY,
           because: "Something went wrong on my side. Nothing has been changed.",
@@ -3331,7 +3270,7 @@ function Conversation() {
         if (owner !== null) letSendGo(owner);
       }
     },
-    [troubleAt, emptyTheBox, holdSend, letSendGo, connection, setRecorded],
+    [troubleAt, emptyTheBox, putBackInBox, holdSend, letSendGo, connection, writeDraft, chat.attachments],
   );
 
   /**
@@ -3353,10 +3292,7 @@ function Conversation() {
       setDesks((current) =>
         current.current === null
           ? current
-          : changeCurrent(current, (one) => ({
-              ...one,
-              turns: [...one.turns, said("you", text, sent)],
-            })),
+          : changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("you", text, sent)] })),
       );
 
       if (before === null) {
@@ -3384,10 +3320,7 @@ function Conversation() {
         // The sentence goes on the desk that has just been made, so it is not
         // lost with the screen it was typed on.
         setDesks((current) =>
-          changeCurrent(current, (one) => ({
-            ...one,
-            turns: [...one.turns, said("you", text, sent)],
-          })),
+          changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, said("you", text, sent)] })),
         );
       }
 
@@ -3445,10 +3378,7 @@ function Conversation() {
       const asking = effectiveHowFar === 'doing' ? null : priced.prompt;
       if (asking !== null) {
         setDesks((current) =>
-          changeCurrent(current, (one) => ({
-            ...one,
-            turns: [...one.turns, estimated(text, asking)],
-          })),
+          changeTheFront(current, (one) => ({ ...one, turns: [...one.turns, estimated(text, asking)] })),
         );
         return;
       }
@@ -3490,7 +3420,7 @@ function Conversation() {
       }
       await deliver(text, priced.task, { lookFirst });
     },
-    [deliver, desks, openProject, howFar, open, plans, say, goalChip, lookAround, picturesInTheBox, researchRuns],
+    [deliver, desks, openProject, howFar, open, plans, say, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans],
   );
 
   /* ------------------------------------------------------------ in line */
@@ -3504,6 +3434,10 @@ function Conversation() {
    */
   const hand = useCallback(
     (text: string, mode?: 'steer' | 'followUp') => {
+      // Read-only is a property of the conversation, not of the box: the
+      // keyboard, the palette and a drafted note all arrive here, so the
+      // refusal belongs here rather than only on the composer's own press.
+      if (unavailable !== null) return;
       if (openProject === null) {
         void send(text);
         return;
@@ -3533,16 +3467,16 @@ function Conversation() {
       // so the steer is laid down here just as `send` would.
       if (mode === 'steer') {
         setDesks((current) =>
-          changeDesk(current, desk.path, (one) => ({
-            ...one,
-            turns: [...one.turns, said('you', text)],
-          })),
+          changeThread(current, { project: desk.path, address: desk.address }, (one) => ({ ...one, turns: [...one.turns, said('you', text)] })),
         );
         // An interrupt carries words only — there is nowhere in a steer to put a
         // picture. So the box is emptied here too: left full, whatever was in it
         // went out with the *next* ordinary message instead, which is the
         // re-sending this was supposed to have ended.
-        if (attachmentsNow.current.length > 0) emptyTheBox();
+        const staged = conversationIn(desk, desk.address).attachments ?? [];
+        if (staged.length > 0) {
+          emptyTheBox({ project: desk.path, address: desk.address }, staged);
+        }
         void bridge.steer(text, {
           project: desk.path,
           conversation: desk.address ?? undefined,
@@ -3557,10 +3491,7 @@ function Conversation() {
         // all — and with a picture attached, which fails slowly, that gap was
         // the whole of the wait.
         setDesks((current) =>
-          changeDesk(current, desk.path, (one) => ({
-            ...one,
-            turns: [...one.turns, said('you', text, picturesInTheBox())],
-          })),
+          changeThread(current, { project: desk.path, address: desk.address }, (one) => ({ ...one, turns: [...one.turns, said('you', text, picturesInTheBox())] })),
         );
         // The same two switches the box is showing. A message queued while
         // "research" or "plan first" is on used to go out as a plain one: the
@@ -3602,7 +3533,7 @@ function Conversation() {
       // once is the point, not a turn that waits for the other's to finish.
       void send(text);
     },
-    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns],
+    [deliver, openProject, send, plans, howFar, emptyTheBox, goalChip, lookAround, picturesInTheBox, researchRuns, setPlans, unavailable],
   );
 
   /* A note written on the page joins the line when a turn of mine is going, and
@@ -3755,16 +3686,6 @@ function Conversation() {
     [reviewWhere, troubleHere, say],
   );
 
-  const mirrorReview = useCallback(
-    (id: string, on: boolean) => {
-      void bridge.reviewMirror(id, on, reviewWhere()).then((answer) => {
-        if (answer.ok) setReviewQ(answer.value);
-        else troubleHere(answer.trouble);
-      });
-    },
-    [reviewWhere, troubleHere],
-  );
-
   /** One clash read out of the two versions. Nothing on disk is touched to
    *  produce it, so closing the screen leaves the file as it was. */
   const openClash = useCallback(
@@ -3792,7 +3713,11 @@ function Conversation() {
             troubleHere(answer.trouble);
             return;
           }
-          say(conflictWords.wrote(path));
+          // The words a settled clash is reported in belong to the screen that
+          // shows one, which is not what a launch waits for.
+          void import("./diff/conflict").then(({ conflictWords }) => {
+            say(conflictWords.wrote(path));
+          });
           setClashes((was) => {
             const left = was.paths.filter((one) => one !== path);
             setClashPath(left[0] ?? null);
@@ -3810,10 +3735,12 @@ function Conversation() {
   const askAboutClash = useCallback(
     (path: string, places: number) => {
       const desk = currentDesk(desksNow.current);
-      void bridge.steer(conflictWords.reconcile(path, places), {
-        ...(desk === null ? {} : { project: desk.path }),
-        ...(clashes.address === '' ? {} : { conversation: clashes.address }),
-      });
+      void import("./diff/conflict").then(({ conflictWords }) =>
+        bridge.steer(conflictWords.reconcile(path, places), {
+          ...(desk === null ? {} : { project: desk.path }),
+          ...(clashes.address === '' ? {} : { conversation: clashes.address }),
+        }),
+      );
       setClashPath(null);
       setClashText(null);
       setClashes((was) => ({ ...was, paths: was.paths.filter((one) => one !== path) }));
@@ -3871,6 +3798,7 @@ function Conversation() {
             // Create a fresh conversation in the parent and rely on extra instruction
             await swapConversation(null);
             if (navigation.current !== request || currentDesk(desksNow.current)?.path !== project) return;
+            const { reviewPrompt } = await import("./components/ReviewsView");
             const base = reviewPrompt(item, repository, repo?.here ?? null);
             const extra = `\n\nThe PR's code has been checked out at ${prFolder}. Read files from there (for example ${prFolder}/src/App.tsx) and treat that folder as the PR root. Do not read from the open project folder for PR files.`;
             void send(`${base}${extra}`);
@@ -3893,22 +3821,12 @@ function Conversation() {
         }
         setInConversation(opened.conversation);
         setOwnCopyHere(opened.ownCopy === true);
-        setDesks((current) =>
-          changeDesk(current, opened.path, (one) => {
-            const incoming = opened.address == null ? undefined : one.parked[opened.address];
-            const withoutIncoming = opened.address == null ? one.parked : Object.fromEntries(Object.entries(one.parked).filter(([a]) => a !== opened.address));
-            const parked = one.address === null || one.address === opened.address ? withoutIncoming : { ...withoutIncoming, [one.address]: { turns: one.turns, doing: one.doing, counted: one.counted } };
-            return {
-              ...one,
-              turns,
-              doing: incoming?.doing ?? null,
-              counted: incoming?.counted ?? 0,
-              address: opened.address ?? null,
-              parked,
-              order: opened.address == null || one.order.includes(opened.address) ? one.order : [...one.order, opened.address],
-            };
-          }),
-        );
+        setUnavailable(opened.unavailable ?? null);
+        // The one way a conversation comes forward, the same as every other:
+        // the record it already had, with the turns the shell read for it. Two
+        // hand-written field lists is how a field comes to be dropped by one of
+        // them, which is what this was.
+        setDesks((current) => showThread(current, opened.path, opened.address ?? null, { turns }));
         refreshRoom({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
         refreshRunning({ project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) });
         setHowFarHere(opened.howFar ?? 'asking');
@@ -3922,9 +3840,15 @@ function Conversation() {
           item.headSha === null || item.headSha.trim() === ''
             ? null
             : { branch: item.headRef, sha: item.headSha };
+        const { reviewPrompt } = await import("./components/ReviewsView");
         const base = reviewPrompt(item, repository, prHere);
         // Add the prompt to the new conversation's desk and send it through the PR-rooted session.
-        setDesks((current) => changeDesk(current, opened.path, (one) => ({ ...one, turns: [...one.turns, said("you", base)] })));
+        setDesks((current) =>
+          changeThread(current, { project: opened.path, address: opened.address ?? null }, (one) => ({
+            ...one,
+            turns: [...one.turns, said("you", base)],
+          })),
+        );
         const promptWhere = { project: opened.path, ...(opened.address == null ? {} : { conversation: opened.address }) };
         void bridge.prompt(base, undefined, undefined, promptWhere).then((answer) => {
           if (!answer.ok) troubleAt(promptWhere, answer.trouble);
@@ -3963,67 +3887,72 @@ function Conversation() {
 
   /* A tab names a conversation inside a project, so going to one is at most two
      moves: bring the project to the front, then bring its conversation. */
-  /** The canvas an id names, or null when it names a conversation. One row
-   *  holds both, so the id has to say which it is. */
-  const canvasIn = (id: string): string | null => {
-    const { address } = ownerOf(id);
-    return address.startsWith('canvas:') ? address.slice(7) : null;
-  };
-
   const goToTab = useCallback(
     async (id: string) => {
       const { project, address } = ownerOf(id);
       const here = desksNow.current;
       if (here.current !== project) await open(project);
-      const canvas = canvasIn(id);
-      if (canvas !== null) {
-        startScreen(() => setCanvasAt(canvas));
-        return;
-      }
       const desk = desksNow.current.byPath[project];
       if (desk === undefined) return;
       // Ask the shell to resume it as well as swapping the renderer's words.
       // An idle session may have left the soft live-session cache; a visual-only
       // switch would then show a tab that could no longer receive a prompt.
       //
-      // The canvas comes off screen only once there is a conversation to put in
-      // its place: taken off first, a swap that bailed left neither.
       if (desk.address !== address) await swapConversation(address);
-      setCanvasAt(null);
     },
-    [open, swapConversation, startScreen],
+    [open, swapConversation],
   );
 
-  /** Closing a tab puts the conversation down; it does not throw it away.
-   *  Opening it again picks up where it was left. */
-  const closeTab = useCallback(
-    async (id: string) => {
-      const canvas = canvasIn(id);
-      if (canvas !== null) {
-        forgetCanvas(canvas);
+  /** The shelf's list, read again. Which conversations have a turn in flight is
+   *  the shell's to know, so the shell is what has to be asked. */
+  const refreshShelf = useCallback((): void => {
+    const project = desksNow.current.current;
+    if (project === null) return;
+    void bridge.conversations({ project }).then((answer) => {
+      if (answer.ok && desksNow.current.current === project) setConversations(answer.value);
+    });
+  }, []);
+
+  /**
+   * End the run in one conversation, named rather than the one in front.
+   *
+   * Stop is its own action, separate from closing a tab: closing is closing a
+   * view, and a turn somebody asked for is only ended by asking. The shelf is
+   * where a conversation whose tab has gone can still be reached.
+   */
+  const stopConversation = useCallback(
+    async (path: string): Promise<void> => {
+      const here = currentDesk(desksNow.current);
+      if (here === null) return;
+      const where: Where = { project: here.path, conversation: path };
+      const answer = await bridge.stop(where);
+      if (!answer.ok) {
+        troubleAt(where, answer.trouble);
         return;
       }
+      refreshShelf();
+    },
+    [refreshShelf, troubleAt],
+  );
+
+  /** Closing a tab puts the view down; it does not throw the conversation away.
+   *  Opening it again picks up where it was left, and a turn still running
+   *  carries on in the conversation it belongs to — the shelf keeps showing it
+   *  as working, and Stop is the press that ends it. */
+  const closeTab = useCallback(
+    async (id: string) => {
       const { project, address } = ownerOf(id);
       const desk = desksNow.current.byPath[project];
       if (desk === undefined) return;
-      /* Closing one mid-turn throws away work somebody is paying for, so it is
-         worth one question. Asked only while something is actually running. */
-      if (
-        preferencesNow.current.askBeforeClosing &&
-        stillWorkingIn(desk, address) &&
-        !window.confirm(STILL_WORKING)
-      ) {
-        return;
-      }
       // Closing the last tab used to take the whole project off the list with
       // it, which put somebody back on the list of projects for pressing the
       // small x on a tab. Closing a tab is closing a tab: the project stays
       // open and a fresh conversation takes the place of the one put down.
-      if (desk.address === address && Object.keys(desk.parked).length === 0) {
+      if ((desk.address ?? '') === address && threadsIn(desk).length <= 1) {
         // Nothing said in it yet, so there is nothing to put down and nothing
         // a new one would be different from. The press does nothing, which is
         // better than a flicker that ends where it started.
-        if (desk.turns.length === 0) return;
+        if (conversationIn(desk, address).turns.length === 0) return;
         await swapConversation(null);
         setDesks((current) => parkThread(current, project, address));
         void bridge.closeConversation({ project, conversation: address });
@@ -4044,10 +3973,66 @@ function Conversation() {
       setDesks((current) => parkThread(current, project, address));
       void bridge.closeConversation({ project, conversation: address });
     },
-    [forgetCanvas, swapConversation],
+    [swapConversation],
   );
 
   tabRow.handles(goToTab, closeTab);
+
+  /* ---------------------------------------------------------------- panes */
+
+  /**
+   * Keep the focused pane pointing at the conversation on screen.
+   *
+   * The desk is what the transcript is drawn from, so a pane and the desk
+   * disagreeing is the bug this prevents: a switch from anywhere — a shelf row,
+   * a tab, the palette, the shell starting a chat — moves the desk, and the
+   * focused pane follows it. The other pane is untouched, which is the whole
+   * point of having two.
+   */
+  useEffect(() => {
+    setPanes((current) => showIn(current, current.focused, desk?.address ?? null));
+  }, [desk?.address]);
+
+  /**
+   * Put the hand in a pane.
+   *
+   * This is the whole of "focusing a pane retargets the composer and the
+   * keyboard": everything that acts on a conversation reads the focused pane's
+   * through the desk, so focusing is not decoration. The desk is moved to the
+   * pane's conversation rather than the other way round, because there is one
+   * transcript and one runtime behind both views.
+   */
+  const focusOn = useCallback(
+    (id: ViewId) => {
+      const wanted = paneAt(panes, id);
+      if (wanted === null || wanted.id === panes.focused) return;
+      setPanes((current) => focusPane(current, id));
+      const desk = currentDesk(desksNow.current);
+      if (desk === null || wanted.conversation === null) return;
+      if (desk.address === wanted.conversation) return;
+      void swapConversation(wanted.conversation);
+    },
+    [panes, swapConversation],
+  );
+
+  /** Open a second pane on the same conversation, and focus it. Nothing is
+   *  asked of the shell: the desk already holds every open conversation whole,
+   *  so two views of one chat cost no second session. */
+  const splitPane = useCallback((): void => {
+    setPanes((current) => addPane(current, aimedAt));
+  }, [aimedAt]);
+
+  const dropPane = useCallback((id: ViewId): void => {
+    setPanes((current) => closePane(current, id));
+  }, []);
+
+  /** Follow the focus, or stay where it was put. */
+  const togglePin = useCallback((): void => {
+    setPanes((current) => pin(current, isPinned(current) ? null : current.focused));
+  }, []);
+
+
+
 
   /** Out of the line and back into the box, so a second thought can be changed
    *  rather than only cancelled. */
@@ -4065,6 +4050,12 @@ function Conversation() {
       ...(desk === null ? {} : { project: desk.path }),
       ...(desk?.address == null ? {} : { conversation: desk.address }),
     };
+    /* The chat the press was made in, taken now rather than read when the shell
+       answers: taking a line back is a round trip, and somebody can switch
+       while it is going. The words belong to the conversation that queued them,
+       not to whichever one is in front by the time they come back. */
+    const mine: Owned | null =
+      desk === null ? null : { project: desk.path, address: desk.address };
     const owner = desk === null ? null : keyOf(desk.path, desk.address ?? '');
     void bridge.takeBackQueue(target).then((answer) => {
       // The line did not come back, so it is still waiting behind the run. The
@@ -4078,15 +4069,13 @@ function Conversation() {
       // Nothing was queued: nothing to put in the box, and nothing on screen to
       // clear.
       if (words.length === 0) return;
-      setDraft((was) => intoTheBox(was, words));
-      // And out of the conversation, or the same sentence is on screen twice:
-      // once as though it had been said, once in the box waiting to be.
-      setDesks((current) =>
-        changeCurrent(current, (one) => ({ ...one, turns: withoutTakenBack(one.turns, words) })),
-      );
+      // Into the box and out of the thread in one write, so the same sentence
+      // is never on screen twice — once as though it had been said, once in the
+      // box waiting to be. With no folder open there is no thread to clear.
+      takeBackTheLine(mine, words);
       if (owner !== null) setQueued((was) => ({ ...was, [owner]: [] }));
     });
-  }, [troubleAt]);
+  }, [troubleAt, takeBackTheLine]);
 
   /**
    * The answer to "this is a bigger job".
@@ -4097,9 +4086,9 @@ function Conversation() {
    * build, which is the one thing this confirmation exists to avoid.
    */
   const answerEstimate = useCallback(
-    (answered: EstimateTurn, go: boolean) => {
+    (owner: Owned, answered: EstimateTurn, go: boolean) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.flatMap((turn): Turn[] => {
             if (turn.kind !== "estimate" || turn.id !== answered.id)
@@ -4132,6 +4121,7 @@ function Conversation() {
    */
   const answerPlan = useCallback(
     (
+      owner: Owned,
       turnId: string,
       go: boolean,
       chosen?: {
@@ -4140,14 +4130,17 @@ function Conversation() {
         decision?: PlanDecision;
       },
     ) => {
-      const text = desk === null ? '' : lookAround.said(desk.path, desk.address);
+      const text = lookAround.said(owner.project, owner.address);
+      const mine = conversationIn(desksNow.current.byPath[owner.project] ?? null, owner.address);
       // The steps the agent proposed for this plan, read before the answer is
       // written — the build-plan store wants the real task list.
-      const planTurn =
-        desk === null ? null : desk.turns.find((turn): turn is Extract<typeof turn, { kind: "plan" }> => turn.kind === "plan" && turn.id === turnId);
-      const steps = planTurn === undefined || planTurn === null ? [] : planTurn.steps;
+      const planTurn = mine.turns.find(
+        (turn): turn is Extract<typeof turn, { kind: "plan" }> =>
+          turn.kind === "plan" && turn.id === turnId,
+      );
+      const steps = planTurn === undefined ? [] : planTurn.steps;
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "plan" && turn.id === turnId
@@ -4160,13 +4153,13 @@ function Conversation() {
       // The look-around has been answered here. Without this the next thing
       // somebody typed counted as the answer to it and skipped its own list,
       // so every message straight after an accepted plan got none.
-      if (desk !== null) lookAround.answering(desk.path, desk.address);
+      lookAround.answering(owner.project, owner.address);
       if (go) {
         if (plansNow.current === 'plan') {
           holdWrites(false);
           setPlans('auto');
           setDesks((current) =>
-            changeCurrent(current, (one) => ({
+            changeThread(current, owner, (one) => ({
               ...one,
               turns: [...one.turns, said('graphe', 'Out of Plan, going ahead with it.')],
             })),
@@ -4210,14 +4203,14 @@ function Conversation() {
            plan to read rather than work already started. */
         const again = chosen?.decision === undefined ? null : decidedMessage(chosen.decision);
         if (again === null) {
-          setDraft(text);
+          writeDraft(owner, () => text);
           return;
         }
         const revise = `${text}\n\n${again}\n\n${PLAN_WORDS.planAgain}`;
         void deliver(revise, sizeUp(revise), { lookFirst: true });
       }
     },
-    [deliver, desk, openProject, holdWrites, lookAround, refreshBuildPlan],
+    [deliver, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
   );
 
   /**
@@ -4234,6 +4227,7 @@ function Conversation() {
     async (verdict: ReviewVerdict): Promise<boolean> => {
       if (verdict.pull === undefined) return false;
       const path = openProject;
+      const { reviewAsMarkdown } = await import("./agent/pi/review");
       const sent = await bridge.repoComment(verdict.pull, reviewAsMarkdown(verdict), {
         project: path ?? undefined,
       });
@@ -4243,9 +4237,9 @@ function Conversation() {
   );
 
   const fixReview = useCallback(
-    (turnId: string) => {
+    (owner: Owned, turnId: string) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "review" && turn.id === turnId
@@ -4267,10 +4261,9 @@ function Conversation() {
      so a big document can be kicked off and left alone.*/
   useEffect(() => {
     if (desk === null) return;
-    // "Until it's done" is itself the answer, whatever the project's hold-back
-    // says: somebody who picked it has already said not to stop and ask.
-    if (howFar !== 'doing' && holdsBack(preferences.heldBack, desk.path)) return;
-    const waiting = desk.turns.find((one) => one.kind === 'plan' && one.answered === null);
+    // "Until it's done" is itself the answer: somebody who picked it has
+    // already said not to stop and ask.
+    const waiting = chat.turns.find((one) => one.kind === 'plan' && one.answered === null);
     if (waiting === undefined || waiting.kind !== 'plan') return;
     // A plan that asked something must never answer itself. Asking two
     // questions and then answering them yourself is worse than never asking.
@@ -4278,24 +4271,24 @@ function Conversation() {
     // Nothing to get on with. A card with no steps is one asking for a list,
     // not one asking for approval — answering it sends "do these: nothing".
     if (waiting.steps.length === 0) return;
-    answerPlan(waiting.id, true);
-  }, [desk, preferences.heldBack, answerPlan, howFar]);
+    answerPlan({ project: desk.path, address: desk.address }, waiting.id, true);
+  }, [desk, chat.turns, answerPlan, howFar]);
 
   /** The model answered in prose. The card says so; this is the press under it,
    *  which asks again in the same words the look-around uses rather than
    *  leaving somebody to work out how to phrase it. */
   const askForAPlanAgain = useCallback(
-    (turnId: string) => {
-      answerPlan(turnId, false);
+    (owner: Owned, turnId: string) => {
+      answerPlan(owner, turnId, false);
       void deliver(PLAN_WORDS.asked, sizeUp(PLAN_WORDS.asked), { lookFirst: true });
     },
     [answerPlan, deliver],
   );
 
   const respond = useCallback(
-    (turnId: string, callId: string, decision: Decision) => {
+    (owner: Owned, turnId: string, callId: string, decision: Decision) => {
       setDesks((current) =>
-        changeCurrent(current, (one) => ({
+        changeThread(current, owner, (one) => ({
           ...one,
           turns: one.turns.map((turn) =>
             turn.kind === "asked" && turn.id === turnId
@@ -4304,10 +4297,12 @@ function Conversation() {
           ),
         })),
       );
-      const here = currentDesk(desksNow.current);
+      // Answered into the conversation the card belongs to, never into
+      // whichever one is in front: two panes can hold two questions at once,
+      // and a press in one must not answer the other's.
       void bridge.answer(callId, decision, {
-        ...(here === null ? {} : { project: here.path }),
-        ...(here?.address == null ? {} : { conversation: here.address }),
+        project: owner.project,
+        ...(owner.address == null ? {} : { conversation: owner.address }),
       });
     },
     [],
@@ -4321,9 +4316,9 @@ function Conversation() {
    * every ask it answers, and a card still open when that arrives would be
    * marked as never answered at all.
    */
-  const answerAsked = useCallback((turnId: string, answers: Answers | null) => {
+  const answerAsked = useCallback((owner: Owned, turnId: string, answers: Answers | null) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
+      changeThread(current, owner, (one) => ({
         ...one,
         turns: one.turns.map((turn) =>
           turn.kind === "asked-first" && turn.id === turnId
@@ -4339,16 +4334,15 @@ function Conversation() {
         ),
       })),
     );
-    const here = currentDesk(desksNow.current);
     void bridge.answerAsked(turnId, answers, {
-      ...(here === null ? {} : { project: here.path }),
-      ...(here?.address == null ? {} : { conversation: here.address }),
+      project: owner.project,
+      ...(owner.address == null ? {} : { conversation: owner.address }),
     });
   }, []);
 
-  const dismiss = useCallback((turnId: string) => {
+  const dismiss = useCallback((owner: Owned, turnId: string) => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({
+      changeThread(current, owner, (one) => ({
         ...one,
         turns: one.turns.filter((turn) => turn.id !== turnId),
       })),
@@ -4418,88 +4412,16 @@ function Conversation() {
     const path = openProject;
     if (path === null) return;
     setPreferences((was) => ({ ...was, kept: keeping(was.kept, path, versionId, keep) }));
-    void bridge.keepVersion(versionId, keep).then((answer) => {
+    void bridge.keepVersion(versionId, keep, { project: path }).then((answer) => {
       if (answer.ok) setPreferences(answer.value);
     });
   }, [openProject]);
 
   const dismissPutBack = useCallback(() => {
     setDesks((current) =>
-      changeCurrent(current, (one) => ({ ...one, putBack: null })),
+      changeTheFront(current, (one) => ({ ...one, putBack: null })),
     );
   }, []);
-
-  /* ---------------------------------------------------------- landing it */
-
-  /**
-   * What can be done with the work now that it exists.
-   *
-   * Asked for rather than assumed, and asked for again after anything that
-   * could change the answer — connecting an account, handing work over,
-   * switching project. The shell remembers the expensive parts of the answer
-   * for a few minutes, so asking often is cheap.
-   */
-  const [landing, setLanding] = useState<LandingState | null>(null);
-  const [going, setGoing] = useState<"developer" | "online" | null>(null);
-  const [landed, setLanded] = useState<Outcome>(null);
-  const [decided, setDecided] = useState<{ letIn: boolean; undoTo: string } | null>(null);
-
-  const refreshLanding = useCallback((path: string | null) => {
-    if (path === null) return;
-    // A project is named so a slow answer from another project cannot land here
-    // and repaint this panel — the same gap the away board had until that fix.
-    const named = panelRepoNow.current;
-    void bridge
-      .landing({ project: path, ...(named === null ? {} : { repo: named }) })
-      .then((answer) => {
-        setLanding(answer.ok ? answer.value : null);
-      });
-  }, [panelRepoNow]);
-
-  useEffect(() => {
-    if (openProject === null) {
-      setLanding(null);
-      return;
-    }
-    setLanded(null);
-    setDecided(null);
-    refreshLanding(openProject);
-  }, [openProject, refreshLanding]);
-
-  /**
-   * The Figma file this project is kept in step with.
-   *
-   * Asked for when a project comes to the front and looked at again on demand.
-   * Never on a timer: reading somebody's Figma file on a schedule they did not
-   * ask for is somebody else's product.
-   */
-  const [inStep, setInStep] = useState<InStepState | null>(null);
-  const [lookingAtFigma, setLookingAtFigma] = useState(false);
-
-  useEffect(() => {
-    if (openProject === null) {
-      setInStep(null);
-      return;
-    }
-    void bridge.inStep().then((answer) => {
-      setInStep(answer.ok ? answer.value : null);
-    });
-  }, [openProject]);
-
-  /** Every one of these answers with the whole of it, so the band never has to
-   *  work out what changed about itself. */
-  const askFigma = useCallback(
-    (ask: () => Promise<Result<InStepState>>) => {
-      setLookingAtFigma(true);
-      void ask()
-        .then((answer) => {
-          if (answer.ok) setInStep(answer.value);
-          else troubleHere(answer.trouble);
-        })
-        .finally(() => setLookingAtFigma(false));
-    },
-    [troubleHere],
-  );
 
   const changeKeepLogins = useCallback(
     (on: boolean) => {
@@ -4531,107 +4453,6 @@ function Conversation() {
     void bridge.openComputerSettings(which);
   }, []);
 
-  const changeHoldBack = useCallback(
-    (on: boolean) => {
-      const path = openProject;
-      setPreferences((was) =>
-        path === null ? was : { ...was, heldBack: { ...was.heldBack, [path]: on } },
-      );
-      setLanding((was) => (was === null ? was : { ...was, holdBack: on }));
-      void bridge.setHoldBack(on, { project: path ?? undefined }).then((answer) => {
-        if (answer.ok) setPreferences(answer.value);
-        refreshLanding(path);
-      });
-    },
-    [openProject, refreshLanding],
-  );
-
-  const decideOnWork = useCallback(
-    (letIn: boolean, observed = true) => {
-      const here = currentDesk(desksNow.current);
-      if (here === null) return;
-      const path = here.path;
-      goBusy();
-      void bridge
-        .decideOnWork(letIn, observed, {
-          project: here.path,
-          ...(here.address == null ? {} : { conversation: here.address }),
-        })
-        .then((answer) => {
-          if (!answer.ok) {
-            troubleHere(answer.trouble);
-            return;
-          }
-          setLanding(answer.value.landing);
-          setDecided(
-            answer.value.undoTo === null
-              ? null
-              : { letIn: answer.value.letIn, undoTo: answer.value.undoTo },
-          );
-          setDesks((current) =>
-            changeDesk(current, path, (one) => ({ ...one, versions: answer.value.versions })),
-          );
-          void refreshOverview(path);
-        })
-        .finally(() => goQuiet());
-    },
-    [refreshOverview, troubleHere],
-  );
-
-  /* How far the waiting work has moved from the pictures that were agreed to,
-     read against the line in force. Null when nothing was compared: an empty
-     set is the absence of a reading, never a reading of "nothing moved". */
-  const gate = useMemo(() => {
-    const changes = landing?.held?.changes ?? [];
-    return changes.length === 0 ? null : gateOf(changes, howMuchBy(preferences.howMuch));
-  }, [landing?.held?.changes, preferences.howMuch]);
-
-  const changeHowMuch = useCallback((id: string) => {
-    setPreferences((was) => ({ ...was, howMuch: howMuchBy(id).id }));
-    void bridge.setHowMuch(id).then((answer) => {
-      if (answer.ok) setPreferences(answer.value);
-    });
-  }, []);
-
-  /* Nothing has moved far enough since the picture somebody last agreed to, so
-     nobody is asked: the work goes in and the undo sits where the question
-     would have been. Auto-clear deliberately does not move that picture. Small
-     changes therefore accumulate until somebody actually looks and agrees.
-
-     A first or unchecked picture still asks: there is no honest baseline until
-     a person has seen one. Once per piece of work, whatever comes back — a
-     refusal must not become a loop of the window trying again forever. */
-  const letThrough = useRef<string | null>(null);
-  useEffect(() => {
-    const waiting = landing?.waiting ?? null;
-    if (waiting === null || waiting.state !== 'waiting') return;
-    if (gate === null || gate.standing !== 'clear') return;
-    if (letThrough.current === waiting.id) return;
-    letThrough.current = waiting.id;
-    decideOnWork(true, false);
-  }, [landing?.waiting, gate, decideOnWork]);
-
-  /** The two that can send something off this computer. Both are only ever
-   *  called from the band's own confirmation, which has already said what is
-   *  about to happen — this is the press, not the offer. */
-  const handToDeveloper = useCallback((repo?: string) => {
-    setGoing("developer");
-    setLanded(null);
-    void bridge
-      .handToDeveloper(true, repo === undefined ? undefined : { repo })
-      .then((answer) => {
-        if (!answer.ok) {
-          troubleHere(answer.trouble);
-          return;
-        }
-        setLanded({ kind: "handed", handed: answer.value });
-      })
-      .finally(() => {
-        setGoing(null);
-        refreshLanding(openProject);
-      });
-  }, [openProject, refreshLanding, troubleHere]);
-
   /** The two moves on the lines of work: switch onto another one, or start a
    *  new one. Both change what the project on screen is, so after either one
    *  the readings that describe it are asked for again — the versions, the
@@ -4656,10 +4477,9 @@ function Conversation() {
         }
         void refreshVersions(here.path);
         void refreshOverview(here.path, here.address);
-        refreshLanding(here.path);
       });
     },
-    [refreshVersions, refreshOverview, refreshLanding, troubleHere],
+    [refreshVersions, refreshOverview, troubleHere],
   );
 
   // One place reads which folder/conversation is in front, and it is the one above.
@@ -4714,24 +4534,8 @@ function Conversation() {
     refreshVersions,
     refreshOverview,
   });
-  const {
-    against,
-    setAgainst,
-    keepGoing,
-    startAfter,
-    keepAway,
-    dropAway,
-    answerAway,
-    sayToAway,
-    compareWays,
-    takeAll,
-    stopWaiting,
-    addRepeat,
-    switchRepeat,
-    forgetRepeat,
-  } = board;
+  const { keepAway, dropAway, answerAway, sayToAway } = board;
   const awayHere = board.here;
-  const awayElsewhere = board.elsewhere;
   const now = board.clock;
 
   /* Everything reachable by name. `ready` is false rather than absent when a
@@ -4754,8 +4558,6 @@ function Conversation() {
     const made = [
       { id: 'new', name: 'Start a new conversation', where: 'Conversation', keys: keysFor('new'),
         run: () => void swapConversation(null), ready: here, whyNot: needsProject },
-      { id: 'design', name: 'Open the design view', where: 'Conversation', keys: keysFor('design'),
-        run: () => { goToScreen('design'); startScreen(() => setDesignAt('styles')); }, ready: here, whyNot: needsProject },
       { id: 'files', name: 'Show everything in this project', where: 'Project', keys: keysFor('files'),
         run: () => setFilesOpen(true), ready: here, whyNot: needsProject },
       { id: 'page', name: 'Show the page beside the conversation', where: 'Conversation', keys: keysFor('page'),
@@ -4764,7 +4566,7 @@ function Conversation() {
         run: () => setShelfOpen((was) => !was) },
       { id: 'find', name: 'Find in this conversation', where: 'Conversation', keys: keysFor('find'),
         run: () => setFinding((was) => (was === null ? '' : was)), ready: here, whyNot: needsProject },
-      { id: 'changes', name: 'Review the working diff', where: 'Project',
+      { id: 'changes', name: 'Changes', where: 'Project',
         run: () => {
           setChangeText(null);
           setChangesOpen(true);
@@ -4784,16 +4586,14 @@ function Conversation() {
               setChangeText(answer.value);
             });
         }, ready: here, whyNot: needsProject },
-      { id: 'history', name: 'Look through the history', where: 'Project',
+      { id: 'history', name: 'History', where: 'Project',
         run: () => goToScreen('graph'), ready: here, whyNot: needsProject },
-      { id: 'canvas', name: 'Open the canvas', where: 'Project',
-        run: () => openCanvas(), ready: here, whyNot: needsProject },
       { id: 'copy', name: COPY_WORDS.whole, where: 'Conversation',
-        run: () => { void copyText(asMarkdown(currentDesk(desksNow.current)?.turns ?? [])); },
+        run: () => { void copyText(asMarkdown(inFront(currentDesk(desksNow.current)).turns)); },
         ready: here, whyNot: needsProject },
-      { id: 'reviews', name: 'Read the pull requests', where: 'Project',
+      { id: 'reviews', name: 'Pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
-      { id: 'review-queue', name: 'Review finished work', where: 'Project',
+      { id: 'review-queue', name: 'Review', where: 'Project',
         run: () => { goToScreen('review'); startScreen(() => setReviewQueueOpen(true)); refreshReviewQueue(); },
         ready: here, whyNot: needsProject },
       { id: 'skills', name: 'Look at the skills', where: 'Graphe',
@@ -4809,13 +4609,7 @@ function Conversation() {
       { id: 'stop', name: 'Stop what is running', where: 'Conversation',
         run: () => halt(), ready: busy, whyNot: 'Nothing is running.' },
     ];
-    /* Every preference by name, so "dark" or "cookies" is one press from here
-       and nobody has to know which page it is on. */
-    const settings = settingsCommands((row) => {
-      setSettingsAt(row.id);
-      startScreen(() => setSettingsOpen(true));
-    });
-    return [...made, ...settings].map((one) => ({
+    return made.map((one) => ({
       ...one,
       run: () => {
         setPaletteOpen(false);
@@ -4826,7 +4620,7 @@ function Conversation() {
     startScreen,
     openProject, actingRepoNow, busy, swapConversation, goToScreen, togglePane, refreshRepo,
     refreshReviewQueue,
-    refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, openCanvas, browse,
+    refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, browse,
     tidyNow, halt, troubleHere,
   ]);
 
@@ -4838,8 +4632,40 @@ function Conversation() {
     return (queued[owner] ?? []).map((text, at) => ({ id: `${owner}-${String(at)}`, text }));
   }, [desks, queued]);
 
+  /* What the conversation in front is waiting to send, because another chat
+     holds the folder it works in. Nothing of it has begun: this is the shell's
+     line, not Pi's, and each send carries the folder it was queued for. */
+  const queuedForWorkspace = useMemo(() => {
+    const desk = currentDesk(desks);
+    if (desk === null) return [];
+    return queuedForFolder[keyOf(desk.path, desk.address ?? '')] ?? [];
+  }, [desks, queuedForFolder]);
+
+  /* The conversations working right now, by their own path: the one in front
+     and any parked one still running. A fork taken mid-turn copies a
+     conversation that had not finished happening, so the shelf is told which
+     rows those are rather than finding out from a refusal. */
+  const workingHere = useMemo(() => {
+    const desk = currentDesk(desks);
+    if (desk === null) return [] as readonly string[];
+    const behind = Object.entries(desk.conversations).flatMap(([path, one]) =>
+      one.busy ? [path] : [],
+    );
+    const here = desk.address ?? '';
+    return behind.includes(here) ? [here, ...behind.filter((one) => one !== here)] : behind;
+  }, [desks]);
+
   /* The checklist, while the reply is still going. The model ticks its own
      items off now, so this is the only thing that shows it moving. */
+  /* An add-on's question, put where the person can see it. Answered once, and
+     the answer goes straight back to whatever is waiting on it. */
+  useEffect(() => {
+    const stop = bridge.onExtensionAsk((ask) => {
+      setAddonAsk(ask);
+    });
+    return stop;
+  }, []);
+
   useEffect(() => {
     const stopPlan = bridge.onBuildPlan((notice) => {
       setBuildPlan(notice.plan === null ? null : { path: notice.project, plan: notice.plan });
@@ -4859,19 +4685,8 @@ function Conversation() {
       // first token, which is a screen saying the opposite of what is true.
       if (notice.resting) return;
       setDesks((current) =>
-        changeDesk(current, notice.project, (one) => {
+        changeThread(current, { project: notice.project, address: notice.address }, (one) => {
           const started = { task: sizeUp(notice.said), startedAt: Date.now() };
-          if (notice.address !== '' && notice.address !== one.address) {
-            const parked = one.parked[notice.address];
-            if (parked === undefined) return one;
-            return {
-              ...one,
-              parked: {
-                ...one.parked,
-                [notice.address]: { ...parked, doing: parked.doing ?? started, busy: true },
-              },
-            };
-          }
           return { ...one, doing: one.doing ?? started, busy: true };
         }),
       );
@@ -4883,176 +4698,10 @@ function Conversation() {
   }, []);
 
 
-  /**
-   * Serve every go in the comparison and put them in the pane.
-   *
-   * A patch says what changed; a running copy says what it looks like, which is
-   * the half a designer decides on. Each go already has a copy of its own, so
-   * this only makes them ready and points the pane at them — nothing new is
-   * built and nothing is written.
-   */
-  const openWaysInBrowser = useCallback(() => {
-    const set = against;
-    if (set === null) return;
-    const members = set.sides
-      .filter((one) => one.folder !== null)
-      .map((one) => ({ id: one.id, name: one.name, folder: one.folder as string }));
-    if (members.length === 0) return;
-    void bridge
-      .variationsServe({ subject: set.subject, variations: members }, { project: set.where })
-      .then((answer) => {
-        if (!answer.ok) {
-          troubleHere(answer.trouble);
-          return;
-        }
-        // Asked something back rather than served: it is a question, not a set.
-        if (answer.value.kind === 'unsure') {
-          troubleHere({ what: answer.value.question, because: '', actionLabel: 'Got it' });
-          return;
-        }
-        const first = answer.value.variations[0];
-        if (first === undefined) return;
-        setAgainst(null);
-        setVariations({
-          subject: answer.value.subject,
-          members: answer.value.variations,
-          inFront: first.id,
-        });
-        setPageAt(first.address);
-        movePane('split');
-      });
-  }, [against, setAgainst, setPageAt, troubleHere, movePane]);
-
-  /** One value moved, from wherever the panel offered it: a slider, or a colour
-   *  nobody could read against the one underneath it. Filed in the draft and
-   *  nothing more — the project is untouched until "Save changes" is pressed. */
-  const nudge = useCallback((name: string, value: string) => {
-    setDesignDraft((current) => {
-      const path = openProject;
-      if (path === null) return current;
-      const here = current[path] ?? { tokens: {}, motions: [] };
-      return {
-        ...current,
-        [path]: { ...here, tokens: { ...here.tokens, [name]: value } },
-      };
-    });
-  }, [openProject]);
-
-  /* Same bargain as a colour: the change waits in the draft, and lands with the
-     whole batch the moment somebody saves. */
-  const nudgeMotion = useCallback(
-    (move: { places: readonly unknown[] }, change: unknown) => {
-      setDesignDraft((current) => {
-        const path = openProject;
-        if (path === null) return current;
-        const here = current[path] ?? { tokens: {}, motions: [] };
-        return { ...current, [path]: { ...here, motions: [...here.motions, { places: move.places, change }] } };
-      });
-    },
-    [openProject],
-  );
-
-  /** "Save changes": write the draft to the stylesheet and keep it as one
-   *  version, then let go of the draft. Nothing has been saved until this. */
-  const commitDesign = useCallback(() => {
-    const path = openProject;
-    if (path === null) return;
-    const draft = designDraft[path];
-    if (draft === undefined) return;
-    const tokens = Object.entries(draft.tokens).map(([name, value]) => ({ name, value }));
-    if (tokens.length === 0 && draft.motions.length === 0) return;
-    const named = panelRepoNow.current ?? actingRepoNow.current;
-    void bridge
-      .designCommit(
-        { tokens, motions: draft.motions },
-        named === null ? undefined : { repo: named },
-      )
-      .then((answer) => {
-      if (!answer.ok) {
-        troubleHere(answer.trouble);
-        return;
-      }
-      setDesignDraft((current) => {
-        if (current[path] === undefined) return current;
-        const next = { ...current };
-        delete next[path];
-        return next;
-      });
-      setDesks((current) =>
-        current.current === path
-          ? changeDesk(current, path, (one) => ({ ...one, versions: answer.value }))
-          : current,
-      );
-      void refreshOverview(path);
-    });
-  }, [actingRepoNow, designDraft, openProject, panelRepoNow, refreshOverview, troubleHere]);
-
-  /** Throw the draft away. Nothing was ever written, so there is nothing to
-   *  undo — forgetting the values is all there was. */
-  const discardDesign = useCallback(() => {
-    const path = openProject;
-    if (path === null) return;
-    setDesignDraft((current) => {
-      if (current[path] === undefined) return current;
-      const next = { ...current };
-      delete next[path];
-      return next;
-    });
-  }, [openProject]);
-
-  /** One value put back where it was. The draft simply forgets it. */
-  const resetToken = useCallback(
-    (name: string) => {
-      const path = openProject;
-      if (path === null) return;
-      setDesignDraft((current) => {
-        const here = current[path];
-        if (here === undefined || here.tokens[name] === undefined) return current;
-        const tokens = { ...here.tokens };
-        delete tokens[name];
-        return { ...current, [path]: { ...here, tokens } };
-      });
-    },
-    [openProject],
-  );
-
-  /** How many edits are waiting to be saved, for the Save button's own label. */
-  const designChanges = useCallback((): number => {
-    const path = desk === null ? null : desk.path;
-    if (path === null) return 0;
-    const here = designDraft[path];
-    if (here === undefined) return 0;
-    return Object.keys(here.tokens).length + here.motions.length;
-  }, [desk, designDraft]);
-
-  /** The stylesheet with the draft edits laid over it, so the design view shows
-   *  what is being tested without anything reaching the project. */
-  const designStyles = useMemo(() => {
-    const inside = desk?.overview?.repos ?? [];
-    const named = inside.find((one) => one.name === panelRepo)?.name ?? inside[0]?.name ?? null;
-    const sheet =
-      named === null ? (desk?.overview?.styles ?? null) : (desk?.repoStyles[named] ?? null);
-    return withDesignDraft(sheet, desk === null ? undefined : designDraft[desk.path]);
-  }, [desk, panelRepo, designDraft]);
-
-  /** What the project's own stylesheet says about itself: how it moves, what
-   *  was written by hand, what cannot be read. One reading, shared by the panel
-   *  that counts it and the view that draws it. */
-  const design = useMemo(
-    () => readDesign(designStyles, desk?.overview?.swatches ?? []),
-    [designStyles, desk?.overview?.swatches],
-  );
-
-  useEffect(() => setFixing(null), [desk?.overview?.styles]);
-
   /* A native view paints above the window's own contents, so anything that
      would cover it has to take it off screen first. */
   const covered =
     watchAt !== null ||
-    designAt !== null ||
-    // A canvas filling the window covers the whole renderer, and a native page
-    // left drawn over it takes the presses and the keys meant for the board.
-    (canvasAt !== null && canvasFull) ||
     graphOpen ||
     reviewsOpen ||
     reviewQueueOpen ||
@@ -5061,10 +4710,11 @@ function Conversation() {
     connectOpen ||
     addMore ||
     composerPopoverOpen;
+  const hideThePage = preview.hidePage;
   useEffect(() => {
     if (pane === 'off') return;
-    void bridge.pageHidden(covered);
-  }, [covered, pane]);
+    hideThePage(covered);
+  }, [covered, pane, hideThePage]);
 
   /* ------------------------------------------------------------------ money */
 
@@ -5131,7 +4781,10 @@ function Conversation() {
         case 'always': {
           // The file is the whole feature, so this opens the file.
           const file = alwaysNow?.file ?? '';
-          if (file !== '') void bridge.openInEditor(file);
+          const here = currentDesk(desksNow.current);
+          if (file !== '') {
+            void bridge.openInEditor(file, here === null ? {} : { project: here.path });
+          }
           return;
         }
         case 'connected':
@@ -5294,10 +4947,10 @@ function Conversation() {
           void putBack(found.version.id, fromRepo.current[found.version.id]);
           return;
         case "say":
-          setDraft(found.say);
+          handIn(() => found.say);
       }
     },
-    [open, panelRepoNow, swapConversation, seeIt, putBack],
+    [open, panelRepoNow, swapConversation, seeIt, putBack, handIn],
   );
 
   /* ------------------------------------------------------------------- draw */
@@ -5312,20 +4965,20 @@ function Conversation() {
    *  "none" puts somebody in front of a blank conversation for a moment and
    *  then takes it away. */
   const undecided = desk === null && (recent === null || openingOnLaunch);
-  const empty = desk === null || desk.turns.length === 0;
+  const empty = chat.turns.length === 0;
   // Which regions have earned their place (notes/strategy/UI-DESIGN.md):
   // the shelf the moment there is a folder in front; the overview the moment
   // there is anything at all to tell about the work — a git state, a search, a
   // reference, or a second version. Both appear once and then stay.
   const shelved = desk !== null;
-  const research = researchLog(desk?.turns ?? []);
+  const research = researchLog(chat.turns);
   const helpers = desk === null ? [] : helpersRunning(desk);
   // On the rail, each helper wears the one question it is answering: a run
   // working four angles at once should read as four angles, not as a spinner.
   // The board behind it keeps the whole of what each was asked.
   const angles = asLinesOfEnquiry(helpers);
   const intoIt = lookingInto(helpers);
-  const doingNow = nowDoing(desk?.turns ?? []);
+  const doingNow = nowDoing(chat.turns);
 
   // What it is looking into takes the band while any of it is still out: that
   // is the thing worth reading, and the step underneath it will come back.
@@ -5335,17 +4988,8 @@ function Conversation() {
      switched in the sidebar, where the whole project list stays in one stable
      place. `threadsIn` preserves opening order, so selecting a tab never
      shuffles the row beneath the pointer. */
-  const canvasTabs: readonly Tab[] = desk === null ? [] : flows.map((one) => ({
-    id: keyOf(desk.path, `canvas:${one.id}`),
-    title: one.name,
-    project: desk.name,
-    projectPath: desk.path,
-    kind: 'canvas' as const,
-    state: one.running === null ? ('idle' as const) : ('working' as const),
-  }));
-
-  const threadTabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address, here }) => {
-      const turns = here ? desk.turns : (desk.parked[address]?.turns ?? []);
+  const threadTabs: readonly Tab[] = desk === null ? [] : threadsIn(desk).map(({ address }) => {
+      const turns = conversationIn(desk, address).turns;
       // `busy` belongs to the window, not a conversation. Applying it to
       // `here` made the spinner jump to whichever tab was clicked while another
       // conversation was doing the work. A live turn is its own evidence.
@@ -5368,7 +5012,57 @@ function Conversation() {
       };
     });
 
-  const tabs: readonly Tab[] = [...threadTabs, ...canvasTabs];
+  const tabs: readonly Tab[] = threadTabs;
+
+  /* Which conversation the main column is drawing, and whether its own turn is
+     in flight. With one pane this is simply the conversation on screen; with
+     two it is the focused pane's, which is what makes focusing a pane retarget
+     the whole column rather than only the box. */
+  const drawnFor: Owned = { project: openProject ?? '', address: desk?.address ?? null };
+  const herePane = focusedPane(panes);
+  const otherPane = panes.open.find((one) => one.id !== herePane.id) ?? null;
+  /** Whether a named conversation's own turn is running, which is what its rows
+   *  answer to: one pane working must not mark the other's newest message as
+   *  still being written. */
+  const busyIn = (address: string | null): boolean => {
+    if (desk === null) return false;
+    const turns = conversationIn(desk, address).turns;
+    return (
+      turns.some(
+        (turn) =>
+          (turn.kind === 'said' && turn.from === 'graphe' && turn.streaming) ||
+          (turn.kind === 'did' && turn.state === 'running') ||
+          (turn.kind === 'tidying' && turn.state === 'running'),
+      ) ||
+      (sendsInTheAir[keyOf(desk.path, address ?? '')] ?? 0) > 0 ||
+      (address === desk.address && chat.busy)
+    );
+  };
+  const busyThere = busyIn(otherPane?.conversation ?? null);
+  /** Whose cards those are. A press in the pane beside must act on that pane's
+   *  conversation, which is the whole difference between two panes and one
+   *  window drawn twice. */
+  const ownerThere: Owned = { project: openProject ?? '', address: otherPane?.conversation ?? null };
+  const allThere = drawnFrom(
+    conversationIn(desk, otherPane?.conversation ?? null).turns,
+    AT_FIRST,
+  ).rows.length;
+  /* The beside pane scrolls itself: it is a reading pane, so it keeps its own
+     position and needs no stick-to-bottom behaviour. */
+  const besideRef = useRef<HTMLDivElement | null>(null);
+
+  /* One row per pane, named for the chat it holds, and the inspector's own line
+     while it is pinned. Both are read from the desk, because the desk holds
+     every open conversation of this project whole. */
+  const paneRows = panes.open.map((one) => ({
+    id: one.id,
+    title: titleOf(conversationIn(desk, one.conversation).turns),
+    focused: one.id === panes.focused,
+  }));
+  const pinnedTo = isPinned(panes)
+    ? pinnedWords(titleOf(conversationIn(desk, inspectorPane(panes).conversation).turns))
+    : null;
+
 
   /* Where a tab sits is the person's to decide: the row is spatial memory, and
      a row that cannot be arranged is one nobody can learn. Conversations only,
@@ -5378,31 +5072,11 @@ function Conversation() {
     if (!threadTabs.some((one) => one.id === id)) return;
     setDesks((current) => moveThread(current, openProject, ownerOf(id).address, to));
   };
-  const canvasHere = canvasAt === null ? null : (flows.find((one) => one.id === canvasAt) ?? null);
-
-  /* What the canvas's own turn is doing this second. Its conversation is
-     usually parked behind the canvas tab, so nothing about it reached the
-     screen — a block could run for twenty minutes saying only "Going". */
-  const canvasDoing = useMemo(() => {
-    if (canvasHere === null || canvasHere.running === null || canvasHere.conversation === null) return undefined;
-    const turns =
-      canvasHere.conversation === desk?.address
-        ? (desk?.turns ?? [])
-        : (desk?.parked[canvasHere.conversation]?.turns ?? []);
-    const step = nowDoing(turns).step;
-    return {
-      step: step === null ? null : step.detail == null ? step.label : `${step.label} · ${step.detail}`,
-      asking: turns.some((one) => one.kind === 'asked' && one.answered === null),
-    };
-  }, [canvasHere, desk?.address, desk?.turns, desk?.parked]);
-
 
   const tabAt =
     openProject === null || desk === null
       ? null
-      : canvasAt !== null
-        ? keyOf(desk.path, `canvas:${canvasAt}`)
-        : keyOf(openProject, desk.address ?? '');
+      : keyOf(openProject, desk.address ?? '');
   tabRow.drawn(
     threadTabs.map((one) => one.id),
     tabAt,
@@ -5420,7 +5094,7 @@ function Conversation() {
     ((desk.overview?.repos?.length ?? 0) > 0 ||
       desk.overview?.git !== null ||
       research.length > 0 ||
-      desk.references.length > 0 ||
+      chat.references.length > 0 ||
       desk.versions.length >= 2);
   if (desk !== null && hasOverview) overviewSeen.current.add(desk.path);
   // The panel steps aside while a file has the column: there is not room for
@@ -5461,7 +5135,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${canvasAt === null ? "" : "app--canvas"} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -5476,10 +5150,13 @@ function Conversation() {
               onOpen={(id) => void goToTab(id)}
               onClose={(id) => void closeTab(id)}
               onNew={() => {
-                setCanvasAt(null);
                 void swapConversation(null);
               }}
               onReorder={reorderTab}
+              // Beside New, where the hand already is: somebody choosing a
+              // conversation is looking at this row, and the second pane shows
+              // the same chat beside itself.
+              onSplit={splitPane}
             />
           ) : null}
 
@@ -5513,30 +5190,32 @@ function Conversation() {
 
             {switching && recent !== null ? (
               <div className="topbar__switcher" role="menu">
-                <ProjectMenu
-                  projects={recent}
-                  openPath={openProject}
-                  onOpen={(project) => void open(project.path)}
-                  onForget={(project) => void forget(project)}
-                  onBrowse={() => void browse()}
-                  editor={editor}
-                  onOpenInEditor={openInEditor}
-                  onRevealFolder={revealFolder}
-                  showMe={preferences.showMe}
-                  onShowMe={changeShowMe}
-                  showFiles={preferences.showFiles}
-                  onShowFiles={changeShowFiles}
-                  onPreview={() => {
-                    if (!severalProjects) {
-                      void seeIt();
-                      return;
-                    }
-                    if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
-                    else movePane('split');
-                  }}
-                  onAccount={openConnect}
-                  onAddMore={openAddMore}
-                />
+                <Suspense fallback={null}>
+                  <ProjectMenu
+                    projects={recent}
+                    openPath={openProject}
+                    onOpen={(project) => void open(project.path)}
+                    onForget={(project) => void forget(project)}
+                    onBrowse={() => void browse()}
+                    editor={editor}
+                    onOpenInEditor={openInEditor}
+                    onRevealFolder={revealFolder}
+                    showMe={preferences.showMe}
+                    onShowMe={changeShowMe}
+                    showFiles={preferences.showFiles}
+                    onShowFiles={changeShowFiles}
+                    onPreview={() => {
+                      if (!severalProjects) {
+                        void seeIt();
+                        return;
+                      }
+                      if (pane === 'off') void seeIt(undefined, undefined, panelRepoNow.current ?? undefined);
+                      else movePane('split');
+                    }}
+                    onAccount={openConnect}
+                    onAddMore={openAddMore}
+                  />
+                </Suspense>
               </div>
             ) : null}
           </div>
@@ -5601,19 +5280,26 @@ function Conversation() {
           openPath={openProject}
           onOpen={(project) => void open(project.path)}
           onBrowse={() => void browse()}
-          pinned={desk?.references ?? []}
+          pinned={chat.references}
+          shared={sharedContext}
+          onShare={shareWithProject}
+          onStopSharing={stopSharing}
           conversations={conversations}
           openConversation={inConversation}
           onOpenConversation={(path) => void swapConversation(path)}
+          onContinueConversation={(path) => void startFrom(path, "continue")}
+          onForkConversation={(path) => void startFrom(path, "fork")}
+          onArchiveConversation={(path, on) => void archiveConversation(path, on)}
+          onStopConversation={(path) => void stopConversation(path)}
+          working={workingHere}
+          // A copy of the project is made with git, and a Mac without it has no
+          // other press behind this one. Offered anyway, it is a press that
+          // comes back a failure.
+          {...(gitIsMissing(appFacts) ? {} : { onNewWorktree: () => setWorktreeOpen(true) })}
           onNewConversation={() => void swapConversation(null)}
           open={shelfOpen}
           onToggle={() => setShelfOpen((was) => !was)}
           onAsk={() => setAsking(true)}
-          onDesign={() => {
-            goToScreen("design");
-            startScreen(() => setDesignAt("styles"));
-          }}
-          onCanvas={openCanvas}
           onHistory={() => {
             goToScreen("graph");
             startScreen(() => setGraphOpen(true));
@@ -5676,25 +5362,6 @@ function Conversation() {
           it offers already lives here; the list is the same one the keys use. */}
       {/* The change in the folder, hunk by hunk. Keeping a subset takes the
           rest back out, which is a real edit — so it snapshots first. */}
-      {/* Which of the several goes to take. The one question the board cannot
-          answer on its own, because the answer is in the files. */}
-      <Suspense fallback={against === null ? null : ARRIVING}>
-        <Against
-          open={against !== null}
-          sides={against?.sides ?? []}
-          busy={busy}
-          onOpenInBrowser={openWaysInBrowser}
-          onClose={() => setAgainst(null)}
-          onKeep={(id) => {
-            // Open until the answer comes back: closing first hides the sheet
-            // behind whatever the press turns out to say.
-            keepAway(id, against?.where, (ok) => {
-              if (ok) setAgainst(null);
-            });
-          }}
-        />
-      </Suspense>
-
       <Suspense fallback={changesOpen ? ARRIVING : null}>
         <Changes
           open={changesOpen}
@@ -5703,13 +5370,17 @@ function Conversation() {
           onClose={() => setChangesOpen(false)}
           onExplain={(file, line) => {
             setChangesOpen(false);
-            const asked = CHANGE_WORDS.explain(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            void wordsAboutChanges().then((words) => {
+              const asked = words.explain(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            });
           }}
           onFix={(file, line) => {
             setChangesOpen(false);
-            const asked = CHANGE_WORDS.fix(file, line);
-            void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            void wordsAboutChanges().then((words) => {
+              const asked = words.fix(file, line);
+              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+            });
           }}
           onWider={async (file, context) => {
             const repo = actingRepoNow.current;
@@ -5722,17 +5393,27 @@ function Conversation() {
           }}
           onKeep={(kept) => {
             const whole = changeText ?? '';
-            const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
-            // What was NOT kept is what to undo. Built from the whole change so
-            // the line numbers on the way out are the ones on the way in — and
-            // left where they are, because this is applied in reverse against a
-            // file that still holds every piece.
-            const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
             setChangesOpen(false);
-            if (dropping.trim() === '') return;
-            void bridge.changesDrop(dropping).then((answer) => {
-              if (!answer.ok) troubleHere(answer.trouble);
-              else if (openProject !== null) void refreshOverview(openProject);
+            void import("./diff/hunks").then(({ parseDiff, undoOf }) => {
+              const keeping = new Set(parseDiff(kept).flatMap((one) => one.hunks).map((one) => one.id));
+              // What was NOT kept is what to undo. Built from the whole change so
+              // the line numbers on the way out are the ones on the way in — and
+              // left where they are, because this is applied in reverse against a
+              // file that still holds every piece.
+              const dropping = undoOf(parseDiff(whole), (hunk) => !keeping.has(hunk.id));
+              if (dropping.trim() === '') return;
+              // The folder the change was read out of, so undoing part of it
+              // cannot land in whichever project happens to be in front.
+              const repo = actingRepoNow.current;
+              void bridge
+                .changesDrop(dropping, {
+                  ...(openProject === null ? {} : { project: openProject }),
+                  ...(repo === null ? {} : { repo }),
+                })
+                .then((answer) => {
+                  if (!answer.ok) troubleHere(answer.trouble);
+                  else if (openProject !== null) void refreshOverview(openProject);
+                });
             });
           }}
         />
@@ -5743,6 +5424,10 @@ function Conversation() {
           open={paletteOpen}
           commands={everyCommand}
           onClose={() => setPaletteOpen(false)}
+          onOpenSetting={(id) => {
+            setSettingsAt(id);
+            startScreen(() => setSettingsOpen(true));
+          }}
         />
       </Suspense>
 
@@ -5756,7 +5441,10 @@ function Conversation() {
             return answer.ok ? answer.value : { state: 'would-not-start', because: answer.trouble.because };
           }}
           onSave={async (tools) => {
-            const answer = await bridge.connectedSave(tools);
+            const answer = await bridge.connectedSave(
+              tools,
+              openProject === null ? {} : { project: openProject },
+            );
             if (answer.ok) setConnected(answer.value);
             else troubleHere(answer.trouble);
           }}
@@ -5780,8 +5468,11 @@ function Conversation() {
             const answer = await bridge.skillText(skill.id);
             return answer.ok ? answer.value : null;
           }}
-          onUse={(insert) => setDraft((was) => draftWith(was, insert))}
-          onOpenFile={(skill) => void bridge.openSkillFile(skill.id)}
+          onUse={(insert) => handIn((was) => draftWith(was, insert))}
+          onOpenFile={(skill) => {
+            const where: Where = openProject === null ? {} : { project: openProject };
+            void bridge.openSkillFile(skill.id, where);
+          }}
           onAddMore={openAddMore}
         />
       </Suspense>
@@ -5796,12 +5487,10 @@ function Conversation() {
           startAt={settingsAt}
           showMe={preferences.showMe}
           showFiles={preferences.showFiles}
-          holdBack={holdsBack(preferences.heldBack, desk?.path)}
           theme={theme}
           onTheme={changeTheme}
           onToggleShowMe={() => changeShowMe(!preferences.showMe)}
           onToggleShowFiles={() => changeShowFiles(!preferences.showFiles)}
-          onToggleHoldBack={() => changeHoldBack(!holdsBack(preferences.heldBack, desk?.path))}
           always={alwaysNow}
           onAlwaysWrite={writeAlways}
           editors={appsHere.editors}
@@ -5834,6 +5523,12 @@ function Conversation() {
             if (answer.ok) setStorage(answer.value);
           });
         }}
+        trash={trash}
+        onTrashRestore={trashHere.restore}
+        onTrashEmpty={trashHere.empty}
+        migration={migration}
+        onMigrationCheck={movedHere.check}
+        onShowBackups={movedHere.backups}
         onClearFinishedWork={() => {
             void bridge.clearFinishedWork().then((answer) => {
               if (!answer.ok) return;
@@ -5868,7 +5563,6 @@ function Conversation() {
           shelfAtLaunch={shelfAtLaunch}
           onShelfAtLaunch={changeShelfAtLaunch}
           nameConversations={preferences.nameConversations}
-          askBeforeClosing={preferences.askBeforeClosing}
           snapBeforeApply={preferences.snapBeforeApply}
           replyLanguage={preferences.replyLanguage}
           onReplyLanguage={(says) => changePreference('replyLanguage', says)}
@@ -5919,7 +5613,7 @@ function Conversation() {
           </div>
           <Suspense fallback={null}>
             <Files
-              files={files[desk.path] ?? []}
+              files={files[desk.path]?.files ?? []}
               selected={reading?.path ?? null}
               onSelect={readFile}
             />
@@ -5928,46 +5622,77 @@ function Conversation() {
       ) : null}
 
       {commandsHere && desk !== null ? (
-        <Commands
-          open
-          onClose={() => setCommandsOpen(false)}
-          turns={desk.turns}
-          servers={running}
-          onSaid={(id) =>
-            bridge
-              .runningSaid(id, {
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => (answer.ok ? answer.value : ''))
-          }
-          page={pane === 'off' ? null : pageAt}
-          onPageSaid={() =>
-            bridge
-              .pageSaid({
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => (answer.ok ? answer.value : []))
-          }
-          onOpenAddress={(address) => {
-            setPageAt(address);
-            movePane('split');
-          }}
-          onStop={(id) => {
-            void bridge
-              .stopRunning(id, {
-                project: desk.path,
-                ...(desk.address == null ? {} : { conversation: desk.address }),
-              })
-              .then((answer) => {
-                if (answer.ok) setRunning(answer.value);
-              });
-          }}
-        />
+        <Suspense fallback={ARRIVING}>
+          <Commands
+            open
+            onClose={() => setCommandsOpen(false)}
+            turns={chat.turns}
+            servers={running}
+            terminal={{
+              workspace: desk.path,
+              open: terminalOpen,
+              onOpen: setTerminalOpen,
+            }}
+            onSaid={(id) =>
+              bridge
+                .runningSaid(id, {
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => (answer.ok ? answer.value : ''))
+            }
+            page={pane === 'off' ? null : pageAt}
+            onPageSaid={() =>
+              bridge
+                .pageSaid({
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => (answer.ok ? answer.value : []))
+            }
+            onOpenAddress={(address) => {
+              setPageAt(address);
+              movePane('split');
+            }}
+            onStop={(id) => {
+              void bridge
+                .stopRunning(id, {
+                  project: desk.path,
+                  ...(desk.address == null ? {} : { conversation: desk.address }),
+                })
+                .then((answer) => {
+                  if (answer.ok) setRunning(answer.value);
+                });
+            }}
+          />
+        </Suspense>
       ) : null}
 
       <div className="app__column" ref={contentRef}>
+        {/* Above everything, and outside the question of what is open: a
+            missing git is not a conversation's problem, and on a first launch
+            this is the only thing on screen. */}
+        <AppWide
+          notices={stillShowing(appFacts, appAway)}
+          onPutAway={(id) => setAppAway((was) => (was.includes(id) ? was : [...was, id]))}
+        />
+
+        {/* Which pane the hand is in, once there is more than one. The press
+            that makes a second lives at the end of the tab strip, where the
+            hand already is; what is left here is the row that says where the
+            hand is and the pin that decides which chat the panel reads. */}
+        {desk === null || panes.open.length < 2 || reading !== null ? null : (
+          <Suspense fallback={null}>
+            <PaneBand
+              panes={paneRows}
+              pinned={pinnedTo}
+              onFocus={focusOn}
+              onClose={dropPane}
+              onTogglePin={togglePin}
+            />
+          </Suspense>
+        )}
+
         {/* The file sits where the reading happens rather than squeezed into
             the panel: a column of code is prose-width, not sidebar-width. */}
         {filesExpanded && reading !== null ? (
@@ -5995,9 +5720,9 @@ function Conversation() {
             onForget={(project) => void forget(project)}
             onBrowse={() => void browse()}
           />
-        ) : undecided ? null : desk === null || desk.turns.length === 0 ? (
+        ) : undecided ? null : desk === null || chat.turns.length === 0 ? (
           <Welcome
-            onUse={setDraft}
+            onUse={(said) => handIn(() => said)}
             project={desk?.name ?? null}
             onPickDocument={async () => {
               const answer = await bridge.chooseDocument(desk === null ? undefined : { project: desk.path });
@@ -6018,7 +5743,9 @@ function Conversation() {
                     return;
                   }
                   if (desk !== null) void refreshBuildPlan(desk.path);
-                  void send(asBuildRequest(source.text, source.instruction));
+                  void import("./work/buildbrief").then(({ asBuildRequest }) => {
+                    void send(asBuildRequest(source.text, source.instruction));
+                  });
                 })
                 .catch(() => {
                   if (desk !== null) void refreshBuildPlan(desk.path);
@@ -6034,97 +5761,154 @@ function Conversation() {
               <h1 className="workhead__name">{desk.name}</h1>
             </header>
 
-            {finding === null ? null : (
-              <FindInThread
-                turns={desk.turns}
-                term={finding}
-                at={foundAt}
-                onTerm={(next) => {
-                  setFinding(next);
-                  setFoundAt(null);
-                }}
-                onAt={(turn, showFrom) => {
-                  setFoundAt(turn);
-                  // Bringing a result into view has to draw it first.
-                  setDrawing((was) => Math.max(was, showFrom));
-                }}
-                onClose={() => {
-                  setFinding(null);
-                  setFoundAt(null);
-                }}
-              />
+            {/* Above the thread and outside it: a read-only fact belongs to the
+                view, not to the conversation, and a card inside the thread
+                would read as something the agent said. The history below is
+                still readable, which is the whole of what opening read-only
+                means. */}
+            {unavailable === null ? null : (
+              <Suspense fallback={null}>
+                <Recovery
+                  trouble={unavailable}
+                  onRelink={() => void relinkConversation()}
+                  onContinue={continueFromHere}
+                  choosing={relinking}
+                />
+              </Suspense>
             )}
 
-            <div className="thread" hidden={readingWhole && reading !== null}>
+            {finding === null ? null : (
+              <Suspense fallback={null}>
+                <FindInThread
+                  turns={chat.turns}
+                  term={finding}
+                  at={foundAt}
+                  onTerm={(next) => {
+                    setFinding(next);
+                    setFoundAt(null);
+                  }}
+                  onAt={(turn, showFrom) => {
+                    setFoundAt(turn);
+                    // Bringing a result into view has to draw it first.
+                    setDrawing((was) => Math.max(was, showFrom));
+                  }}
+                  onClose={() => {
+                    setFinding(null);
+                    setFoundAt(null);
+                  }}
+                />
+              </Suspense>
+            )}
+
             {(() => {
               /* Nobody reopens a sitting to read the top of it. A conversation
                  of ten thousand turns draws its last few hundred, and the rest
                  is one press away. */
-              const paged = lastTurns(desk.turns, drawing);
-              // A step that took a picture stays on its own line: a picture
-              // folded into a collapsed run is a picture nobody sees. So does
-              // the advisor — nobody asked for a second model, so the line is
-              // the only evidence it happened, and a fold hides it.
-              const showing = new Set<string>();
-              for (const turn of paged.turns) {
+              /* A step that took a picture stays on its own line: a picture
+                 folded into a collapsed run is a picture nobody sees. So does
+                 the advisor — nobody asked for a second model, so the line is
+                 the only evidence it happened, and a fold hides it. */
+              const apart = new Set<string>();
+              for (const turn of chat.turns) {
                 if (turn.kind !== 'did') continue;
-                if (turn.shown !== undefined || isAdvisor(turn.label)) showing.add(turn.id);
+                if (turn.shown !== undefined || isAdvisor(turn.label)) apart.add(turn.id);
               }
-              const all = rows(paged.turns, showing);
-              const lastGrapheIdx = [...all].reverse().findIndex((r) => r.kind !== 'steps' && r.turn.kind === 'said' && r.turn.from === 'graphe');
-              const lastIdx = lastGrapheIdx === -1 ? -1 : all.length - 1 - lastGrapheIdx;
-              const earlier =
-                paged.earlier === 0 ? null : (
-                  <button
-                    key="earlier"
-                    type="button"
-                    className="thread__earlier"
-                    onClick={() => setDrawing((was) => was + AT_FIRST)}
-                  >
-                    {threadWords.earlier(paged.earlier)}
-                  </button>
-                );
-              return [
+              /* Only the rows on screen are in the document; the rest are two
+                 blocks of empty room and the arithmetic in `lib/windowed.ts`.
+                 The row this draws is the row the thread has always drawn, so
+                 the spacing, the mark a search lands on and the last thing said
+                 are all unchanged. */
+              const {
+                rows: all,
                 earlier,
-                ...all.map((row, idx) =>
-              row.kind === "steps" ? (
-                <Steps key={row.id} steps={row.steps} showMe={preferences.showMe} />
-              ) : (
-                <div
-                  key={row.turn.id}
-                  className={`thread__row ${row.turn.id === foundId ? 'thread__row--found' : ''}`}
-                  data-turn={row.turn.id}
-                >
-                  <Turnstile
-                    turn={row.turn}
-                    onRespond={respond}
-                    onAnswerAsked={answerAsked}
-                    onDismiss={dismiss}
-                    onAnswerEstimate={answerEstimate}
-                    onAnswerPlan={answerPlan}
-                    onAskForAPlanAgain={askForAPlanAgain}
-                    onFixReview={fixReview}
-                    onPostReview={postReview}
-                    showMe={preferences.showMe}
-                    isLast={idx === lastIdx}
-                  />
-                </div>
-              ),
-            )]; })()}
-              {frontBusy && !runningNow ? <WorkingMark /> : null}
-              {/* The run sits at the end of the conversation, next to the box,
-                  because it is the newest thing anybody has to say about the
-                  page and the next message is usually about it. */}
-              {recorded !== null && recorded.project === desk.path ? (
-                <EvidenceReel recording={recorded.recording} />
-              ) : null}
-              {finishedRun !== null && desk !== null &&
-              finishedRun.owner === keyOf(desk.path, desk.address ?? '') ? (
-                <p className="threadnote">
-                  Worked for {durationInWords(finishedRun.seconds)}
-                </p>
-              ) : null}
-            </div>
+                lastReply: lastIdx,
+                stands: boundaries,
+              } = drawnFrom(chat.turns, drawing, apart);
+              /* Only the rows on screen are in the document; the rest are two
+                 blocks of empty room and the arithmetic in `lib/windowed.ts`.
+                 The row this draws is the row the thread has always drawn, so
+                 the spacing, the mark a search lands on and the last thing said
+                 are all unchanged. */
+              return (
+                <ThreadRows
+                  rows={all}
+                  scroller={scrollRef}
+                  hidden={readingWhole && reading !== null}
+                  bring={foundId}
+                  lead={
+                    earlier === 0 ? null : (
+                      <button
+                        type="button"
+                        className="thread__earlier"
+                        onClick={() => setDrawing((was) => was + AT_FIRST)}
+                      >
+                        {threadWords.earlier(earlier)}
+                      </button>
+                    )
+                  }
+                  draw={(row, idx, mark) =>
+                    row.kind === "steps" ? (
+                      <div className="thread__row" ref={mark}>
+                        <Steps steps={row.steps} showMe={preferences.showMe} />
+                      </div>
+                    ) : (
+                      <div
+                        ref={mark}
+                        className={`thread__row ${row.turn.id === foundId ? 'thread__row--found' : ''}`}
+                        data-turn={row.turn.id}
+                      >
+                        {/* Its own boundary: one row's code arriving must not
+                            hold up the column, and a row that is not drawn
+                            yet is a row that has nothing to say yet. */}
+                        <Suspense fallback={null}>
+                          <Turnstile
+                            turn={row.turn}
+                            onRespond={(turnId, callId, decision) =>
+                              respond(drawnFor, turnId, callId, decision)
+                          }
+                          onAnswerAsked={(turnId, answers) =>
+                            answerAsked(drawnFor, turnId, answers)
+                          }
+                          onDismiss={(turnId) => dismiss(drawnFor, turnId)}
+                          onAnswerEstimate={(turn, go) => answerEstimate(drawnFor, turn, go)}
+                          onAnswerPlan={(turnId, go, chosen) =>
+                            answerPlan(drawnFor, turnId, go, chosen)
+                          }
+                          onAskForAPlanAgain={(turnId) => askForAPlanAgain(drawnFor, turnId)}
+                          onFixReview={(turnId) => fixReview(drawnFor, turnId)}
+                          onPostReview={postReview}
+                          showMe={preferences.showMe}
+                          isLast={idx === lastIdx}
+                          saidBy={boundaries.get(row.turn.id) ?? null}
+                          onForkHere={forkHere}
+                          // The newest exchange is the one still being
+                          // written while this conversation is working, and
+                          // the shell refuses a fork of a boundary that has
+                          // not finished happening.
+                            forkWaits={frontBusy && idx === all.length - 1}
+                          />
+                        </Suspense>
+                      </div>
+                    )
+                  }
+                  trail={
+                    <>
+                      {frontBusy && !runningNow ? <WorkingMark /> : null}
+                      {/* The run sits at the end of the conversation, next to
+                          the box, because it is the newest thing anybody has to
+                          say about the page and the next message is usually
+                          about it. */}
+                      {finishedRun !== null &&
+                      finishedRun.owner === keyOf(desk.path, desk.address ?? '') ? (
+                        <p className="threadnote">
+                          Worked for {durationInWords(finishedRun.seconds)}
+                        </p>
+                      ) : null}
+                    </>
+                  }
+                />
+              );
+            })()}
           </>
         )}
 
@@ -6177,35 +5961,50 @@ function Conversation() {
                 steps have, and nothing about the build is lost if the window
                 closes — the plan is written down and reopened. */}
             {buildPlan !== null && buildPlan.path === desk?.path && buildPlan.plan.total > 0 ? (
-              <BuildProgress
-                plan={buildPlan.plan}
-                running={frontBusy}
-                project={buildPlan.path}
-                carryingOn={
-                  carryingOn[keyOf(buildPlan.path, buildPlan.plan.address)] ?? null
-                }
-                onStopCarryingOn={() => {
-                  void bridge.continuationStop({
-                    project: buildPlan.path,
-                    ...(buildPlan.plan.address === ''
-                      ? {}
-                      : { conversation: buildPlan.plan.address }),
-                  });
-                }}
-              />
+              <Suspense fallback={null}>
+                <BuildProgress
+                  plan={buildPlan.plan}
+                  running={frontBusy}
+                  project={buildPlan.path}
+                  carryingOn={
+                    carryingOn[keyOf(buildPlan.path, buildPlan.plan.address)] ?? null
+                  }
+                  onStopCarryingOn={() => {
+                    void bridge.continuationStop({
+                      project: buildPlan.path,
+                      ...(buildPlan.plan.address === ''
+                        ? {}
+                        : { conversation: buildPlan.plan.address }),
+                    });
+                  }}
+                />
+              </Suspense>
             ) : null}
 
             {/* Both bands sit above the composer rather than in the panel on
                 the right: that panel is a reading of what has happened, and
                 these two are what is happening. */}
-            <HelperRail
-              helpers={angles}
-              onOpen={(at) => {
-                goToScreen("helpers");
-                startScreen(() => setHelpersAt({ at }));
-              }}
-            />
-            <InLine waiting={waitingHere} onTake={takeBack} />
+            {angles.length === 0 ? null : (
+              <Suspense fallback={null}>
+                <HelperRail
+                  helpers={angles}
+                  onOpen={(at) => {
+                    goToScreen("helpers");
+                    startScreen(() => setHelpersAt({ at }));
+                  }}
+                />
+              </Suspense>
+            )}
+            {waitingHere.length === 0 && queuedForWorkspace.length === 0 ? null : (
+              <Suspense fallback={null}>
+                <InLine
+                  waiting={waitingHere}
+                  queued={queuedForWorkspace}
+                  onTake={takeBack}
+                  onNewWorktree={() => setWorktreeOpen(true)}
+                />
+              </Suspense>
+            )}
 
             {/* Finished work that has not touched the folder yet. One quiet row
                 where the hand already is, because a review nobody can see is a
@@ -6230,6 +6029,8 @@ function Conversation() {
 
             {/* Servers and watchers outlive the sentence that started them, so
                 they sit above the composer rather than inside the conversation. */}
+            {running.length === 0 ? null : (
+              <Suspense fallback={null}>
             <Running
               pieces={running}
               onOpen={(address) => {
@@ -6246,11 +6047,16 @@ function Conversation() {
                 });
               }}
             />
+              </Suspense>
+            )}
 
             <Composer
               onSend={hand}
               onQueue={hand}
               onStop={halt}
+              // A conversation whose folder is gone can be read and not written
+              // to, and the box says so rather than swallowing the message.
+              {...(unavailable === null ? {} : { readOnly: unavailable.because })}
               figmaLinked={(connected?.tools ?? []).some((one) => one.name === 'figma')}
               onLinkFigma={letFigmaIn}
               autoFocus
@@ -6261,10 +6067,10 @@ function Conversation() {
               waiting={desk !== null && holding[keyOf(desk.path, desk.address ?? '')] === true}
               onWait={waitForMe}
               draft={draft}
+              onDraftChange={keepDraftAt(boxOwner)}
               attachments={attachments}
               connection={connection}
               room={room}
-              turns={desk?.turns ?? []}
               tidying={tidying}
               onTidy={tidyNow}
               howFar={howFar}
@@ -6286,36 +6092,94 @@ function Conversation() {
               onConnect={openConnect}
               onThinking={changeThinking}
               skills={skills}
-              tree={desk === null ? [] : (files[desk.path] ?? []).map((one) => ({ path: one.path, folder: false }))}
+              tree={
+                desk === null
+                  ? []
+                  : (files[desk.path]?.files ?? []).map((one) => ({ path: one.path, folder: false }))
+              }
               workflows={workflows}
-              onAttachmentsChange={(next) => {
-                if (openProject === null) setLoose(next);
-                else {
-                  setDesks((current) =>
-                    changeCurrent(current, (one) => ({
-                      ...one,
-                      attachments: next,
-                    })),
-                  );
-                }
-              }}
+              onAttachmentsChange={fillBox}
             />
           </div>
         )}
       </div>
 
+      {/* The pane beside the focused one, when there is one.
+          
+          It is drawn from the same desk as the column — every open conversation
+          of this project is held whole — so this is a second view of one
+          conversation and never a second session. What it does not do is take
+          typing: the hand is in the focused pane, and this one is for reading
+          what is happening next to what you are working on. That is what makes
+          two panes useful rather than two half-windows. */}
+      {otherPane !== null && otherPane.conversation !== null && desk !== null ? (
+        <aside className="beside" aria-label={`Pane showing ${titleOf(conversationIn(desk, otherPane.conversation).turns)}`}>
+          <header className="beside__head">
+            <h2 className="beside__name">
+              {titleOf(conversationIn(desk, otherPane.conversation).turns)}
+            </h2>
+          </header>
+          <div className="beside__scroll scroll--auto">
+            <ThreadRows
+              rows={drawnFrom(conversationIn(desk, otherPane.conversation).turns, AT_FIRST).rows}
+              scroller={besideRef}
+              draw={(row, idx, mark) =>
+                row.kind === 'steps' ? (
+                  <div className="thread__row" ref={mark}>
+                    <Steps steps={row.steps} showMe={preferences.showMe} />
+                  </div>
+                ) : (
+                  <div className="thread__row" ref={mark}>
+                    <Suspense fallback={null}>
+                      <Turnstile
+                        turn={row.turn}
+                        onRespond={(turnId, callId, decision) =>
+                          respond(ownerThere, turnId, callId, decision)
+                        }
+                      onAnswerAsked={(turnId, answers) =>
+                        answerAsked(ownerThere, turnId, answers)
+                      }
+                      onDismiss={(turnId) => dismiss(ownerThere, turnId)}
+                      onAnswerEstimate={(turn, go) => answerEstimate(ownerThere, turn, go)}
+                      onAnswerPlan={(turnId, go, chosen) =>
+                        answerPlan(ownerThere, turnId, go, chosen)
+                      }
+                      onAskForAPlanAgain={(turnId) => askForAPlanAgain(ownerThere, turnId)}
+                      onFixReview={(turnId) => fixReview(ownerThere, turnId)}
+                      onPostReview={postReview}
+                      showMe={preferences.showMe}
+                      isLast={idx === allThere - 1}
+                      onForkHere={forkHere}
+                        forkWaits={busyThere && idx === allThere - 1}
+                      />
+                    </Suspense>
+                  </div>
+                )
+              }
+              trail={busyThere ? <WorkingMark /> : null}
+            />
+          </div>
+        </aside>
+      ) : null}
+
       {overviewed && desk !== null ? (
         <Overview
           key={keyOf(desk.path, desk.address ?? '')}
+          /* Only this conversation's finished work. The queue is the project's,
+             but the panel is the chat's, and a project list drawn under a chat
+             heading reads as this chat's state. Project-wide work has its own
+             screen, which names the chat behind every row. */
+          waitingHere={reviewQ.filter(
+            (one) => desk.address !== null && one.address === desk.address,
+          )}
           view={{
             now: nowThere,
             git: desk.overview?.git ?? null,
             repos: desk.overview?.repos ?? [],
             repoVersions: desk.repoVersions,
             research,
-            references: desk.references,
+            references: chat.references,
             versions: desk.versions,
-            pictures: versionPictures[desk.path] ?? {},
             kept: preferences.kept[desk.path] ?? [],
             putBack: desk.putBack,
             spent: desk.spent,
@@ -6325,18 +6189,7 @@ function Conversation() {
             showMe: preferences.showMe,
             artifacts: desk.overview?.artifacts ?? [],
             swatches: desk.overview?.swatches ?? [],
-            styles: designStyles,
-            reading: design,
-            inStep,
-            landing,
-            gate,
-            howMuch: howMuchBy(preferences.howMuch).id,
-            going,
-            landed,
-            decided,
             away: awayHere,
-            elsewhere: awayElsewhere,
-            project: openProject === null ? "" : folderCalled(openProject),
             clock: now,
             /* Four numbers that were on four screens. The steps come from the
                list the model owns, the rest from the goal file. */
@@ -6358,10 +6211,6 @@ function Conversation() {
           onDismissPutBack={dismissPutBack}
           onShowSplit={() => void showSplit()}
           onLimit={setLimit}
-          onOpenDesign={(part) => {
-            goToScreen("design");
-            startScreen(() => setDesignAt(part));
-          }}
           onOpenGraph={(repo) => {
             goToScreen("graph");
             setGraphRepo(repo ?? null);
@@ -6371,11 +6220,6 @@ function Conversation() {
           onCreateBranch={createBranch}
           onFetch={(repo) => fromOrigin((where) => bridge.fetchOrigin(where), repo)}
           onFastForward={(repo) => fromOrigin((where) => bridge.fastForward(where), repo)}
-          onShare={(repo) => void bridge.shareReview(repo === undefined ? undefined : { repo })}
-          onDecide={decideOnWork}
-          onHowMuch={changeHowMuch}
-          onHandOver={handToDeveloper}
-          onOpenLink={(address) => void bridge.openLink(address)}
           onOpenReview={(id) => {
             goToScreen('review');
             startScreen(() => setReviewQueueOpen(true));
@@ -6398,21 +6242,15 @@ function Conversation() {
           onWhose={(name) => {
             panelRepoNow.current = name;
             setPanelRepo((was) => (was === name ? was : name));
-            refreshLanding(openProject);
           }}
-          onOpenFile={(file) => void bridge.openInEditor(file)}
-          onKeepGoing={keepGoing}
-          onStartAfter={startAfter}
+          onOpenFile={(file) => {
+            const where: Where = openProject === null ? {} : { project: openProject };
+            void bridge.openInEditor(file, where);
+          }}
           onKeepAway={keepAway}
           onDropAway={dropAway}
           onAnswerAway={answerAway}
           onSayToAway={sayToAway}
-          onCompareWays={compareWays}
-          onStopWaiting={stopWaiting}
-          onTakeAll={takeAll}
-          onAddRepeat={addRepeat}
-          onSwitchRepeat={switchRepeat}
-          onForgetRepeat={forgetRepeat}
           onSave={(repo?: string) => {
             const here = currentDesk(desksNow.current);
             if (here === null) return;
@@ -6437,93 +6275,10 @@ function Conversation() {
         />
       ) : null}
 
-      {/* Everything about how the project looks, and everywhere it has been.
-          Both take the room between the shelf and the panel, because both were
-          unreadable in a 328px column. */}
-      {designAt !== null && desk !== null ? (
-        <Suspense fallback={ARRIVING}>
-          <DesignView
-            at={designAt}
-            data={{
-              styles: designStyles,
-              motion: design.motion,
-              drifted: design.drifted,
-              unreadable: design.unreadable,
-              fixing,
-              repairs: design.repairs,
-              nudged: Object.keys(
-                (desk === null ? undefined : designDraft[desk.path])?.tokens ?? {},
-              ),
-              looks: looks.looks,
-              looksSay: looks.says,
-              checkingWidths,
-              workingAt,
-              inStep,
-              lookingAtFigma,
-              busy,
-              showMe: preferences.showMe,
-            }}
-            changes={designChanges()}
-            onSave={commitDesign}
-            onDiscard={discardDesign}
-            onClose={() => setDesignAt(null)}
-            onNudge={nudge}
-            onResetToken={resetToken}
-            onNudgeMotion={nudgeMotion}
-            onOpenFile={(file) => void bridge.openInEditor(file)}
-            onUseAll={(findings) => {
-              // One message for the lot: a press per finding would be a
-              // conversation per finding.
-              const where = designStyles?.file ?? "";
-              const text = findings.map((one) => saysUseYours(one, where)).join("\n");
-              setDesignAt(null);
-              void deliver(text, sizeUp(text), { lookFirst: true });
-            }}
-            onUseYours={(finding) => {
-              // Through the agent rather than straight to disk: the edit is then
-              // snapshotted, photographed and undoable like any other change.
-              const text = saysUseYours(finding, designStyles?.file ?? "");
-              setDesignAt(null);
-              void deliver(text, sizeUp(text), { lookFirst: true });
-            }}
-            onFixColour={(finding) => {
-              const token = design.repairs.get(finding.id);
-              if (token === undefined || finding.fix === null) return;
-              setFixing(finding.id);
-              nudge(token, finding.fix.colour);
-            }}
-            onCheckWidths={() => {
-              setCheckingWidths(true);
-              void bridge
-                .checkWidths(
-                  panelRepoNow.current === null ? undefined : { repo: panelRepoNow.current },
-                )
-                .then((answer) => {
-                  if (answer.ok) setLooks(answer.value);
-                })
-                .finally(() => setCheckingWidths(false));
-            }}
-            onWorkAt={(look) => setWorkingAt((was) => (was === look.id ? null : look.id))}
-            onFollowDesign={(address) => askFigma(() => bridge.followDesign(address))}
-            onLookAgain={() => askFigma(() => bridge.lookAgain())}
-            onCaughtUp={() => askFigma(() => bridge.caughtUp())}
-            onStopFollowing={() => askFigma(() => bridge.stopFollowing())}
-            /* The one thing here that is a request rather than a reading: what
-               moved goes to the conversation as the sentence that would bring the
-               work back in step. */
-            onBuildIn={(move: Move) => {
-              setDesignAt(null);
-              void send(move.asks);
-            }}
-          />
-        </Suspense>
-      ) : null}
-
       {graphOpen && desk !== null ? (
         <Suspense fallback={ARRIVING}>
           <HistoryView
             versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
-            pictures={versionPictures[desk.path] ?? {}}
             git={
               historyRepo === null
                 ? (desk.overview?.git ?? null)
@@ -6532,7 +6287,10 @@ function Conversation() {
             busy={busy}
             onClose={() => setGraphOpen(false)}
             onPutBack={(versionId) => void putBack(versionId, historyRepo ?? undefined)}
-            onOpenFile={(file) => void bridge.openInEditor(file)}
+            onOpenFile={(file) => {
+              const where: Where = openProject === null ? {} : { project: openProject };
+              void bridge.openInEditor(file, where);
+            }}
             repos={desk.overview?.repos ?? []}
             repo={historyRepo}
             onRepo={(name) => setGraphRepo(name)}
@@ -6543,61 +6301,35 @@ function Conversation() {
       {/* The canvas in front, drawn where a conversation would be. It is a tab,
           so the row of tabs stays above it and switching back is one press on
           something you can see. */}
-      {canvasHere === null ? null : (
-        <Suspense fallback={ARRIVING}>
-          <CanvasView
-            flow={canvasHere}
-            onFlow={changeFlow}
-            onStart={startFlow}
-            onStop={stopFlow}
-            onCarryOn={openGate}
-            connection={connection}
-            thinking={preferences?.thinking ?? {}}
-            onThinking={setBlockThinking}
-            repos={desk?.overview?.repos ?? []}
-            doing={canvasDoing}
-            onModel={selectModel}
-            onConnect={() => setConnectedOpen(true)}
-            advisor={preferences.advisor}
-            onAdvisor={selectAdvisor}
-            {...(preferences.advisorThinking === null ? {} : { advisorThinking: preferences.advisorThinking })}
-            onAdvisorThinking={setAdvisorThinking}
-            full={canvasFull}
-            onFull={setCanvasFull}
-            {...(canvasHere.conversation === null || desk === null
-              ? {}
-              : { onOpenThread: () => void goToTab(keyOf(desk.path, canvasHere.conversation ?? '')) })}
+      {reviewsOpen && desk !== null ? (
+        <Suspense fallback={reviewsOpen ? ARRIVING : null}>
+          <ReviewsView
+            repo={repo}
+            busy={reviewsBusy}
+            onRefresh={refreshRepo}
+            onClose={() => setReviewsOpen(false)}
+            onReview={startReview}
+            onWork={startIssue}
+            prDiff={(number) => bridge.prDiff(number, reviewsWhere())}
+            prChecks={(number) => bridge.prChecks(number, reviewsWhere())}
+            prCheckout={(number) => bridge.prCheckout(number, reviewsWhere())}
+            prComments={(number) => bridge.prComments(number, reviewsWhere())}
+            prComment={(number, body, path, line) =>
+              bridge.prComment(number, body, path, line, reviewsWhere())
+            }
+            repos={desk.overview?.repos ?? []}
+            which={
+              (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
+              (desk.overview?.repos ?? [])[0]?.name ??
+              null
+            }
+            onWhich={(name) => {
+              setReviewsRepo(name);
+              reviewsRepoNow.current = name;
+              refreshRepo();
+            }}
           />
         </Suspense>
-      )}
-
-      {reviewsOpen && desk !== null ? (
-        <ReviewsView
-          repo={repo}
-          busy={reviewsBusy}
-          onRefresh={refreshRepo}
-          onClose={() => setReviewsOpen(false)}
-          onReview={startReview}
-          onWork={startIssue}
-          prDiff={(number) => bridge.prDiff(number, reviewsWhere())}
-          prChecks={(number) => bridge.prChecks(number, reviewsWhere())}
-          prCheckout={(number) => bridge.prCheckout(number, reviewsWhere())}
-          prComments={(number) => bridge.prComments(number, reviewsWhere())}
-          prComment={(number, body, path, line) =>
-            bridge.prComment(number, body, path, line, reviewsWhere())
-          }
-          repos={desk.overview?.repos ?? []}
-          which={
-            (desk.overview?.repos ?? []).find((one) => one.name === reviewsRepo)?.name ??
-            (desk.overview?.repos ?? [])[0]?.name ??
-            null
-          }
-          onWhich={(name) => {
-            setReviewsRepo(name);
-            reviewsRepoNow.current = name;
-            refreshRepo();
-          }}
-        />
       ) : null}
 
       {reviewQueueOpen && desk !== null ? (
@@ -6612,18 +6344,21 @@ function Conversation() {
             onDecide={decideReview}
             onLand={landReview}
             onOpenPr={openReviewPr}
-            onMirror={mirrorReview}
             onRefresh={refreshReviewQueue}
             onClose={() => setReviewQueueOpen(false)}
             onExplain={(file, line) => {
               setReviewQueueOpen(false);
-              const asked = CHANGE_WORDS.explain(file, line);
-              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              void wordsAboutChanges().then((words) => {
+                const asked = words.explain(file, line);
+                void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              });
             }}
             onFix={(file, line) => {
               setReviewQueueOpen(false);
-              const asked = CHANGE_WORDS.fix(file, line);
-              void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              void wordsAboutChanges().then((words) => {
+                const asked = words.fix(file, line);
+                void deliver(asked, sizeUp(asked), { lookFirst: false, queue: 'followUp' });
+              });
             }}
           />
         </Suspense>
@@ -6652,29 +6387,14 @@ function Conversation() {
           address={pageAt ?? previewUrl}
           onAddress={(address) => {
             setPageAt(address);
-            void bridge.pageAt(address, null, true);
+            preview.pointAt(address);
           }}
           onElsewhere={(address) => void bridge.openLink(address)}
           onRoom={movePane}
           onClose={() => movePane('off')}
-          variations={
-            variations === null
-              ? undefined
-              : variations.members.map((one) => ({ id: one.id, name: one.name }))
-          }
-          recording={recording}
-          onRecord={record}
           watched={watched}
           watching={watchAt !== null}
           onWatch={watchTheBrowser}
-          variation={variations?.inFront ?? null}
-          onVariation={variations === null ? undefined : (id) => {
-            const chosen = variations.members.find((one) => one.id === id);
-            if (chosen === undefined) return;
-            setVariations((current) => (current === null ? current : { ...current, inFront: id }));
-            setPageAt(chosen.address);
-            movePane('split');
-          }}
           onBounds={movedPage}
         />
       </Suspense>
@@ -6704,6 +6424,35 @@ function Conversation() {
         />
       ) : null}
 
+      {addonAsk === null ? null : (
+        <Suspense fallback={null}>
+          <AddonAsk
+            request={addonAsk}
+            onAnswer={(answer) => {
+              const asking = addonAsk;
+              setAddonAsk(null);
+              void bridge.answerExtension(asking.requestId, answer, {
+                project: asking.project,
+                ...(asking.conversation === null ? {} : { conversation: asking.conversation }),
+              });
+            }}
+          />
+        </Suspense>
+      )}
+
+      {worktreeOpen ? (
+        <Suspense fallback={null}>
+          <NewWorktree
+            project={desksNow.current.current}
+            onClose={() => setWorktreeOpen(false)}
+            onMade={(address) => {
+              setWorktreeOpen(false);
+              if (address !== null) void swapConversation(address);
+            }}
+          />
+        </Suspense>
+      ) : null}
+
       <Suspense fallback={null}>
         <AddMore
           open={addMore}
@@ -6720,25 +6469,33 @@ function Conversation() {
              this project already has marked as connected. Without these the
              whole shelf never drew, so the one-press way to give the agent a
              browser was invisible. */
-          reaches={alreadyReached((connected?.tools ?? []).map((one) => one.name))}
+          reaches={(connected?.tools ?? []).map((one) => one.name)}
           onConnect={(id) => {
-            const wanted = REACHABLE.find((one) => one.id === id);
-            if (wanted === undefined) return;
             setPackBusy(id);
             const now = connected?.tools ?? [];
-            void bridge
-              .connectedSave([...now.filter((one) => one.name !== id), asServer(wanted)])
-              .then((answer) => {
-                if (answer.ok) setConnected(answer.value);
-                else troubleHere(answer.trouble);
-              })
-              .finally(() => setPackBusy(null));
+            void import("./agent/pi/reach").then(({ REACHABLE, asServer }) => {
+              const wanted = REACHABLE.find((one) => one.id === id);
+              if (wanted === undefined) return;
+              return bridge
+                .connectedSave(
+                  [...now.filter((one) => one.name !== id), asServer(wanted)],
+                  openProject === null ? {} : { project: openProject },
+                )
+                .then((answer) => {
+                  if (answer.ok) setConnected(answer.value);
+                  else troubleHere(answer.trouble);
+                })
+                .finally(() => setPackBusy(null));
+            });
           }}
           onDisconnect={(id) => {
             setPackBusy(id);
             const now = connected?.tools ?? [];
             void bridge
-              .connectedSave(now.filter((one) => one.name !== id))
+              .connectedSave(
+                now.filter((one) => one.name !== id),
+                openProject === null ? {} : { project: openProject },
+              )
               .then((answer) => {
                 if (answer.ok) setConnected(answer.value);
                 else troubleHere(answer.trouble);
@@ -6752,6 +6509,7 @@ function Conversation() {
           }}
           onAdd={(id) => {
             setPackBusy(id);
+            setStoppedSays(null);
             void bridge
               .addPackage(id)
               .then((answer) => {
@@ -6762,6 +6520,7 @@ function Conversation() {
           }}
           onRemove={(id) => {
             setPackBusy(id);
+            setStoppedSays(null);
             void bridge
               .removePackage(id)
               .then((answer) => {
@@ -6769,6 +6528,22 @@ function Conversation() {
               })
               .finally(() => setPackBusy(null));
           }}
+          /* Stopping is the shelf's own answer, in the shelf's own words: what
+             a stopped install left on disk is only knowable once it is over. */
+          onStop={() => {
+            void bridge.stopPackage().then((answer) => {
+              if (!answer.ok) {
+                troubleHere(answer.trouble);
+                return;
+              }
+              if (answer.value.packs !== undefined) setPacks(answer.value.packs);
+              setStoppedSays(answer.value.says);
+            });
+          }}
+          {...(addonStopping === null ? {} : { stopping: addonStopping })}
+          stoppedSays={stoppedSays}
+          here={extensionsHere}
+          {...(addonSetup === null ? {} : { setup: addonSetup })}
           carried={carried}
           onTrustCarried={trustCarried}
         />
@@ -6806,226 +6581,3 @@ function Conversation() {
 /** A step's own words on one feed line: what it was asked until it has said
  *  something, and then what it said. Read from whichever end of the text means
  *  something — see `opening`. */
-function saying(turn: Extract<Turn, { kind: "did" }>): string | undefined {
-  if (turn.progress === undefined) return turn.detail;
-  return isAdvisor(turn.label) ? opening(turn.progress) : lastSaid(turn.progress);
-}
-
-/**
- * One row of the conversation.
- *
- * Memoised, and on identity rather than a deep comparison: every arm of the
- * fold replaces the slot rather than editing the turn, so a turn that is the
- * same object is a turn that has not changed. Without this, a token landing in
- * the last turn redrew every row above it — three thousand of them, sixty times
- * a second, on a long conversation.
- *
- * The callbacks are rebuilt on every render of the window and never change what
- * a row draws, so comparing them would defeat the whole thing.
- */
-const Turnstile = memo(function Turnstile({
-  turn,
-  onRespond,
-  onAnswerAsked,
-  onDismiss,
-  onAnswerEstimate,
-  onAnswerPlan,
-  onAskForAPlanAgain,
-  onFixReview,
-  onPostReview,
-  showMe,
-  isLast,
-}: {
-  turn: Turn;
-  onRespond: (turnId: string, callId: string, decision: Decision) => void;
-  onAnswerAsked: (turnId: string, answers: Answers | null) => void;
-  onDismiss: (turnId: string) => void;
-  onAnswerEstimate: (turn: EstimateTurn, go: boolean) => void;
-  onAnswerPlan: (
-    turnId: string,
-    go: boolean,
-    chosen?: {
-      kept: readonly string[];
-      dropped: readonly string[];
-      decision?: PlanDecision;
-    },
-  ) => void;
-  /** The model answered in prose rather than a list. Asks again, in the same
-   *  words the look-around uses, rather than leaving the card as a dead end. */
-  onAskForAPlanAgain: (turnId: string) => void;
-  onFixReview: (turnId: string) => void;
-  onPostReview: (verdict: ReviewVerdict) => Promise<boolean>;
-  /** Name the real command, path or operation under each step (BACKLOG D1).
-   *  The words themselves were recorded when the step happened, so turning this
-   *  on explains the conversation you already had. */
-  showMe: boolean;
-  isLast?: boolean;
-}) {
-  switch (turn.kind) {
-    case "said":
-      return (
-        <Message
-          from={turn.from}
-          streaming={turn.streaming}
-          isLast={isLast}
-          pictures={turn.pictures}
-          copy={wordsOf(turn)}
-        >
-          {turn.text}
-        </Message>
-      );
-
-    case "did":
-      return (
-        <>
-          <ActivityLine
-            state={turn.state}
-            label={turn.label}
-            detail={saying(turn)}
-            real={showMe ? turn.real : undefined}
-          />
-          {turn.shown === undefined ? null : (
-            <Shown picture={turn.shown} label={turn.label} />
-          )}
-        </>
-      );
-
-    case "asked":
-      // Once it is answered the question stops being a control and becomes part
-      // of the record — a live pair of buttons for a decision already taken is
-      // how people learn to click without reading.
-      return turn.answered === null ? (
-        <ConfirmChange
-          question={turn.question}
-          detail={turn.detail}
-          consequence={turn.consequence}
-          technical={showMe ? turn.real : undefined}
-          confirmLabel="Yes, go ahead"
-          cancelLabel="No, leave it"
-          onConfirm={() => onRespond(turn.id, turn.callId, "yes")}
-          onCancel={() => onRespond(turn.id, turn.callId, "no")}
-        />
-      ) : (
-        <ActivityLine
-          state={turn.answered === "yes" ? "done" : "failed"}
-          label={turn.question}
-          detail={
-            turn.answered === "yes"
-              ? "You said yes."
-              : "You said no, so I left it alone."
-          }
-          real={showMe ? turn.real : undefined}
-        />
-      );
-
-    // Asked before a single file is touched, so that everything after it can
-    // happen with nobody watching. The card holds the picking; the turn only
-    // hears the answer.
-    case "asked-first":
-      return (
-        <AskFirst
-          questions={turn.questions}
-          answers={turn.answers}
-          answered={turn.answered}
-          onAnswer={(answers) => onAnswerAsked(turn.id, answers)}
-        />
-      );
-
-    case "plan":
-      return (
-        <PlanCard
-          steps={turn.steps}
-          caveats={turn.caveats}
-          answered={turn.answered}
-          questions={turn.questions}
-          onGo={(kept, dropped, decision) =>
-            onAnswerPlan(turn.id, true, { kept, dropped, decision })
-          }
-          onChange={() => onAnswerPlan(turn.id, false)}
-          onAskAgain={() => onAskForAPlanAgain(turn.id)}
-        />
-      );
-
-    case "review":
-      return (
-        <ReviewCard
-          verdict={turn.verdict}
-          asked={turn.asked}
-          onFix={() => onFixReview(turn.id)}
-          onPost={() => onPostReview(turn.verdict)}
-        />
-      );
-
-    case "estimate":
-      // Same shape as any other question, and the same grammar: the option that
-      // spends less carries the visual weight. Every word of it is written by
-      // src/cost/phrasing.ts and none of it by this file.
-      return turn.answered === null ? (
-        <ConfirmChange
-          question={turn.prompt.title}
-          detail={turn.prompt.body}
-          consequence={turn.prompt.note}
-          confirmLabel={turn.prompt.confirm}
-          cancelLabel={turn.prompt.alternative}
-          onConfirm={() => onAnswerEstimate(turn, true)}
-          onCancel={() => onAnswerEstimate(turn, false)}
-        />
-      ) : (
-        // Answered, it stops being a control and becomes part of the record —
-        // the same shape the Guard's own questions take once they have been
-        // answered, for the same reason: a live pair of buttons for a decision
-        // already taken is how people learn to click without reading.
-        <ActivityLine
-          state="done"
-          label={turn.prompt.title}
-          detail={
-            turn.answered === "went-ahead"
-              ? "You said go ahead."
-              : "You said you would rather start smaller."
-          }
-        />
-      );
-
-    case "tidying":
-      // Behind this is Pi's own tidying of a long conversation. In front of it
-      // is one plain sentence, from src/cost/phrasing.ts — and, for anyone who
-      // asked, its real name underneath.
-      return (
-        <ActivityLine
-          state={turn.state}
-          label={turn.state === 'failed' ? longConversation.stayedAsIs : longConversation.tidying}
-          real={showMe ? behind.tidying : undefined}
-        />
-      );
-
-    case "holding":
-      // A service that could not answer, and the wait before asking again.
-      // Nothing to look at for up to half an hour, so the line says how long.
-      return (
-        <ActivityLine
-          state={turn.state}
-          label={
-            turn.state === 'failed'
-              ? busyService.gaveUp
-              : turn.state === 'done'
-                ? busyService.carriedOn
-                : busyService.waiting(turn.seconds)
-          }
-        />
-      );
-
-    case "trouble":
-      return (
-        <ErrorCard
-          what={turn.trouble.what}
-          because={turn.trouble.because}
-          actionLabel={turn.trouble.actionLabel}
-          onAction={() => onDismiss(turn.id)}
-          technicalDetails={turn.trouble.details}
-        />
-      );
-  }
-}, (before, after) =>
-  before.turn === after.turn &&
-  before.showMe === after.showMe &&
-  before.isLast === after.isLast);

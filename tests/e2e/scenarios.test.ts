@@ -12,11 +12,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { GRAPHE_OWNED, reconcile } from '../../src/agent/advisor';
 import { budgetMs, forgetOverruns, recentOverruns, withHookBudget, type Overrun } from '../../src/agent/pi/hook-budget';
@@ -30,9 +28,11 @@ import {
   withinBudget,
 } from '../../src/agent/pi/standing';
 import { parseProposal } from '../../src/agent/plan';
+import { piecesOf } from '../../src/agent/pi/prompt';
 import { implementationPlanFromResearch, stepsFromReport } from '../../src/agent/research';
 import type { AgentEvent, Money } from '../../src/agent/types';
-import { changeDesk, noDesks, openDesk, receive } from '../../src/lib/projects';
+import { changeDesk, inFront, noDesks, openDesk, receive } from '../../src/lib/projects';
+import { NOTHING_SAID } from '../../src/state/conversations';
 import { GoalFile } from '../../src/projects/goals';
 import { parseDiff } from '../../src/diff/hunks';
 import { forgetScratch, optionsWithScratch, scratchUnder } from '../../src/agent/pi/childenv';
@@ -531,7 +531,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     desks = receive(desks, { project, conversation: null, event });
     return desks.byPath[project];
@@ -539,8 +541,8 @@ describe('S-10 a run that costs nothing', () => {
 
   it('clears the job the moment the run settles', () => {
     const now = desk({ type: 'settled', how: 'finished' });
-    expect(now?.doing).toBeNull();
-    expect(now?.filing).not.toBeNull();
+    expect(inFront(now).doing).toBeNull();
+    expect(inFront(now).filing).not.toBeNull();
   });
 
   it('files nothing when the split never comes', () => {
@@ -548,7 +550,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     for (const event of [
       { type: 'settled', how: 'finished' } as AgentEvent,
@@ -556,7 +560,7 @@ describe('S-10 a run that costs nothing', () => {
     ]) {
       desks = receive(desks, { project, conversation: null, event });
     }
-    expect(desks.byPath[project]?.doing).toBeNull();
+    expect(inFront(desks.byPath[project]).doing).toBeNull();
     expect(desks.byPath[project]?.jobs).toEqual([]);
   });
 
@@ -565,7 +569,9 @@ describe('S-10 a run that costs nothing', () => {
     desks = changeDesk(desks, project, (one) => ({
       ...one,
       address: '',
-      doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 },
+      conversations: {
+        '': { ...NOTHING_SAID, doing: { task: { kind: 'change', size: 'page' }, startedAt: 0 } },
+      },
     }));
     const total: Money = { minor: 250, currency: 'INR' };
     for (const event of [
@@ -588,7 +594,7 @@ describe('S-10 a run that costs nothing', () => {
       desks = receive(desks, { project, conversation: null, event });
     }
     expect(desks.byPath[project]?.jobs).toHaveLength(1);
-    expect(desks.byPath[project]?.filing).toBeNull();
+    expect(inFront(desks.byPath[project]).filing).toBeNull();
   });
 
   it('leaves nothing spinning after a settle', async () => {
@@ -596,7 +602,7 @@ describe('S-10 a run that costs nothing', () => {
     const report = await app.run([{ says: 'Both.', calls: ticks(1, 2) }]);
     expect(report.busy).toBe(false);
     expect(report.waiting).toEqual([]);
-    expect(app.desks().byPath[app.project]?.doing).toBeNull();
+    expect(inFront(app.desks().byPath[app.project]).doing).toBeNull();
   });
 });
 
@@ -673,13 +679,23 @@ describe('S-16 a house-rules file nobody could carry whole', () => {
   });
 
   it('is held where it is read rather than after the prompt is assembled', () => {
-    const adapter = readFileSync(
-      fileURLToPath(new URL('../../src/agent/pi/adapter.ts', import.meta.url)),
-      'utf8',
+    // Every instruction file is its own repository section, capped by path, so
+    // the rest of it is one named read away rather than cut off mid-sentence.
+    const { sections } = piecesOf(
+      [
+        'You are an expert coding assistant.',
+        '',
+        '<project_context>',
+        '<project_instructions path="/p/AGENTS.md">',
+        'Rule one.',
+        '</project_instructions>',
+        '</project_context>',
+      ].join('\n'),
+      { contextFiles: [{ path: '/p/AGENTS.md', content: 'Rule one.' }] },
     );
-    expect(adapter).toContain(
-      'withinBudget(read, AGENTS_BUDGET, standingWords.agentsTrimmed)',
-    );
+    const repository = sections.find((one) => one.of === 'repository');
+    expect(repository?.at).toBe('/p/AGENTS.md');
+    expect(repository?.most).toBe(AGENTS_BUDGET);
   });
 });
 
@@ -756,17 +772,6 @@ describe('S-22 a file git has never seen', () => {
     expect(files).toHaveLength(1);
     expect(files[0]?.kind).toBe('added');
     expect(files[0]?.hunks[0]?.newLines).toBe(2);
-  });
-});
-
-describe('S-24 the shelf’s two states', () => {
-  it('expose the same places in the same order', async () => {
-    // Rendered in `tests/sidebar.test.ts`; what is asserted here is that one
-    // list is the only source, so the two cannot drift again.
-    const { readFileSync } = await import('node:fs');
-    const shelf = readFileSync(`${process.cwd()}/src/components/Sidebar.tsx`, 'utf8');
-    expect(shelf).toContain('function placesOf(p: Props): readonly Place[] {');
-    expect(shelf.match(/places\.map\(/g)).toHaveLength(2);
   });
 });
 

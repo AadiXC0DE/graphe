@@ -1,16 +1,23 @@
-/** The diff viewer, in the parts of it that can be argued about without drawing.
+// @vitest-environment jsdom
+/** The diff viewer, at both of its ends: the parts that can be argued about on
+ * their own, and the screen those parts are drawn on.
  *
  * `src/diff/sidebyside.ts` had the pairing and the word marks and no consumer at
  * all. What was missing between it and a screen is here: one flat list of rows
  * for the whole change so it can be windowed, the two readings over the same
  * pairing, and the colour and the marks applied to the same characters at once.
+ *
+ *  Source text, not behaviour: which fold `e` opens, and that the viewer never reaches the bridge itself; no behaviour can reach either — jsdom draws no fold rows, and an absent import cannot be called.
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement, type ReactElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import Changes from '../src/components/Changes';
+import DiffView, { DIFF_SAYS } from '../src/components/DiffView';
 import { foldIn, foldUnchanged } from '../src/diff/collapse';
 import { parseDiff } from '../src/diff/hunks';
 import { piecesOf, type Token } from '../src/diff/paint';
@@ -34,15 +41,9 @@ import {
   type Entry,
 } from '../src/diff/rows';
 import { splitHunk } from '../src/diff/sidebyside';
+import { ago } from '../src/lib/when';
 
-const changes = readFileSync(
-  fileURLToPath(new URL('../src/components/Changes.tsx', import.meta.url)),
-  'utf8',
-);
-const view = readFileSync(
-  fileURLToPath(new URL('../src/components/DiffView.tsx', import.meta.url)),
-  'utf8',
-);
+const view = readFileSync('src/components/DiffView.tsx', 'utf8');
 
 const DIFF = `diff --git a/src/one.ts b/src/one.ts
 index 111..222 100644
@@ -66,6 +67,124 @@ index 333..444 100644
 
 const files = parseDiff(DIFF);
 const kinds = (entries: readonly Entry[]): readonly string[] => entries.map((one) => one.kind);
+
+/* A change whose two sides differ in nothing but the spacing. */
+const SPACING_ONLY = `diff --git a/src/one.ts b/src/one.ts
+--- a/src/one.ts
++++ b/src/one.ts
+@@ -1,2 +1,2 @@
+-const a = 1;
++const   a = 1;
+`;
+
+/* -------------------------------------------------------------------------- */
+/* The screen it is drawn on                                                   */
+/* -------------------------------------------------------------------------- */
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.ResizeObserver ??= class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+  // Nothing is laid out here, so a row the viewer scrolls to has no box to bring into view.
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+});
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+function mount(node: ReactElement): HTMLDivElement {
+  const into = document.createElement('div');
+  document.body.append(into);
+  host = into;
+  root = createRoot(into);
+  act(() => {
+    root?.render(node);
+  });
+  return into;
+}
+
+function unmount(): void {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+}
+
+type ChangeProps = Parameters<typeof Changes>[0];
+
+/** The sheet, with nothing filled in but the change. */
+function sheet(over: Partial<ChangeProps> = {}): ReactElement {
+  return createElement(Changes, {
+    open: true,
+    diff: DIFF,
+    onClose: () => undefined,
+    onKeep: () => undefined,
+    ...over,
+  });
+}
+
+function found<T extends Element>(into: HTMLElement, where: string, kind: new () => T): T {
+  const one = into.querySelector(where);
+  if (!(one instanceof kind)) throw new Error(`nothing at ${where}`);
+  return one;
+}
+
+/** A press, by the words on it. */
+function pressNamed(into: HTMLElement, label: string): HTMLButtonElement {
+  const one = [...into.querySelectorAll('button')].find((each) => each.textContent === label);
+  if (!(one instanceof HTMLButtonElement)) throw new Error(`no press called ${label}`);
+  return one;
+}
+
+/** One file's own keep or drop, in its heading. */
+function filePress(into: HTMLElement, path: string, label: string): HTMLButtonElement {
+  const heading = [...into.querySelectorAll('.diffview__filetop')].find(
+    (one) => one.querySelector('.diffview__path')?.textContent === path,
+  );
+  const one = [...(heading?.querySelectorAll('button') ?? [])].find(
+    (each) => each.textContent === label,
+  );
+  if (!(one instanceof HTMLButtonElement)) throw new Error(`no ${label} on ${path}`);
+  return one;
+}
+
+/** A key the viewer listens for on the window, pressed from inside the sheet. */
+function press(key: string): void {
+  act(() => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  });
+}
+
+/** The scroll event a browser fires once a press has moved the pane. */
+function scrolled(into: HTMLElement): void {
+  act(() => {
+    found(into, '.diffview__body', HTMLElement).dispatchEvent(new Event('scroll'));
+  });
+}
+
+/** The pane scrolled by rows of the viewer's own guess. jsdom measures nothing,
+ *  so 22 a row is the only height there is. */
+function scrollRows(into: HTMLElement, rows: number): void {
+  act(() => {
+    const pane = found(into, '.diffview__body', HTMLElement);
+    pane.scrollTop = rows * 22;
+    pane.dispatchEvent(new Event('scroll'));
+  });
+}
+
+/** Typed into a controlled box the way a person's keystroke arrives. */
+function typed(box: HTMLTextAreaElement, text: string): void {
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, text);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+afterEach(() => {
+  unmount();
+  window.localStorage.clear();
+});
 
 describe('one flat list for the whole change', () => {
   it('opens every file with its heading, then its pieces', () => {
@@ -242,24 +361,59 @@ describe('colour and the marks land on the same characters', () => {
 
 describe('where the viewer is used', () => {
   it('is what the working change is drawn with', () => {
-    expect(changes).toContain("import DiffView from './DiffView';");
-    expect(changes).toContain('<DiffView');
-    expect(changes).not.toContain('changes__lines');
+    const into = mount(sheet());
+    expect(into.querySelector('.diffview')).not.toBeNull();
+    expect(into.querySelector('.diffview__piece')).not.toBeNull();
   });
 
   it('keeps the yes and no on every piece', () => {
-    expect(changes).toContain('onToggle={(hunk) => {');
-    expect(changes).toContain('onKeepFile={(file, keep) => setDropped((was) => withFile(was, file, keep))}');
+    const into = mount(sheet());
+    const yes = (): readonly (string | null)[] =>
+      [...into.querySelectorAll('.diffview__toggle')].map((one) => one.getAttribute('aria-pressed'));
+    expect(yes()).toEqual(['true', 'true']);
+    act(() => {
+      found(into, '.diffview__toggle', HTMLButtonElement).click();
+    });
+    expect(yes()).toEqual(['false', 'true']);
+    act(() => {
+      filePress(into, 'src/one.ts', DIFF_SAYS.keepAll).click();
+    });
+    expect(yes()).toEqual(['true', 'true']);
+    act(() => {
+      filePress(into, 'src/one.ts', DIFF_SAYS.dropAll).click();
+    });
+    // The whole of one file, and not a piece of its neighbour.
+    expect(yes()).toEqual(['false', 'true']);
   });
 
   it('sends a steer carrying the file and the line, and never sends one itself', () => {
-    expect(view).toContain('onExplain(hunk.path, line)');
-    expect(view).toContain('onFix(hunk.path, line)');
+    const explain = vi.fn();
+    const fix = vi.fn();
+    const into = mount(sheet({ onExplain: explain, onFix: fix }));
+    act(() => {
+      pressNamed(into, DIFF_SAYS.explain).click();
+    });
+    expect(explain).toHaveBeenCalledWith('src/one.ts', 1);
+    act(() => {
+      pressNamed(into, DIFF_SAYS.fix).click();
+    });
+    expect(fix).toHaveBeenCalledWith('src/one.ts', 1);
+    // The sheet around the viewer is what sends a steer; the viewer is a reader.
     expect(view).not.toContain('bridge.');
   });
 
+  /* A hundred and twenty files, and the viewer draws the handful somebody is
+     looking at: a windowed list is the whole reason a generated diff opens. */
   it('draws a bounded number of rows however long the change is', () => {
-    expect(view).toContain('useWindowed');
+    const many = Array.from(
+      { length: 120 },
+      (_, n) =>
+        `diff --git a/f${String(n)}.txt b/f${String(n)}.txt\n--- a/f${String(n)}.txt\n+++ b/f${String(n)}.txt\n@@ -1,2 +1,2 @@\n-a${String(n)}\n+b${String(n)}\n c\n`,
+    ).join('');
+    const into = mount(createElement(DiffView, { files: parseDiff(many) }));
+    const drawn = into.querySelectorAll('.diffview__row').length;
+    expect(drawn).toBeGreaterThan(0);
+    expect(drawn).toBeLessThan(100);
   });
 });
 
@@ -286,12 +440,28 @@ describe('the file list', () => {
   });
 
   it('is folded and unfolded with one key, and the choice is kept', () => {
-    expect(view).toContain("if (event.key === '[') {");
-    expect(view).toContain("keep(filesKey, was ? 'shut' : 'open')");
+    const into = mount(createElement(DiffView, { files }));
+    const list = (at: HTMLElement): Element | null => at.querySelector('.diffview__files');
+    expect(list(into)).not.toBeNull();
+    press('[');
+    expect(list(into)).toBeNull();
+    unmount();
+    const again = mount(createElement(DiffView, { files }));
+    expect(list(again)).toBeNull();
+    press('[');
+    expect(list(again)).not.toBeNull();
   });
 
   it('moves a file at a time on n and p', () => {
-    expect(view).toContain("if (event.key !== 'n' && event.key !== 'p') return;");
+    const into = mount(createElement(DiffView, { files }));
+    const here = (): string => into.querySelector('.diffview__here')?.textContent ?? '';
+    expect(here()).toBe('src/one.ts');
+    press('n');
+    scrolled(into);
+    expect(here()).toBe('README.md');
+    press('p');
+    scrolled(into);
+    expect(here()).toBe('src/one.ts');
   });
 });
 
@@ -303,8 +473,12 @@ describe('lines that changed nothing but their spacing', () => {
   });
 
   it('are left out until somebody asks for them', () => {
-    expect(view).toContain('if (spacing) return entries;');
-    expect(view).toContain('!onlySpacing(left.text, right.text)');
+    const into = mount(createElement(DiffView, { files: parseDiff(SPACING_ONLY) }));
+    expect(into.querySelectorAll('.diffview__row')).toHaveLength(0);
+    act(() => {
+      pressNamed(into, DIFF_SAYS.whitespace).click();
+    });
+    expect(into.querySelectorAll('.diffview__row')).toHaveLength(1);
   });
 });
 
@@ -406,10 +580,21 @@ describe('the unchanged lines nobody came to read', () => {
   });
 
   it('is on unless somebody turned it off, and the choice is kept', () => {
-    expect(view).toContain("remembered(COLLAPSED) !== 'no'");
-    expect(view).toContain("keep(COLLAPSED, was ? 'no' : 'yes')");
+    const into = mount(createElement(DiffView, { files }));
+    const lifted = (at: HTMLElement): string | null =>
+      pressNamed(at, DIFF_SAYS.collapse).getAttribute('aria-pressed');
+    expect(lifted(into)).toBe('true');
+    act(() => {
+      pressNamed(into, DIFF_SAYS.collapse).click();
+    });
+    expect(lifted(into)).toBe('false');
+    unmount();
+    const again = mount(createElement(DiffView, { files }));
+    expect(lifted(again)).toBe('false');
   });
 
+  /* Kept as source text: the fold rows are the one thing jsdom cannot draw —
+     the window has no height to lay anything out — so `e` has no row to open. */
   it('opens the fold nearest the cursor on e', () => {
     expect(view).toContain("if (event.key === 'e') {");
     expect(view).toContain('foldIn(folded, at)');
@@ -418,12 +603,23 @@ describe('the unchanged lines nobody came to read', () => {
 
 describe('the file heading, pinned', () => {
   it('is drawn above the scroller once its own row has gone past the top', () => {
-    expect(view).toContain('const pinned = here !== null && headAt >= 0 && headAt < topAt;');
-    expect(view).toContain('diffview__pinned');
+    const into = mount(createElement(DiffView, { files }));
+    expect(into.querySelector('.diffview__pinned')).toBeNull();
+    scrollRows(into, 9);
+    const pinned = into.querySelector('.diffview__pinned .diffview__path');
+    expect(pinned).not.toBeNull();
+    expect(pinned?.textContent).toBe(into.querySelector('.diffview__here')?.textContent);
   });
 
   it('is the same heading in both places', () => {
-    expect(view.match(/<FileTop/g)).toHaveLength(2);
+    const into = mount(createElement(DiffView, { files, onKeepFile: () => undefined }));
+    scrollRows(into, 2);
+    const listed = into.querySelector('.diffview__list .diffview__filetop');
+    const pinned = into.querySelector('.diffview__pinned .diffview__filetop');
+    expect(listed).not.toBeNull();
+    expect(pinned).not.toBeNull();
+    expect(pinned?.textContent).toBe(listed?.textContent);
+    expect(pinned?.querySelector('.diffview__fileall')).not.toBeNull();
   });
 });
 
@@ -467,16 +663,36 @@ describe('remarks on a line', () => {
 
   /* Changes and Review pass neither prop, and must look exactly as they did. */
   it('leaves the gutter alone where nothing can be said', () => {
-    expect(view).toContain('onComment === undefined || key === null ? null : (');
+    const into = mount(createElement(DiffView, { files }));
+    expect(into.querySelector('.diffview__add')).toBeNull();
   });
 
   it('posts what was written and closes the box', () => {
-    expect(view).toContain('void onComment(entry.hunk.path, line, draft.trim());');
-    expect(view).toContain('setAsking(null);');
+    const onComment = vi.fn();
+    const into = mount(createElement(DiffView, { files, onComment }));
+    act(() => {
+      found(into, '.diffview__add', HTMLButtonElement).click();
+    });
+    act(() => {
+      typed(found(into, '.diffview__field', HTMLTextAreaElement), 'because');
+    });
+    act(() => {
+      pressNamed(into, DIFF_SAYS.post).click();
+    });
+    expect(onComment).toHaveBeenCalledWith('src/one.ts', 2, 'because');
+    expect(into.querySelector('.diffview__saying')).toBeNull();
   });
 
   it('says the time the way the rest of the app does', () => {
-    expect(view).toContain("import { ago } from '../lib/when';");
+    const at = '2026-01-01T00:00:00.000Z';
+    const into = mount(
+      createElement(DiffView, {
+        files,
+        comments: [{ id: '1', path: 'src/one.ts', line: 2, author: 'ada', body: 'why?', at }],
+      }),
+    );
+    expect(into.querySelector('.diffview__said .diffview__by')?.textContent).toBe('ada');
+    expect(into.querySelector('.diffview__when')?.textContent).toBe(ago(Date.parse(at)));
   });
 });
 
@@ -579,7 +795,16 @@ diff --git a/late.ts b/late.ts
   });
 
   it('is a plain rule rather than a press where nobody can fetch the lines', () => {
-    expect(view).toContain('onExpand === undefined ? (');
-    expect(view).toContain('<span className="diffview__between">{DIFF_SAYS.between(entry.hidden)}</span>');
+    const rule = (into: HTMLElement): Element | null => into.querySelector('.diffview__folded');
+    const plain = mount(createElement(DiffView, { files: apart }));
+    expect(rule(plain)?.querySelector('.diffview__between')).not.toBeNull();
+    expect(rule(plain)?.querySelector('button')).toBeNull();
+    unmount();
+    const asked = vi.fn();
+    const into = mount(createElement(DiffView, { files: apart, onExpand: asked }));
+    act(() => {
+      found(into, '.diffview__unfold', HTMLButtonElement).click();
+    });
+    expect(asked).toHaveBeenCalledWith('far.ts', 4);
   });
 });

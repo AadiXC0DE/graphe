@@ -15,7 +15,6 @@ import {
   canHearYou,
   canKeep,
   saysCannotKeep,
-  speaksForGroup,
   waysNumbering,
   groupWork,
   howManyGoing,
@@ -403,31 +402,6 @@ describe('saying something to work already going', () => {
   });
 });
 
-describe('who carries the comparison', () => {
-  const goes = [
-    { id: 'a', oneOf: { named: 'the hero' } },
-    { id: 'b', oneOf: { named: 'the hero' } },
-    { id: 'c', oneOf: { named: 'the footer' } },
-    { id: 'd' },
-    { id: 'e', oneOf: null },
-  ];
-
-  it('offers it once per group, not once per card', () => {
-    const speaks = speaksForGroup(goes);
-    expect([...speaks].sort()).toEqual(['a', 'c']);
-  });
-
-  /** Throwing the first go away must not take the comparison with it — the
-   *  remaining goes are exactly when somebody still needs to choose. */
-  it('moves to the next one when the first is gone', () => {
-    expect([...speaksForGroup(goes.slice(1))].sort()).toEqual(['b', 'c']);
-  });
-
-  it('offers nothing on ordinary work', () => {
-    expect(speaksForGroup([{ id: 'd' }, { id: 'e', oneOf: null }]).size).toBe(0);
-  });
-});
-
 describe('what each go is called', () => {
   const goes = [
     { id: 'a', ways: 'the hero' },
@@ -515,21 +489,5 @@ describe('the sentence is not lost while it is being handed over', () => {
     for (const said of [boardWords.send, boardWords.sending, boardWords.sent]) {
       expect(said).not.toMatch(/still in the box/i);
     }
-  });
-});
-
-describe('letting a piece off the wait it was given', () => {
-  /** The wait could be set when work was asked for and never changed after, so
-   *  a piece waiting on something that was abandoned waited for good. The whole
-   *  door to changing it — `putAfter` — had no caller anywhere. */
-  it('says what it does without naming the machinery', () => {
-    expect(boardWords.stopWaiting).not.toMatch(/depend|graph|queue|node|edge/i);
-  });
-
-  it('is about the wait, not about the work', () => {
-    // "Stop this one" already means something else on the same card. This must
-    // not read as a second way to say that.
-    expect(boardWords.stopWaiting).not.toBe(boardWords.stop);
-    expect(boardWords.stopWaiting).toMatch(/wait/i);
   });
 });

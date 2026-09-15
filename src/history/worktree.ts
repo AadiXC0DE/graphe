@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { chmod, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -45,9 +46,26 @@ export type RunGit = (
   options: { cwd: string },
 ) => Promise<{ code: number; out?: string }>;
 
+/** Tracked changes here that a squash merge would swallow. Said on its own, and
+ *  again with the files when the caller has looked at which they are. */
+const DIRTY =
+  'You have unsaved work here that a merge could squash. Save it first, and this will finish.';
+
 export const worktreeWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot work on its own checkout of it.',
-  dirty: 'You have unsaved work here that a merge could squash. Save it first, and this will finish.',
+  dirty: DIRTY,
+  /** The same refusal with the files it is about: "you have unsaved work" is a
+   *  sentence somebody has to go hunting through their own changes to act on. */
+  dirtyAbout: (paths: readonly string[]): string => {
+    const named = paths.slice(0, 6).join(', ');
+    const rest = paths.length > 6 ? ` and ${String(paths.length - 6)} more` : '';
+    return `${DIRTY} Changed here: ${named}${rest}.`;
+  },
+  /** A folder at the path a copy was recorded at that now holds a different
+   *  repository. Merging into it would put this conversation's work into
+   *  somebody else's project. */
+  otherRepo:
+    'This copy is not a checkout of this project any more, so I did not merge it. Nothing has been changed on either side.',
   noWorktree: 'This conversation has no checkout to merge back.',
   /** A real conflict, said as itself. It used to be reported as "you have
    *  unsaved work", which is advice nobody can act on when what actually
@@ -68,7 +86,11 @@ export type BringBack = {
   conflicted: readonly string[];
 };
 
-export type Result = { ok: true; value: Worktree | null } | { ok: false; because: string };
+export type Result =
+  | { ok: true; value: Worktree | null }
+  /** `paths` is what the refusal is about, when the caller looked: a merge held
+   *  up by a dirty folder names the files somebody has to deal with. */
+  | { ok: false; because: string; paths?: readonly string[] };
 
 const ok = (value: Worktree | null = null): Result => ({ ok: true, value });
 const no = (because: string): Result => ({ ok: false, because });
@@ -77,8 +99,23 @@ const no = (because: string): Result => ({ ok: false, because });
  *  so the whole apply is one step back. Written as a version title. */
 export const beforeBringingWorkIn = 'Before bringing work in';
 
+/** Said when a conversation that works in its own checkout is opened.
+ *
+ * The window reads the project folder, so a conversation writing elsewhere
+ * looks, from the outside, exactly like one writing here. Opening it is
+ * navigation and changes nothing: the copy is described, and merging it stays
+ * something somebody asks for. */
+export const ownCopyWords = {
+  whereItWorks: (folder: string, project: string): string =>
+    `This conversation works in its own checkout at ${folder}. Nothing it writes reaches ${project} until you merge it back.`,
+} as const;
+
 export const bringBackWords = {
   notRepo: 'This folder is not a git repository, so a conversation cannot bring its work back here.',
+  /** The copy's folder is there, and it is no longer a checkout of this
+   *  project: carrying files out of it would move somebody else's work in. */
+  otherRepo:
+    'This copy is not a checkout of this project any more, so I did not bring anything over. Nothing has been changed on either side.',
   /** Said when work stayed behind. Both sides changed the same file, so keeping
    *  either one would have thrown the other away without asking. */
   heldBack: (files: readonly string[]): string => {
@@ -95,12 +132,64 @@ async function isRepo(run: RunGit, folder: string): Promise<boolean> {
   return (await run(['rev-parse', '--is-inside-work-tree'], { cwd: folder })).code === 0;
 }
 
-/** Whether the main checkout has tracked changes a merge could squash.
- *  Untracked files are not squashed by a merge, so they do not hold one up. */
-async function isDirty(run: RunGit, repo: string): Promise<boolean> {
+/**
+ * What git calls this repository.
+ *
+ * The common git directory answers the same from every checkout of one
+ * repository — the project folder and each of its worktrees — and differently
+ * from an unrelated repository, so it is an identity rather than a location.
+ * A separate clone is a repository of its own and says so. A folder that is
+ * not a repository at all has none.
+ */
+export async function repoKeyOf(run: RunGit, folder: string): Promise<string | null> {
+  const absolute = await run(['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+    cwd: folder,
+  });
+  let dir = absolute.code === 0 ? (absolute.out ?? '').trim() : '';
+  if (dir === '') {
+    // Older git has no `--path-format`, and its answer is relative to the
+    // folder the question was asked in.
+    const relative = await run(['rev-parse', '--git-common-dir'], { cwd: folder });
+    const plain = relative.code === 0 ? (relative.out ?? '').trim() : '';
+    if (plain === '') return null;
+    dir = resolve(folder, plain);
+  }
+  // Resolved, so a symlinked route to the same git directory is the same
+  // repository. A path that is not there is still the path it was.
+  try {
+    return realpathSync(dir);
+  } catch {
+    return resolve(dir);
+  }
+}
+
+/**
+ * Whether two folders are checkouts of one repository.
+ *
+ * Two folders that hold no repository at all have no identity to disagree
+ * about, so they answer yes; a folder that holds one against a folder that does
+ * not answers no. Callers that need the folder to exist check that themselves.
+ */
+export async function sameRepository(run: RunGit, one: string, other: string): Promise<boolean> {
+  const [here, there] = await Promise.all([repoKeyOf(run, one), repoKeyOf(run, other)]);
+  return here === there;
+}
+
+/** The tracked changes in the main checkout that a squash merge would swallow,
+ *  by path. Untracked files are not squashed by a merge, so they do not hold
+ *  one up. Exported because the merges that decide where work lands check it
+ *  before anything of theirs moves. */
+export async function blockingChanges(run: RunGit, repo: string): Promise<readonly string[]> {
   const { code, out } = await run(['status', '--porcelain'], { cwd: repo });
-  if (code !== 0 || out === undefined) return false;
-  return out.split('\n').some((line) => line.trim() !== '' && !line.startsWith('??'));
+  if (code !== 0 || out === undefined) return [];
+  return out
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== '' && !line.startsWith('??'))
+    // `XY path`, and a rename carries `old -> new`: the path somebody knows is
+    // the new one.
+    .map((line) => line.slice(3).split(' -> ').at(-1) ?? line.slice(3))
+    .filter((path) => path !== '');
 }
 
 /** A branch name that reads as belonging to us and no-one else. Every segment
@@ -178,8 +267,11 @@ export { landingWords } from '../work/reviewqueue';
  * Bring a conversation's checkout into the main checkout, then throw the
  * checkout away.
  *
- * Refused while the main checkout has tracked changes a merge could squash.
- * A real conflict is git's and is left for the person rather than guessed at.
+ * Refused while the main checkout has tracked changes a merge could squash —
+ * named, because that is what somebody has to deal with — and refused outright
+ * when the folder is no longer a checkout of this repository, which would put
+ * the work somewhere nobody asked for. A real conflict is git's and is left for
+ * the person rather than guessed at.
  *
  * The default is one commit. A conversation's automatic saves are made past the
  * person's hooks and without their signature — right for the timeline, wrong
@@ -194,7 +286,9 @@ export async function landWorktree(
 ): Promise<Result> {
   const branch = await branchAt(run, folder);
   if (branch === null) return no(worktreeWords.noWorktree);
-  if (await isDirty(run, repo)) return no(worktreeWords.dirty);
+  if (!(await sameRepository(run, repo, folder))) return no(worktreeWords.otherRepo);
+  const blocked = await blockingChanges(run, repo);
+  if (blocked.length > 0) return { ok: false, because: worktreeWords.dirty, paths: blocked };
 
   const squash = landing.how !== 'every-version';
   const merged = await run(squash ? ['merge', '--squash', branch] : ['merge', '--no-edit', branch], {
@@ -650,6 +744,12 @@ export async function bringBack(
   only?: readonly string[],
 ): Promise<{ ok: true; value: BringBack } | { ok: false; because: string }> {
   if (!(await isRepo(run, repo))) return { ok: false, because: bringBackWords.notRepo };
+  // A folder at the copy's path that now holds another repository is not this
+  // conversation's work, and carrying files out of it would put a stranger's
+  // files into this project.
+  if (!(await sameRepository(run, repo, folder))) {
+    return { ok: false, because: bringBackWords.otherRepo };
+  }
   const base = await sharedBase(run, folder, repo);
   if (base === null) return { ok: false, because: bringBackWords.notRepo };
   const wanted = only === undefined ? null : new Set(only);

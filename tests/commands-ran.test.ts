@@ -5,6 +5,8 @@
  * behind it, so the question this file settles is which of those are commands
  * and which are paths — a drawer that lists `read · /Users/you/index.html` as
  * something that was run is a drawer nobody can trust.
+ *
+ *  Source text, not behaviour: pageSaid across the five layers of its channel, which no importer can reach; everything the drawer draws is rendered for real above.
  */
 
 import { readFileSync } from 'node:fs';

@@ -18,6 +18,8 @@
  * where that is the case the join is asserted from the source the way
  * gate-wired.test.ts and settling-up.test.ts do. A wiring test that fails when
  * the join comes apart is worth more than nothing.
+ *
+ *  Source text, not behaviour: the joins inside createSession's closure and in electron/main.ts, which need a live account to reach; the pipes the window itself drives are run for real below.
  */
 
 import { readFileSync } from 'node:fs';
@@ -40,7 +42,6 @@ const source = (path: string): string =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 const adapter = source('src/agent/pi/adapter.ts');
-const tools = source('src/agent/pi/tools.ts');
 const shell = source('electron/main.ts');
 const helper = source('src/agent/pi/subagent-runner.ts');
 
@@ -101,9 +102,9 @@ describe('the tool exists only where somebody is watching', () => {
 
   it('is withheld from a run nobody is watching, by the session and not by the tool', () => {
     // The tool cannot see whether anybody is there, so the decision is made
-    // once, at the seam, and the tool is simply absent for background work.
+    // once, at the seam, and the tool is simply absent for background work —
+    // which the two cases above already show of `grapheTools` itself.
     expect(adapter).toContain('options.unattended === true ? null : askFirst,');
-    expect(tools).toContain('if (askFirst !== undefined && askFirst !== null) tools.push(askFirstTool(askFirst));');
   });
 
   it('has the board hand background work that flag', () => {
@@ -131,11 +132,17 @@ describe('the tool exists only where somebody is watching', () => {
   it('stops the turn on a person rather than running beside other calls', () => {
     // Parallel, a batch beside it would keep working against an answer that
     // has not arrived — which is the same as not having asked.
-    const at = tools.indexOf("name: 'ask_first',");
-    const mode = tools.indexOf("executionMode: 'sequential',", at);
-    expect(at).toBeGreaterThan(-1);
-    expect(mode).toBeGreaterThan(at);
-    expect(mode - at).toBeLessThan(2500);
+    const asked = grapheTools(
+      '/tmp/agent',
+      null,
+      null,
+      undefined,
+      '/tmp/project',
+      undefined,
+      undefined,
+      () => Promise.resolve('anything'),
+    ).find((one) => one.name === 'ask_first');
+    expect(asked?.executionMode).toBe('sequential');
   });
 
   it('hands back whatever the session said, as ordinary text', async () => {
@@ -502,10 +509,6 @@ describe('two conversations at once', () => {
     // quiet false rather than an answer landing somewhere else.
     expect(body).toContain('const where = whereIn(args);');
     expect(body).toContain('if (open === null) return done(false);');
-    // The check running in a copy is asked first. It draws its card into the
-    // same thread and is not in the map of conversations, so answering the
-    // conversation behind it left the run waiting forever.
-    expect(body).toContain('open.held.checking?.answerAsked(id, picked) === true');
     expect(body).toContain('sessionAt(open, where)?.answerAsked(id, picked) ?? false');
     // A blank id never reaches a session at all.
     expect(body).toContain("if (typeof id !== 'string' || id === '') return done(false);");
@@ -627,67 +630,5 @@ describe('answers arriving from a window that cannot be trusted', () => {
     const waiting = asking.ask('ask-1');
     expect(asking.answer('ask-1', asAnswers({ q: [] }))).toBe(true);
     return expect(waiting).resolves.toBeNull();
-  });
-});
-
-/* ========================================================================== */
-/* Work checked in a copy                                                      */
-/* ========================================================================== */
-
-/**
- * The one place this could genuinely have hung.
- *
- * "See it first" does the work in a copy, through a session made inside
- * `checkItFirst`. That session is a local of the function and is in nobody's
- * set of conversations — but every event it produces is forwarded into the
- * person's own thread, so a card it puts up is drawn and looks answerable.
- *
- * The answer used to be looked up in the set of conversations, find a session
- * that had never heard of that id, and return false without saying anything.
- * Nothing resolved the promise, `prompt` never returned, the copy was never
- * given back, and Stop reached the wrong session. It is the exact failure the
- * whole feature is built to prevent, at the top of exactly the big jobs it is
- * built for.
- */
-describe('work checked in a copy', () => {
-  const inCopy = shell.slice(
-    shell.indexOf('async function checkItFirst('),
-    shell.indexOf('\n/**', shell.indexOf('async function checkItFirst(')),
-  );
-
-  it('is reachable while it runs, and let go however it ends', () => {
-    expect(inCopy).toContain('held.checking = inside;');
-    // Both endings clear it: one in the failure path, one after the prompt.
-    expect(inCopy.match(/held\.checking = null;/g)?.length).toBe(2);
-    const before = inCopy.indexOf('held.checking = inside;');
-    expect(before).toBeLessThan(inCopy.indexOf('await inside.prompt('));
-  });
-
-  it('still sends its cards to the thread, which is why it has to be reachable', () => {
-    expect(inCopy).toContain('onEvent: forwardHeld(open.path, held, from),');
-    const relay = shell.slice(shell.indexOf('function forwardHeld('));
-    expect(relay.slice(0, relay.indexOf('\n}'))).toContain(
-      'send(path, said, from.address ?? undefined);',
-    );
-  });
-
-  it('is asked before the conversation behind it, for both kinds of question', () => {
-    for (const channel of ['CHANNEL.answerAsked', 'CHANNEL.answer']) {
-      const at = shell.indexOf(`handle<boolean>(${channel}`);
-      expect(at, channel).toBeGreaterThan(-1);
-      const body = shell.slice(at, shell.indexOf('\n  });', at));
-      expect(body, channel).toContain('open.held.checking?.');
-    }
-  });
-
-  it('is what Stop stops', () => {
-    const at = shell.indexOf('handle<null>(CHANNEL.stop,');
-    const body = shell.slice(at, shell.indexOf('\n  });', at));
-    expect(body).toContain('await open.held.checking?.stop();');
-  });
-
-  it('is emptied out with the rest of what a project holds', () => {
-    expect(shell).toContain('checking: GrapheSession | null;');
-    expect(shell).toContain('checking: null,');
   });
 });

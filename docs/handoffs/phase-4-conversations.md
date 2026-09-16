@@ -1,9 +1,9 @@
 # Phase 4 handoff: conversations that are durable, resumable, and independent of tabs
 
 Findings: W04 done (reopening a conversation whose folder has gone — see below),
-W06, S01, S02, S04, S09, S10, S13, S14 done; S11 and S12 open, and 4.2's states
-are now all driven or documented (see below). W07's lifecycle half is dispositioned
-in the phase 3 handoff (closing is a view). Numbers here were taken on this tree on
+W06, S01, S02, S04, S09, S10, S11, S13, S14 done; S12 open, and 4.2's states are
+now all driven or documented (see below). W07's lifecycle half is dispositioned in
+the phase 3 handoff (closing is a view). Numbers here were taken on this tree on
 2026-09-16.
 
 ## Done
@@ -226,6 +226,21 @@ own chat, a box with no conversation keeps nothing at all, and after the store i
 read back off disk a third New chat opens empty while both earlier drafts are
 still there.
 
+**An address resolves by either name a conversation carries (4.4, S11).**
+`addressFor` (`electron/main.ts:2041`) found a session's existing conversation by
+the `sessionFile` field alone. That field is written once, when the session is
+built, and `GrapheSession.conversation` is null until Pi writes the file
+(`src/agent/pi/adapter.ts:4130`) — so a profile from before ids existed, which
+files a conversation *under* its transcript path with no field of its own (the
+shape `parseIndex` upgrades, `electron/services/workspace-registry.ts:237-260`),
+resolved to nothing and was handed a second id for one transcript. It now asks
+`conversationById` (`:2044`), the lookup that answers to both names, which is what
+makes the id stable across the first write. Evidence:
+`tests/address-mapping.test.ts`, 3 tests — a bare-string row found by its own path
+where the field-only lookup finds nothing, one row however it is asked for once the
+transcript is attached, and the shell's resolution asked by both names rather than
+by the field alone.
+
 **Drafts, references and attachments belong to the conversation (4.5, S01).**
 `src/lib/projects.ts` gives `Parked` its own `attachments`, `references`, `draft`
 and `plans`; `conversationIn` reads the one in front off the desk's own fields and
@@ -248,7 +263,6 @@ all passing: `tests/draft-kept.test.ts` 15,
 | Item | Finding | What is missing |
 | --- | --- | --- |
 | Second view attaches to one runtime | 4.2 | **The registry half is done; the window's half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), one runtime behind two views is structural (`Sessions` is keyed by conversation, `src/domain/conversations.ts:261`, and a pane holds an address rather than a session, so opening the same chat twice asks for the same one), and the view record is now durable: `WorkspaceIndex.views` with `noteView`/`viewInPane`/`dropView`/`dropViewsOf` and schema version 2 (see Done). What is missing is the window calling `noteView` when a pane opens and reading `viewInPane` at launch — no registry work is left for it |
-| Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` (`electron/main.ts:3643`) writes both the current address and the durable one, which covers the first-write case, but rebuild, fork and eviction transitions are not all covered |
 | Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |
 | The interrupted sentence's lifetime | 4.2 | The note is said once per launch and cleared at launch rather than kept until somebody has looked at the conversation it belongs to |
 | `workspaceId` in the run record | 4.2 | It is null in the recorded facts: the registry owns the workspace link and the runtime does not ask for it |

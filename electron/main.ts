@@ -311,7 +311,6 @@ import {
   addConversation,
   addWorkspace,
   conversationById,
-  conversationInFile,
   attachConversation,
   canonical,
   emptyIndex,
@@ -2034,12 +2033,15 @@ function newAddress(): string {
  *
  * A conversation opened again is the conversation already recorded rather than
  * a second row pointing at the same file, so the record is found by the file
- * before an id is made.
+ * before an id is made. Found by *either* name it can carry: a profile written
+ * before ids existed files a conversation under its transcript, with no
+ * `sessionFile` of its own, and resolving only by the field minted a second id
+ * for one transcript.
  */
 function addressFor(session: GrapheSession): string {
   const file = session.conversation;
   const known =
-    file === null || !workspaceIndexLoaded ? null : conversationInFile(workspaceIndex, file);
+    file === null || !workspaceIndexLoaded ? null : conversationById(workspaceIndex, file);
   return known?.conversationId ?? newAddress();
 }
 

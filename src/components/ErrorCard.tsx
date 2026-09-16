@@ -39,7 +39,7 @@ export default function ErrorCard({
 
       <div className="errorcard__body">
         <p className="errorcard__because">{because}</p>
-        <button type="button" className="errorcard__button" onClick={onAction}>
+        <button type="button" className="errorcard__button" aria-label={`${actionLabel}: ${what}`} onClick={onAction}>
           {actionLabel}
         </button>
 

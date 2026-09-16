@@ -192,7 +192,7 @@ describe('the window hears about the projects', () => {
   it('asks each project for its own timeline', () => {
     // The ask and the field it lands on both live with the panel queries now —
     // see src/hooks/useInspector.ts, which owns what each of these reads.
-    expect(INSPECTOR).toContain("bridge.versions({ project: path, repo: one.name })");
+    expect(INSPECTOR).toContain("bridge.versions({ project: path, repo: one.name, ...(address === null ? {} : { conversation: address }) })");
     expect(INSPECTOR).toContain('repoVersions: perRepo }');
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });

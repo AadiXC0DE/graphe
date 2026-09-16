@@ -1487,7 +1487,7 @@ await row('long-project-name', 'the same window with a name that cannot fit', as
   // And back, which is also the check that tabs belong to a project. Counted
   // rather than assumed: rows above this one open conversations of their own, so
   // a fixed number here would be measuring the row order, not the app.
-  const mine = (await stripState(window_)).tabs;
+  const mine = here.tabs;
   await window_.locator('.topbar__name').first().click();
   await window_.locator('.topbar__switcher .pickerrow__open', { hasText: PROJECT }).first().click();
   const back = await until(async () => (await window_.locator('.tabs__title').count()) === mine, 20_000);
@@ -2061,20 +2061,22 @@ await row('loading-layout', 'the rectangle held where a sheet is still on its wa
     await pause(3000);
     await route.continue();
   });
+  await window_.reload();
+  await ensureProjectOpen();
   await window_.locator('.shelf__more--last').first().click();
   const drawn = await until(
-    async () => (await window_.locator('.sheet--arriving:not(.sheet--cover)').count()) > 0,
+    async () => (await window_.locator('.sheet--arriving').count()) > 0,
     5_000,
   );
   verdict('the rectangle is drawn while the sheet is on its way', drawn);
   if (!drawn) {
-    await window_.unroute(held);
+    await window_.unrouteAll({ behavior: 'wait' });
     note('the sheet arrived too quickly to catch its own placeholder');
     return;
   }
   await shot('loading-layout');
   const said = await window_
-    .locator('.sheet--arriving:not(.sheet--cover)')
+    .locator('.sheet--arriving')
     .first()
     .evaluate((el) => {
       const s = getComputedStyle(el);
@@ -2096,12 +2098,12 @@ await row('loading-layout', 'the rectangle held where a sheet is still on its wa
   }
   note(`the rectangle is ${String(said.w)}×${String(said.h)} on ${said.ground}`);
   const view = await viewport(window_);
-  const [box] = await boxes(window_, ['.sheet--arriving:not(.sheet--cover)']);
+  const [box] = await boxes(window_, ['.sheet--arriving']);
   verdict('the rectangle is inside the window', inside(box, view));
 
-  await window_.unroute(held);
+  await window_.unrouteAll({ behavior: 'wait' });
   await window_.locator('.settings').waitFor({ timeout: 30_000 });
-  const replaced = await window_.locator('.sheet--arriving:not(.sheet--cover)').count();
+  const replaced = await window_.locator('.sheet--arriving').count();
   verdict('the rectangle is gone once the sheet itself arrives', replaced === 0);
   await window_.keyboard.press('Escape');
   await until(async () => (await window_.locator('.settings').count()) === 0, 10_000);
@@ -3109,6 +3111,7 @@ await row('error-state', 'what a turn that could not run looks like', async () =
     await shot('error-state');
     return;
   }
+  await window_.locator('.errorcard').first().scrollIntoViewIfNeeded();
   await shot('error-state');
   const view = await viewport(window_);
   const [card] = await boxes(window_, ['.errorcard']);
@@ -3703,6 +3706,24 @@ await row('canvas-running', 'a run in flight: the sweep, the line carrying the w
     bad('the row in the sidebar did not open the canvas');
     return;
   }
+  // Persisted Running records without a driver are recovered as Interrupted.
+  // This fixture checks live rendering; real execution has Electron coverage.
+  const canonicalProject = await window_.evaluate(async () => {
+    const answer = await window.graphe.recentProjects();
+    return answer.ok ? answer.value.find((one) => !one.missing)?.path ?? null : null;
+  });
+  const liveFlow = await window_.evaluate(async (project) => {
+    const answer = await window.graphe.flowList({ project });
+    if (!answer.ok) throw new Error(answer.trouble.because);
+    const flow = answer.value.find((one) => one.id === 'flow-seeded-running');
+    if (flow === undefined) throw new Error('running canvas fixture is missing');
+    return flow;
+  }, canonicalProject);
+  await tell(({ BrowserWindow }, notice) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.send('graphe:flow-changed', notice);
+    return true;
+  }, { project: canonicalProject, flow: { ...liveFlow, runs: [run] } });
+  note('live rendering uses a synthetic shell notice; actual execution is covered by Electron smoke');
   await pause(900);
   await shot('canvas-running');
   const said = await canvasState(window_);

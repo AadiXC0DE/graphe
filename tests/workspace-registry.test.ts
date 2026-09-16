@@ -28,12 +28,15 @@ import {
   INDEX_VERSION,
   markDeleted,
   noteView,
+  noteViewForProject,
   parseIndex,
   projectAtPath,
   relinkProject,
   serializeIndex,
   verifyWorkspace,
   viewInPane,
+  viewInPaneForProject,
+  viewInProject,
   workspaceAtPath,
   type WorkspaceRecord,
   workspaceById,
@@ -357,6 +360,59 @@ describe('a view somebody had open', () => {
     expect(refused.made).toBe(false);
     expect(refused.view).toBeNull();
     expect(refused.index).toBe(index);
+  });
+
+  it('keeps pane numbers scoped to their project and refuses foreign chats', () => {
+    const firstRoot = scratch();
+    const secondRoot = scratch();
+    const firstProject = ensureProject(emptyIndex(), firstRoot);
+    const firstWorkspace = addWorkspace(firstProject.index, {
+      projectId: firstProject.project.projectId,
+      path: firstRoot,
+      kind: 'local',
+      managed: false,
+      now: NOW,
+    });
+    const firstChat = addConversation(firstWorkspace.index, {
+      conversationId: 'first-chat',
+      workspaceId: firstWorkspace.workspace.workspaceId,
+      now: NOW,
+    });
+    const secondProject = ensureProject(firstChat.index, secondRoot);
+    const secondWorkspace = addWorkspace(secondProject.index, {
+      projectId: secondProject.project.projectId,
+      path: secondRoot,
+      kind: 'local',
+      managed: false,
+      now: NOW,
+    });
+    const secondChat = addConversation(secondWorkspace.index, {
+      conversationId: 'second-chat',
+      workspaceId: secondWorkspace.workspace.workspaceId,
+      now: NOW,
+    });
+
+    const firstView = noteViewForProject(
+      secondChat.index,
+      { viewId: 'first-view', conversation: 'first-chat', pane: 0 },
+      firstProject.project.projectId,
+    );
+    const both = noteViewForProject(
+      firstView.index,
+      { viewId: 'second-view', conversation: 'second-chat', pane: 0 },
+      secondProject.project.projectId,
+    );
+    expect(viewInPaneForProject(both.index, 0, firstProject.project.projectId)?.conversation).toBe('first-chat');
+    expect(viewInPaneForProject(both.index, 0, secondProject.project.projectId)?.conversation).toBe('second-chat');
+
+    const refused = noteViewForProject(
+      both.index,
+      { viewId: 'foreign-view', conversation: 'second-chat', pane: 1 },
+      firstProject.project.projectId,
+    );
+    expect(refused.made).toBe(false);
+    expect(refused.index).toBe(both.index);
+    expect(viewInProject(both.index, both.index.views['first-view']!, firstProject.project.projectId)).toBe(true);
   });
 
   it('is taken away with its pane, and the conversation is not', () => {

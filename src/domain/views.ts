@@ -110,7 +110,7 @@ export function panesFrom(
 ): Panes {
   const known = new Set(here);
   const other = shown.find(
-    (one) => one.pane === 1 && one.conversation !== opened && known.has(one.conversation),
+    (one) => one.pane === 1 && known.has(one.conversation),
   );
   const only = onePane(opened);
   if (other === undefined) return only;
@@ -197,6 +197,17 @@ export function panesShowing(
   conversation: string | null,
 ): readonly Pane[] {
   return panes.open.filter((one) => one.conversation === conversation);
+}
+
+export function withoutConversation(panes: Panes, conversation: string, fallback: string | null): Panes {
+  const remaining = panes.open.filter((one) => one.conversation !== conversation);
+  if (remaining.length === panes.open.length) return panes;
+  if (remaining.length === 0) return onePane(fallback);
+  return {
+    open: remaining,
+    focused: remaining.some((one) => one.id === panes.focused) ? panes.focused : remaining[0]!.id,
+    pinned: remaining.some((one) => one.id === panes.pinned) ? panes.pinned : null,
+  };
 }
 
 /**

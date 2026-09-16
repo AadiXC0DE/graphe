@@ -152,6 +152,26 @@ describe('a legacy row that cannot be read', () => {
       expect(row.projectPath).toBe(canonical('/tmp/paper'));
     }
   });
+
+  it('quarantines one malformed checkout source without losing another project', () => {
+    const manifest = discover({
+      projects: [
+        {
+          path: '/tmp/good-project',
+          checkouts: { 'chat-good': { folder: '/tmp/good-project/.graphe/worktrees/chat-good', branch: 'graphe/good' } },
+        },
+        { path: '/tmp/broken-project', checkouts: '{ half-written json' },
+      ],
+      exists: () => true,
+    });
+
+    expect(manifest.records.map((one) => one.conversationId)).toContain('chat-good');
+    expect(manifest.quarantined).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ projectPath: canonical('/tmp/broken-project'), address: '' }),
+      ]),
+    );
+  });
 });
 
 describe('a write that cannot finish', () => {

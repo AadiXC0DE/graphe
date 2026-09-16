@@ -10,9 +10,8 @@
  * the file a person could open says what their drawing says.
  *
  * Two rules about damage, both learned elsewhere: a file that will not parse is
- * a project with no flows rather than a screen with an error on it, and an empty
- * list is the file gone, because the only reason to write one is that somebody
- * drew something.
+ * refused without overwriting it, and an empty list is the file gone, because
+ * the only reason to write one is that somebody drew something.
  *
  * That second rule is why there is a note of what has been imported. A project
  * with no file is a project that never had a canvas *or* one whose canvases were
@@ -44,14 +43,27 @@ function importedNote(userData: string): string {
   return join(userData, 'flows', 'imported.json');
 }
 
-/** A file's text, or null where there is no file to read. The one place that
- *  decides a file which cannot be read is treated as a file that was never
- *  there, so no caller has to decide it again. */
+/** A flow file exists but cannot be trusted. Callers must preserve the bytes
+ * and show a recovery result instead of treating this as an empty canvas. */
+export class FlowFileUnreadable extends Error {
+  readonly file: string;
+
+  constructor(file: string) {
+    super(`The canvas file could not be read: ${file}`);
+    this.name = 'FlowFileUnreadable';
+    this.file = file;
+  }
+}
+
+/** A file's text, or null only where there is no file to read. Permission,
+ * device and directory errors are evidence that an existing file cannot be
+ * trusted; treating them as absence would let a later save overwrite it. */
 async function textIn(file: string): Promise<string | null> {
   try {
     return await readFile(file, 'utf8');
-  } catch {
-    return null;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw new FlowFileUnreadable(file);
   }
 }
 
@@ -63,6 +75,36 @@ function jsonIn(text: string | null): unknown {
   } catch {
     return null;
   }
+}
+
+const transactions = new Map<string, Promise<void>>();
+
+function transactionKey(projectId: string, userData: string): string {
+  return `${resolve(userData)}\u0000${projectId}`;
+}
+
+/** Parse a durable flow array without silently throwing away part of it. The
+ * renderer/file recovery reader is intentionally forgiving for old shapes,
+ * but a stored array that loses an entry, id or block on read must be refused
+ * before any transaction can rewrite the remaining data. */
+function storedFlows(raw: unknown, file: string): readonly Flow[] {
+  if (!Array.isArray(raw)) throw new FlowFileUnreadable(file);
+  const found = readFlows(raw);
+  if (found.length !== raw.length || new Set(found.map((flow) => flow.id)).size !== found.length) {
+    throw new FlowFileUnreadable(file);
+  }
+  for (let at = 0; at < raw.length; at += 1) {
+    const source = raw[at];
+    const flow = found[at];
+    if (typeof source !== 'object' || source === null || Array.isArray(source) || flow === undefined) {
+      throw new FlowFileUnreadable(file);
+    }
+    const blocks = (source as Record<string, unknown>)['blocks'];
+    if (!Array.isArray(blocks) || flow.blocks.length !== blocks.length) {
+      throw new FlowFileUnreadable(file);
+    }
+  }
+  return found;
 }
 
 async function hasImported(projectId: string, userData: string): Promise<boolean> {
@@ -102,11 +144,22 @@ export class FlowFile {
     root: string | null = null,
   ): Promise<readonly Flow[]> {
     const raw = await textIn(FlowFile.pathFor(projectId, userData));
-    if (raw !== null) return readFlows(jsonIn(raw));
+    if (raw !== null) {
+      return storedFlows(jsonIn(raw), FlowFile.pathFor(projectId, userData));
+    }
     // No file of its own. Either this project has never been read, or every
     // canvas it had has been thrown away, and the note is what tells them apart.
     if (root === null || (await hasImported(projectId, userData))) return [];
-    const found = readFlows(jsonIn(await textIn(olderFlowFile(root, userData))));
+    const olderRaw = await textIn(olderFlowFile(root, userData));
+    if (olderRaw !== null) {
+      const olderParsed = jsonIn(olderRaw);
+      if (!Array.isArray(olderParsed)) {
+        throw new FlowFileUnreadable(olderFlowFile(root, userData));
+      }
+    }
+    const found = olderRaw === null
+      ? []
+      : storedFlows(jsonIn(olderRaw), olderFlowFile(root, userData));
     // The old file is left exactly where it is: it cost somebody a drawing, and
     // a change to how flows are filed is not a reason to take it away.
     if (found.length === 0) return [];
@@ -121,9 +174,32 @@ export class FlowFile {
   static async write(projectId: string, userData: string, flows: readonly Flow[]): Promise<void> {
     const file = FlowFile.pathFor(projectId, userData);
     if (flows.length === 0) {
-      await rm(file, { force: true }).catch(() => undefined);
+      await rm(file, { force: true }).catch((cause) => {
+        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+      });
       return;
     }
     await writeAtomically(file, `${JSON.stringify(flows, null, 2)}\n`);
+  }
+
+  /** Read/modify/write one project's complete flow document under one queue.
+   * Every caller sees the previous committed snapshot, so run events and drawing
+   * edits cannot overwrite one another after racing reads. */
+  static transact(
+    projectId: string,
+    userData: string,
+    root: string | null,
+    change: (flows: readonly Flow[]) => readonly Flow[],
+  ): Promise<readonly Flow[]> {
+    const key = transactionKey(projectId, userData);
+    const prior = transactions.get(key) ?? Promise.resolve();
+    const result = prior.then(async () => {
+      const held = await FlowFile.read(projectId, userData, root);
+      const next = change(held);
+      await FlowFile.write(projectId, userData, next);
+      return next;
+    });
+    transactions.set(key, result.then(() => undefined, () => undefined));
+    return result;
   }
 }

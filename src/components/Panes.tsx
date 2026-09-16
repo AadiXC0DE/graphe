@@ -16,7 +16,7 @@ type Props = {
   pinned: string | null;
   onFocus: (id: ViewId) => void;
   onClose: (id: ViewId) => void;
-  onTogglePin: () => void;
+  onTogglePin?: () => void;
 };
 
 export const SAYS = {
@@ -110,7 +110,7 @@ export default function Panes({ panes, pinned, onFocus, onClose, onTogglePin }: 
         {pinned === null ? null : (
           <span className="panes__pinned">{pinned}</span>
         )}
-        <button
+        {onTogglePin === undefined ? null : <button
           type="button"
           className={`panes__act ${pinned === null ? '' : 'panes__act--on'}`}
           title={pinned === null ? SAYS.pinHint : SAYS.unpinHint}
@@ -118,7 +118,7 @@ export default function Panes({ panes, pinned, onFocus, onClose, onTogglePin }: 
           onClick={onTogglePin}
         >
           {pinned === null ? SAYS.pin : SAYS.pinned}
-        </button>
+        </button>}
       </div>
     </div>
   );

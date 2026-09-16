@@ -609,6 +609,18 @@ export class ProjectHistory {
     let parent = from;
     let expected = (await this.checkpointTip()) ?? '';
     for (let round = 0; round < 3; round += 1) {
+      // A competing save may have moved the checkpoint ref after the tree was
+      // prepared above. Rebuild from that new parent before retrying: keeping
+      // the old tree here would make the retry a correctly-linked commit that
+      // silently drops files the competing save just recorded.
+      if (round > 0) {
+        const retryScratch = await this.scratch();
+        try {
+          tree = await this.candidateTree(retryScratch.index, parent, historyProblems.saveFailed);
+        } finally {
+          await retryScratch.done();
+        }
+      }
       const args = ['commit-tree', tree];
       if (parent !== null) args.push('-p', parent);
       args.push('-m', text);

@@ -143,6 +143,20 @@ function surfaceOf(host: HTMLElement): HTMLElement {
   return surface;
 }
 
+describe('canvas persistence boundaries', () => {
+  it('does not write a loaded canvas back merely because it was rendered', async () => {
+    vi.useFakeTimers();
+    try {
+      const save = vi.fn();
+      draw({ onSave: save });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 /** One card, by the name on its face, with the box it really occupies. */
 function cardAt(host: HTMLElement, name: string): { card: HTMLElement; box: DOMRect } {
   const face = [...host.querySelectorAll('.canvas__face')].find((one) =>

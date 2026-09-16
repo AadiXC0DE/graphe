@@ -1,5 +1,17 @@
 # What is left, and where it stands
 
+## PR #51 regression audit, 16 September 2026
+
+The earlier completion statements below describe prior implementation waves,
+not proof that the current branch is free of regressions. The
+[deep audit and repair register](../pr-51-deep-audit-2026-09-16.md) supersedes
+those statements for canvas lifecycle, pane ownership, terminal behavior,
+runtime cancellation, and data-safety defects. That register records current
+verification separately from physical-device and live-provider checks that
+have not been performed. The experimental child conversation runtime falls
+back visibly to the supported in-process runtime until feature parity exists;
+it is not advertised as complete.
+
 Every item the stabilization plan asks for that is not finished, with the phase
 it belongs to, its current state and what closed it. Rewritten as work lands; the
 phase handoffs carry the detail.

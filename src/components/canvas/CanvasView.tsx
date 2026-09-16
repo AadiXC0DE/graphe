@@ -31,7 +31,6 @@ import {
   type Standing,
 } from '../../work/canvas';
 import type { ConnectionState, ModelChoice, ThinkingLevel } from '../../lib/ipc';
-import { heldWrites } from '../../lib/heldwrites';
 import Asking from '../Asking';
 import ThinkingWith from '../ThinkingWith';
 import { beside } from './BlockCard';
@@ -114,52 +113,43 @@ export default function CanvasView({
   if (ringOf.current !== flow.id) {
     ringOf.current = flow.id;
     ringNow.current = historyOf(flow);
+  } else if (ringNow.current.now !== flow) {
+    ringNow.current = { ...ringNow.current, now: flow };
   }
-  const saves = useRef(heldWrites());
   /** The box the panel is placed inside. The panel is positioned against the
    *  canvas rather than the window, so it has to be clamped to what this section
    *  actually covers: a canvas beside a shelf and a file panel does not start at
    *  zero, and clamping to the window put the panel past the right edge. */
   const shellRef = useRef<HTMLElement | null>(null);
-  const keep = useRef(onSave ?? onFlow);
-  keep.current = onSave ?? onFlow;
 
   const draw = useCallback(
     (next: Flow) => {
+      const active = latestRun(flow);
+      if (active?.state === 'running' || active?.state === 'needs-you') return;
       ringNow.current = undoable(ringNow.current, next);
       setRing(ringNow.current);
       onFlow(next);
+      onSave?.(next);
     },
-    [onFlow],
+    [flow, onFlow, onSave],
   );
 
   const back = useCallback(
     (move: (was: History) => History) => {
+      const active = latestRun(flow);
+      if (active?.state === 'running' || active?.state === 'needs-you') return;
       const moved = move(ringNow.current);
       if (moved === ringNow.current) return;
-      ringNow.current = moved;
-      setRing(moved);
+      const restored = { ...moved, now: { ...moved.now, runs: flow.runs } };
+      ringNow.current = restored;
+      setRing(restored);
       setPicked(null);
       setLine(null);
-      onFlow(moved.now);
+      onFlow(restored.now);
+      onSave?.(restored.now);
     },
-    [onFlow],
+    [flow, onFlow, onSave],
   );
-
-  useEffect(() => {
-    saves.current.soon(flow.id, () => keep.current(flow));
-  }, [flow]);
-
-  /* A tab going is the other half of a window going: whatever is still waiting
-     is written now, rather than thrown away with the timers. */
-  useEffect(() => {
-    const flush = (): void => saves.current.now();
-    window.addEventListener('beforeunload', flush);
-    return () => {
-      window.removeEventListener('beforeunload', flush);
-      flush();
-    };
-  }, []);
 
   useEffect(() => {
     if (refused === null) return;
@@ -279,9 +269,16 @@ export default function CanvasView({
   const keepFiles = useCallback(
     async (files: readonly File[]) => {
       if (onKeepAttachments === undefined || chosen === null) return;
-      const kept = await onKeepAttachments(files);
-      if (kept.length === 0) return;
-      draw(change(flow, chosen.id, { attachments: [...chosen.attachments, ...kept.map((one) => one.id)] }));
+      try {
+        const kept = await onKeepAttachments(files);
+        if (kept.length === 0) return;
+        const current = ringNow.current.now;
+        const block = current.blocks.find((one) => one.id === chosen.id);
+        if (block === undefined) return;
+        draw(change(current, block.id, { attachments: [...new Set([...block.attachments, ...kept.map((one) => one.id)])] }));
+      } catch (cause) {
+        setRefused(cause instanceof Error ? cause.message : 'The attachment could not be saved.');
+      }
     },
     [chosen, flow, onKeepAttachments, draw],
   );

@@ -162,6 +162,28 @@ describe('a run written down before it starts', () => {
     await writeFile(runNotesFile(profile), 'half a file', 'utf8');
     expect(readRunNotes(profile)).toEqual([]);
   });
+
+  it('returns a disk failure for one note without poisoning the queue', async () => {
+    const root = await scratch();
+    const bad = join(root, 'not-a-directory');
+    const good = join(root, 'good');
+    await writeFile(bad, 'occupied', 'utf8');
+
+    await expect(wroteRunNote(bad, facts('failed.jsonl', 'running'), '/work/atlas')).rejects.toBeDefined();
+    await wroteRunNote(good, facts('recovered.jsonl', 'running'), '/work/atlas');
+    expect(readRunNotes(good).map((one) => one.conversationId)).toEqual(['recovered.jsonl']);
+  });
+
+  it('returns a removal failure for one note without poisoning the queue', async () => {
+    const root = await scratch();
+    const bad = join(root, 'not-a-directory');
+    const good = join(root, 'good');
+    await writeFile(bad, 'occupied', 'utf8');
+
+    await expect(tookRunNoteAway(bad, 'failed.jsonl')).rejects.toBeDefined();
+    await wroteRunNote(good, facts('recovered.jsonl', 'running'), '/work/atlas');
+    expect(readRunNotes(good).map((one) => one.conversationId)).toEqual(['recovered.jsonl']);
+  });
 });
 
 describe('the launch after a run was cut off', () => {

@@ -87,7 +87,7 @@ const MOST_HELD = 512 * 1024;
 export class Terminals {
   private readonly live = new Map<
     string,
-    { session: TerminalSession; pty: PtyProcess; held: string[]; heldBytes: number }
+    { session: TerminalSession; pty: PtyProcess; held: string[]; heldBytes: number; sequence: number }
   >();
 
   private made = 0;
@@ -166,14 +166,15 @@ export class Terminals {
         env: shellEnv(options.env ?? process.env),
       });
       const held: string[] = [];
-      const record = { session, pty, held, heldBytes: 0 };
+      const record = { session, pty, held, heldBytes: 0, sequence: 0 };
       pty.onData((data: string) => {
         record.held.push(data);
         record.heldBytes += data.length;
         while (record.heldBytes > MOST_HELD && record.held.length > 1) {
           record.heldBytes -= (record.held.shift() ?? '').length;
         }
-        this.tell({ id, data });
+        record.sequence += 1;
+        this.tell({ id, data, sequence: record.sequence });
       });
       pty.onExit((event) => {
         const exit = { code: event.exitCode, signal: event.signal ?? null };
@@ -193,6 +194,11 @@ export class Terminals {
   /** Everything a terminal has printed, for a window that has just opened it. */
   scrollback(id: string): string {
     return (this.live.get(id)?.held ?? []).join('');
+  }
+
+  snapshot(id: string): { data: string; sequence: number } {
+    const held = this.live.get(id);
+    return { data: (held?.held ?? []).join(''), sequence: held?.sequence ?? 0 };
   }
 
   list(): readonly TerminalSession[] {

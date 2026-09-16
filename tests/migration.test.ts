@@ -565,5 +565,11 @@ describe('running it again', () => {
     expect(readMarker(JSON.stringify({ ...result.marker, completedAt: undefined }))).toBeNull();
     expect(readMarker(JSON.stringify({ version: MIGRATION_VERSION, completedAt: NOW }))).toBeNull();
     expect(readMarker(JSON.stringify({ ...result.marker, verdicts: [] }))).toBeNull();
+    expect(readMarker(JSON.stringify({ ...result.marker, workspaces: undefined }))).toBeNull();
+    expect(
+      readMarker(JSON.stringify({ ...result.marker, verdicts: { ...result.marker.verdicts, verified: undefined } })),
+    ).toBeNull();
+    expect(readMarker(JSON.stringify({ ...result.marker, sources: result.marker.sources + 1 }))).toBeNull();
+    expect(readMarker(JSON.stringify({ ...result.marker, backups: [''] }))).toBeNull();
   });
 });

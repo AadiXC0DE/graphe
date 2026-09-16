@@ -33,6 +33,7 @@ import {
   pinnedWords,
   showIn,
   shownNow,
+  withoutConversation,
 } from "../src/domain/views";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
@@ -222,11 +223,9 @@ describe("what the window does with it", () => {
     expect(APP).toContain("respond(ownerThere, turnId, callId, decision)");
   });
 
-  it("says which chat the panel is pinned to, and offers the pin", () => {
-    expect(APP).toContain("pinnedTo = isPinned(panes)");
-    expect(APP).toContain("pinnedWords(");
-    expect(APP).toContain("inspectorPane(panes).conversation");
-    expect(BAND).toContain("{pinned === null ? SAYS.pin : SAYS.pinned}");
+  it("does not offer inspector pinning before all inspector actions support it", () => {
+    expect(APP).not.toContain("onTogglePin={");
+    expect(BAND).toContain("onTogglePin");
   });
 
   /* The band is a real tablist: focusing a pane is what retargets everything,
@@ -239,6 +238,19 @@ describe("what the window does with it", () => {
 });
 
 describe("what a pane was showing, so a launch can put it back", () => {
+  it("restores two distinct views of the same conversation", () => {
+    const first = onePane('chat-a');
+    const pair = addPane(first, 'chat-a');
+    expect(panesFrom(shownNow(pair), ['chat-a'], 'chat-a').open).toHaveLength(2);
+  });
+
+  it("removes stale references when a conversation closes", () => {
+    const pair = two();
+    const next = withoutConversation(pair, 'chat-b', 'chat-a');
+    expect(next.open.map((pane) => pane.conversation)).toEqual(['chat-a']);
+    expect(next.focused).toBe(next.open[0]?.id);
+    expect(withoutConversation(next, 'chat-a', null).open[0]?.conversation).toBeNull();
+  });
   it("writes the panes that hold a conversation, numbered from the left", () => {
     expect(shownNow(onePane("chat-a"))).toEqual([
       { viewId: expect.any(String), conversation: "chat-a", pane: 0 },

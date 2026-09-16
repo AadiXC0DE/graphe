@@ -59,20 +59,22 @@ export function useInspector(options: {
   const refreshVersions = useCallback(
     async (path: string) => {
       const deskNow = desksNow.current.byPath[path];
-      const key = keyOf(path, deskNow?.address ?? '');
+      const address = deskNow?.address ?? null;
+      const key = `versions:${keyOf(path, address ?? '')}`;
       const mine = (asksMade.current.get(key) ?? 0) + 1;
       asksMade.current.set(key, mine);
-      const answer = await bridge.versions();
+      const answer = await bridge.versions({ project: path, ...(address === null ? {} : { conversation: address }) });
       // A folder holding several projects has no timeline of its own. Each
       // project answers where it lives, and the panel shows whichever is chosen.
       const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
       const each = await Promise.all(
         several.map(
           async (one) =>
-            [one.name, await bridge.versions({ project: path, repo: one.name })] as const,
+            [one.name, await bridge.versions({ project: path, repo: one.name, ...(address === null ? {} : { conversation: address }) })] as const,
         ),
       );
       if (desksNow.current.current !== path) return;
+      if ((desksNow.current.byPath[path]?.address ?? null) !== address) return;
       if (asksMade.current.get(key) !== mine) return;
       const perRepo: Record<string, readonly SavedVersion[]> = {};
       for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
@@ -103,7 +105,7 @@ export function useInspector(options: {
          not enough to write an answer under: an older ask arriving late would
          put one chat's files, branch or processes on screen under another
          chat's name. */
-      const key = keyOf(path, address ?? '');
+      const key = `overview:${keyOf(path, address ?? '')}`;
       const mine = (asksMade.current.get(key) ?? 0) + 1;
       asksMade.current.set(key, mine);
       const answer = await bridge.overview(where);
@@ -136,10 +138,15 @@ export function useInspector(options: {
         ...(desk === null ? {} : { project: desk.path }),
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       };
+      const key = `running:${keyOf(asked.project ?? '', asked.conversation ?? '')}`;
+      const sequence = (asksMade.current.get(key) ?? 0) + 1;
+      asksMade.current.set(key, sequence);
       void bridge.running(asked).then((answer) => {
         if (!answer.ok) return;
         const current = currentDesk(desksNow.current);
         if (asked.project !== undefined && current?.path !== asked.project) return;
+        if (asked.conversation !== undefined && current?.address !== asked.conversation) return;
+        if (asksMade.current.get(key) !== sequence) return;
         setRunning(answer.value);
       });
     },
@@ -153,11 +160,15 @@ export function useInspector(options: {
         ...(desk === null ? {} : { project: desk.path }),
         ...(desk?.address == null ? {} : { conversation: desk.address }),
       };
+      const key = `room:${keyOf(asked.project ?? '', asked.conversation ?? '')}`;
+      const sequence = (asksMade.current.get(key) ?? 0) + 1;
+      asksMade.current.set(key, sequence);
       void bridge.room(asked).then((answer) => {
         if (!answer.ok) return;
         const current = currentDesk(desksNow.current);
         if (asked.project !== undefined && current?.path !== asked.project) return;
         if (asked.conversation !== undefined && current?.address !== asked.conversation) return;
+        if (asksMade.current.get(key) !== sequence) return;
         setRoom(answer.value);
       });
     },
@@ -168,8 +179,12 @@ export function useInspector(options: {
    *  box. Same in-front guard as everything else that answers about a folder. */
   const refreshBuildPlan = useCallback(
     async (path: string) => {
-      const answer = await bridge.buildPlan();
+      const key = `plan:${path}`;
+      const sequence = (asksMade.current.get(key) ?? 0) + 1;
+      asksMade.current.set(key, sequence);
+      const answer = await bridge.buildPlan({ project: path });
       if (!answer.ok) return;
+      if (asksMade.current.get(key) !== sequence) return;
       setPlan((current) => {
         if (desksNow.current.current !== path) return current;
         return answer.value === null ? null : { path, plan: answer.value };

@@ -1838,8 +1838,8 @@ let previewPlanMode = false;
       return Promise.resolve(previewFail<TerminalSession>());
     },
 
-    terminalScrollback(): Promise<Result<string>> {
-      return Promise.resolve(previewFail<string>());
+    terminalScrollback(): Promise<Result<{ data: string; sequence: number }>> {
+      return Promise.resolve(previewFail<{ data: string; sequence: number }>());
     },
 
     terminalWrite(): Promise<Result<null>> {
@@ -2769,4 +2769,3 @@ export const bridge: Bridge = connect();
 if (typeof document !== 'undefined' && bridge.desktop) {
   document.documentElement.dataset['shell'] = 'desktop';
 }
-

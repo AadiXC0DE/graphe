@@ -96,7 +96,24 @@ async function readMeta(userData: string, id: string): Promise<Meta | null> {
   if (raw === null) return null;
   try {
     const one = JSON.parse(raw) as Meta;
-    return typeof one.name === 'string' && typeof one.byteSize === 'number' ? one : null;
+    if (
+      one.id !== id ||
+      typeof one.name !== 'string' ||
+      one.name === '' ||
+      (one.kind !== 'image' && one.kind !== 'document') ||
+      typeof one.mimeType !== 'string' ||
+      one.mimeType === '' ||
+      typeof one.byteSize !== 'number' ||
+      !Number.isSafeInteger(one.byteSize) ||
+      one.byteSize < 0 ||
+      typeof one.keptAt !== 'string' ||
+      Number.isNaN(Date.parse(one.keptAt))
+    ) {
+      return null;
+    }
+    if (one.thumbName !== undefined && one.thumbName !== `${id}.thumb.jpg`) return null;
+    if (one.thumbName !== undefined && typeof one.thumbType !== 'string') return null;
+    return one;
   } catch {
     // A half-written metadata file is not a stored attachment. The bytes are
     // still there under their own name, which is what makes them findable.
@@ -222,7 +239,7 @@ async function writtenOnce(userData: string, id: string, file: Incoming): Promis
   );
   if (!there) await writeAtomically(bin, file.bytes);
 
-  if (existing !== null) {
+  if (existing !== null && existing.byteSize === file.bytes.length) {
     // Same content, so the same stored attachment: the name it was first kept
     // under stands, and nothing is written again.
     return shown(userData, existing, true);

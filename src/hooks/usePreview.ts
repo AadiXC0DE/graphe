@@ -47,8 +47,8 @@ export type Preview = {
   opensItself(address: string): boolean;
 };
 
-export function usePreview(options: { desksNow: { current: Desks } }): Preview {
-  const { desksNow } = options;
+export function usePreview(options: { desksNow: { current: Desks }; project?: string | null; conversation?: string | null }): Preview {
+  const { desksNow, project, conversation } = options;
 
   const [pane, setPane] = useState<PaneRoom>('off');
   const paneNow = useRef<PaneRoom>('off');
@@ -61,6 +61,16 @@ export function usePreview(options: { desksNow: { current: Desks } }): Preview {
    *  belongs to, and the address it was pointed at. One view is shared by the
    *  whole window, so every call about the page names that project. */
   const pageHeld = useRef<{ project: string; address: string } | null>(null);
+  useEffect(() => {
+    const held = pageHeld.current;
+    if (held !== null) void bridge.pageAt(null, null, false, { project: held.project });
+    pageHeld.current = null;
+    pageAtNow.current = null;
+    openedItself.current = null;
+    paneNow.current = 'off';
+    setPageAt(null);
+    setPane('off');
+  }, [project, conversation]);
 
   /** The project a call about the page names: the one the page the shell has
    *  belongs to, or the one in front while there is no page yet. */

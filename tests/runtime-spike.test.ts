@@ -576,6 +576,7 @@ describe('a child that is killed', () => {
 
     const seen = watched();
     let asked: ExtensionAsk | null = null;
+    let cancelledRequest: string | null = null;
     const runtime = await startRuntime({
       cwd: project,
       agentDir: join(root, 'agent'),
@@ -590,6 +591,9 @@ describe('a child that is killed', () => {
         // Never settles: somebody walked away mid-dialog, which is exactly the
         // wait a kill has to cancel.
         return Promise.withResolvers<never>().promise;
+      },
+      cancelAsk: (requestId) => {
+        cancelledRequest = requestId;
       },
     });
     running.push(runtime);
@@ -619,6 +623,7 @@ describe('a child that is killed', () => {
     // waiting on is named so its promise can be settled as cancelled.
     expect(how.kind).toBe('died');
     expect(how.unanswered).toHaveLength(1);
+    expect(cancelledRequest).toContain(':');
 
     // Nothing starts again: a prompt after the death is refused rather than
     // reissued to a runtime that is not there, and the model was not asked a

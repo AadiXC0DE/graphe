@@ -85,6 +85,13 @@ async function parents(root: string, id: string): Promise<string[]> {
   return (await git(root, ['log', '--format=%P', '-n', '1', id])).trim().split(' ').filter((one) => one !== '');
 }
 
+async function filesAt(root: string, id: string): Promise<string[]> {
+  return (await git(root, ['ls-tree', '-r', '--name-only', id]))
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
 /* ========================================================================== */
 
 describe('two saves landing at once', () => {
@@ -114,6 +121,9 @@ describe('two saves landing at once', () => {
     const behind = await parents(root, tip);
     expect(behind).toHaveLength(1);
     expect([first, second]).toContain(behind[0]);
+    // The retry must rebuild its tree from the new parent. A linked history
+    // whose top commit lost the first writer's file is still data loss.
+    expect(await filesAt(root, tip)).toEqual(expect.arrayContaining(['one.txt', 'two.txt']));
   });
 
   it('leaves the branch somebody is working on exactly where it was', async () => {

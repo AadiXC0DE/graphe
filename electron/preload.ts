@@ -771,8 +771,8 @@ const api: GrapheApi = {
     >;
   },
 
-  terminalScrollback(id: string): Promise<Result<string>> {
-    return ipcRenderer.invoke(CHANNEL.terminalScrollback, id) as Promise<Result<string>>;
+  terminalScrollback(id: string): Promise<Result<{ data: string; sequence: number }>> {
+    return ipcRenderer.invoke(CHANNEL.terminalScrollback, id) as Promise<Result<{ data: string; sequence: number }>>;
   },
 
   terminalWrite(id: string, data: string): Promise<Result<null>> {

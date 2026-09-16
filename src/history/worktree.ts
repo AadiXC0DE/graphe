@@ -76,6 +76,9 @@ export const worktreeWords = {
   /** A conversation put away and then asked for again, whose work is no longer
    *  in the project. Said rather than quietly opened on the wrong files. */
   gone: 'The work this conversation was doing is not in this project any more, so I could not open it again.',
+  removeFailed: 'I could not remove this checkout. Its folder and branch are still there, so I left its ownership record in place.',
+  branchRemoveFailed: 'I removed the checkout folder, but could not remove its branch. The branch still holds its work, so I left its ownership record in place.',
+  landedButCleanupFailed: 'The work was merged into the project, but I could not finish removing its checkout. Its branch or folder may still be there; do not land it again.',
 } as const;
 
 /** What an Apply carried back, and where it could not. */
@@ -318,7 +321,8 @@ export async function landWorktree(
     }
   }
 
-  await dropWorktree(run, repo, folder);
+  const dropped = await dropWorktree(run, repo, folder);
+  if (!dropped.ok) return no(worktreeWords.landedButCleanupFailed);
   return ok();
 }
 
@@ -332,8 +336,12 @@ async function backOutOfTheMerge(run: RunGit, repo: string): Promise<void> {
 /** Throw a conversation's checkout away, branch and all. */
 export async function dropWorktree(run: RunGit, repo: string, folder: string): Promise<Result> {
   const branch = await branchAt(run, folder);
-  await run(['worktree', 'remove', '--force', folder], { cwd: repo });
-  if (branch !== null) await run(['branch', '-D', branch], { cwd: repo });
+  const removed = await run(['worktree', 'remove', '--force', folder], { cwd: repo });
+  if (removed.code !== 0) return no(worktreeWords.removeFailed);
+  if (branch !== null) {
+    const deleted = await run(['branch', '-D', branch], { cwd: repo });
+    if (deleted.code !== 0) return no(worktreeWords.branchRemoveFailed);
+  }
   return ok();
 }
 
@@ -346,7 +354,8 @@ export async function dropWorktree(run: RunGit, repo: string, folder: string): P
  * down is not a decision to lose it.
  */
 export async function releaseWorktree(run: RunGit, repo: string, folder: string): Promise<Result> {
-  await run(['worktree', 'remove', '--force', folder], { cwd: repo });
+  const removed = await run(['worktree', 'remove', '--force', folder], { cwd: repo });
+  if (removed.code !== 0) return no(worktreeWords.removeFailed);
   return ok();
 }
 

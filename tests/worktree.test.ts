@@ -24,6 +24,7 @@ import {
   landWorktree,
   putAwayWorktree,
   renameCheckoutBranch,
+  releaseWorktree,
   reopenWorktree,
   sweepCheckouts,
   worktreeWords,
@@ -193,6 +194,43 @@ describe('dropWorktree', () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
+  });
+
+  it('keeps ownership truthful when git refuses removal', async () => {
+    const calls: string[][] = [];
+    const refused: RunGit = async (args) => {
+      calls.push(args);
+      if (args[0] === 'rev-parse') return { code: 0, out: 'graphe/review\n' };
+      if (args[0] === 'worktree') return { code: 1, out: 'permission denied' };
+      return { code: 0, out: '' };
+    };
+
+    const result = await dropWorktree(refused, '/repo', '/repo/.graphe/worktrees/review');
+    expect(result).toEqual({ ok: false, because: worktreeWords.removeFailed });
+    // A failed removal must not be followed by branch deletion: the checkout
+    // is still the only recoverable copy of the conversation's work.
+    expect(calls.some((args) => args[0] === 'branch')).toBe(false);
+  });
+
+  it('reports a failed release instead of pretending the copy was put away', async () => {
+    const refused: RunGit = async (args) =>
+      args[0] === 'worktree' ? { code: 1, out: 'permission denied' } : { code: 0, out: '' };
+    const result = await releaseWorktree(refused, '/repo', '/repo/.graphe/worktrees/review');
+    expect(result).toEqual({ ok: false, because: worktreeWords.removeFailed });
+  });
+
+  it('distinguishes a checkout folder removed while its branch remains', async () => {
+    const calls: string[][] = [];
+    const refused: RunGit = async (args) => {
+      calls.push(args);
+      if (args[0] === 'rev-parse') return { code: 0, out: 'graphe/review\n' };
+      if (args[0] === 'branch') return { code: 1, out: 'permission denied' };
+      return { code: 0, out: '' };
+    };
+
+    const result = await dropWorktree(refused, '/repo', '/repo/.graphe/worktrees/review');
+    expect(result).toEqual({ ok: false, because: worktreeWords.branchRemoveFailed });
+    expect(calls.map((args) => args[0])).toEqual(['rev-parse', 'worktree', 'branch']);
   });
 });
 

@@ -58,6 +58,11 @@ export type Flow = {
   /** `flow-…` */
   id: string;
   name: string;
+  /** Defaults used by blocks that leave their model or thinking unset. Optional
+   *  for files written before flow-level defaults existed; readers normalize a
+   *  missing value to null. */
+  model?: BlockModel;
+  thinking?: ThinkingLevel | null;
   blocks: readonly Block[];
   /** How far the whole flow may go on its own. */
   howFar: HowFar;
@@ -121,6 +126,8 @@ export function newFlow(name = canvasWords.untitled): Flow {
   return {
     id: `flow-${at.toString(36)}-${String(counter)}`,
     name,
+    model: null,
+    thinking: null,
     blocks: [],
     // A flow is left to run: stopping to ask would stop it where nobody is
     // looking. The rung is on the flow's own bar, and this is its default.
@@ -1229,6 +1236,8 @@ export function readFlow(raw: unknown): Flow | null {
       typeof held['name'] === 'string' && held['name'].trim() !== ''
         ? (held['name'] as string)
         : canvasWords.untitled,
+    model: readModel(held['model']),
+    thinking: readThinking(held['thinking']),
     blocks: standing,
     howFar: isHowFar(held['howFar']) ? held['howFar'] : 'doing',
     lanes: lanes === 'worktrees' ? 'worktrees' : 'in-turn',
@@ -1240,6 +1249,64 @@ export function readFlow(raw: unknown): Flow | null {
         ? (held['updatedAt'] as number)
         : 0,
   };
+}
+
+/** Read a flow supplied by the renderer without the forgiving recovery rules
+ *  used for files. IPC saves must reject a malformed drawing rather than
+ *  silently dropping a block/edge and persisting a different graph. Run history
+ *  is intentionally not validated here: the shell owns and discards it. */
+export function readFlowStrict(raw: unknown): Flow | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const held = raw as Record<string, unknown>;
+  if (typeof held['id'] !== 'string' || held['id'] === '' || typeof held['name'] !== 'string' || !Array.isArray(held['blocks'])) return null;
+  const model = held['model'];
+  if (model !== undefined && model !== null && (typeof model !== 'object' || Array.isArray(model) || readModel(model) === null)) return null;
+  const thinking = held['thinking'];
+  if (thinking !== undefined && thinking !== null && (typeof thinking !== 'string' || readThinking(thinking) === null)) return null;
+  // These fields control authorization and execution admission. Unlike the
+  // file reader's recovery path, IPC must not silently default an omitted value
+  // to full-access `doing` or the wrong lane mode.
+  if (!isHowFar(held['howFar'])) return null;
+  if (held['lanes'] !== 'in-turn' && held['lanes'] !== 'worktrees') return null;
+  for (const key of ['createdAt', 'updatedAt']) {
+    const value = held[key];
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return null;
+  }
+
+  const list = held['blocks'] as readonly unknown[];
+  const ids = new Set<string>();
+  const kinds = new Set(Object.values(KINDS));
+  for (const one of list) {
+    if (typeof one !== 'object' || one === null || Array.isArray(one)) return null;
+    const block = one as Record<string, unknown>;
+    const id = block['id'];
+    if (typeof id !== 'string' || id === '' || ids.has(id)) return null;
+    ids.add(id);
+    if (typeof block['kind'] !== 'string' || !kinds.has(block['kind'] as BlockKind)) return null;
+    if (typeof block['name'] !== 'string' || typeof block['says'] !== 'string') return null;
+    if (block['model'] !== null && (typeof block['model'] !== 'object' || Array.isArray(block['model']) || readModel(block['model']) === null)) return null;
+    if (block['thinking'] !== null && (typeof block['thinking'] !== 'string' || readThinking(block['thinking']) === null)) return null;
+    if (!Array.isArray(block['after'])) return null;
+    const after = block['after'] as readonly unknown[];
+    if (new Set(after).size !== after.length || after.some((parent) => typeof parent !== 'string' || parent === '' || parent === id || !ids.has(parent) && !list.some((candidate) => typeof candidate === 'object' && candidate !== null && (candidate as Record<string, unknown>)['id'] === parent))) return null;
+    if (block['lookFirst'] !== true && block['lookFirst'] !== false) return null;
+    if (!Array.isArray(block['attachments'])) return null;
+    const attachments = block['attachments'] as readonly unknown[];
+    if (new Set(attachments).size !== attachments.length || attachments.some((attachment) => typeof attachment !== 'string' || attachment.trim() === '')) return null;
+    const retries = block['retries'];
+    if (typeof retries !== 'number' || !Number.isFinite(retries) || retries < 0 || !Number.isInteger(retries)) return null;
+    if (block['at'] !== undefined && readAt(block['at']) === null) return null;
+  }
+  const normalized = readFlow(raw);
+  if (normalized === null || normalized.blocks.length !== list.length) return null;
+  // readFlow drops self/unknown/cyclic edges during recovery. Exact equality of
+  // the edge lists makes those cases a hard IPC refusal instead.
+  for (const one of list) {
+    const source = one as Record<string, unknown>;
+    const parsed = normalized.blocks.find((block) => block.id === source['id']);
+    if (parsed === undefined || JSON.stringify(parsed.after) !== JSON.stringify(source['after'])) return null;
+  }
+  return normalized;
 }
 
 /** What a flow may be set to. The Guard knows two more, and a person setting a

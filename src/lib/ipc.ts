@@ -242,7 +242,8 @@ export type TerminalSession = {
 
 /** Output, in chunks: a terminal that printed a megabyte should not arrive as
  *  one message. */
-export type TerminalChunk = { id: string; data: string };
+export type TerminalChunk = { id: string; data: string; sequence: number };
+export type TerminalSnapshot = { data: string; sequence: number };
 export type TerminalExit = { id: string; code: number; signal: number | null };
 
 /**
@@ -2160,7 +2161,7 @@ export type GrapheApi = {
     where?: Where,
   ): Promise<Result<TerminalSession>>;
   /** What it has printed so far, for a pane opened after the fact. */
-  terminalScrollback(id: string): Promise<Result<string>>;
+  terminalScrollback(id: string): Promise<Result<TerminalSnapshot>>;
   terminalWrite(id: string, data: string): Promise<Result<null>>;
   terminalResize(id: string, cols: number, rows: number): Promise<Result<null>>;
   terminalClose(id: string): Promise<Result<null>>;

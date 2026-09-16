@@ -22,7 +22,7 @@ export type { ExtensionAnswer, ExtensionAsk };
 
 /** Where an answer comes from: the window, or the fact that there is no window
  *  to ask. */
-export type AskTheWindow = (ask: ExtensionAsk) => Promise<ExtensionAnswer>;
+export type AskTheWindow = (ask: ExtensionAsk, requestId?: string) => Promise<ExtensionAnswer>;
 
 /** How the host tells somebody about something that cannot be drawn. */
 export type SayUnsupported = (what: string, method: string) => void;

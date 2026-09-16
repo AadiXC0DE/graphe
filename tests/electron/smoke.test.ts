@@ -72,6 +72,13 @@ const TYPES: Readonly<Record<string, string>> = {
   '.wasm': 'application/wasm',
 };
 
+const cleanupFailures: string[] = [];
+const serving: Array<() => Promise<void>> = [];
+function reportCleanup(message: string): void {
+  cleanupFailures.push(message);
+  console.error(`[electron-smoke] ${message}`);
+}
+
 /** The built renderer over HTTP, which is where an unpackaged shell looks for
  *  it — `GRAPHE_DEV_SERVER_URL`. A `file://` window would carry the markup and
  *  not the workers and dynamic imports the app loads. */
@@ -92,13 +99,32 @@ async function serve(folder: string): Promise<{ url: string; stop: () => Promise
   await listening.promise;
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('the file server has no port');
+  let stoppingServer: Promise<void> | null = null;
+  const stop = (): Promise<void> => {
+    if (stoppingServer !== null) return stoppingServer;
+    stoppingServer = new Promise<void>((resolve) => {
+      // Close sockets before closing the listener so an abandoned asset stream
+      // cannot keep the test process alive after the Electron window is gone.
+      server.closeAllConnections();
+      server.closeIdleConnections?.();
+      try {
+        server.close((error) => {
+          if (error !== undefined && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
+            reportCleanup(`renderer server close failed: ${String(error)}`);
+          }
+          resolve();
+        });
+      } catch (cause) {
+        reportCleanup(`renderer server close failed: ${String(cause)}`);
+        resolve();
+      }
+    });
+    return stoppingServer;
+  };
+  serving.push(stop);
   return {
     url: `http://127.0.0.1:${String(address.port)}/`,
-    stop: () => {
-      const closed = Promise.withResolvers<void>();
-      server.close(() => closed.resolve());
-      return closed.promise;
-    },
+    stop,
   };
 }
 
@@ -141,6 +167,8 @@ async function readWhenWritten(file: string, within = 30_000): Promise<string> {
  *  "Connect a model", which is a scenario of its own. The seam is refused in a
  *  shipped app, so a launch that asks for it is asserted to be an unpackaged
  *  one rather than assumed to be. */
+const ownedProcesses = new WeakMap<ElectronApplication, ReturnType<ElectronApplication['process']>>();
+
 async function launchApp(
   profile: string,
   url: string,
@@ -169,12 +197,28 @@ async function launchApp(
     cwd: here,
     env,
   });
+  ownedProcesses.set(app, app.process());
   if (scripted !== undefined) {
     expect(await app.evaluate(({ app: electronApp }) => electronApp.isPackaged)).toBe(false);
   }
   const window = await app.firstWindow();
+  // Keep ordinary locator failures actionable. Scenarios that genuinely need
+  // longer waits provide an explicit timeout at the assertion site.
+  window.setDefaultTimeout(15_000);
   await window.waitForLoadState('domcontentloaded');
   return { app, window };
+}
+
+async function captureFailure(window: Page, label: string): Promise<void> {
+  const file = join(tmpdir(), `graphe-electron-${label}-failure-${String(process.pid)}-${String(Date.now())}.png`);
+  try {
+    await window.screenshot({ path: file, fullPage: true });
+    console.error(`[electron-smoke] ${label} failure screenshot: ${file}`);
+  } catch (cause) {
+    console.error(`[electron-smoke] ${label} failure screenshot unavailable: ${String(cause)}`);
+  }
+  const trouble = await window.locator('.termpane__trouble, .canvas__refused').allTextContents().catch(() => []);
+  if (trouble.length > 0) console.error(`[electron-smoke] ${label} visible trouble: ${trouble.join(' | ')}`);
 }
 
 /** A folder with one commit in it, remembered in the profile as the last
@@ -224,13 +268,125 @@ function errorsIn(log: string): readonly string[] {
   return log.split('\n').filter((line) => /^\S+ error /.test(line));
 }
 
+const APP_CLOSE_TIMEOUT = 10_000;
+const APP_EXIT_GRACE = 2_000;
+
+/** Close only the Electron process this test launched. Cleanup diagnostics are
+ *  reported, but never thrown from a finally block: a failing body assertion
+ *  must remain the failure the runner shows. */
+async function closeAppBounded(app: ElectronApplication): Promise<void> {
+  let child: ReturnType<ElectronApplication['process']> | null = ownedProcesses.get(app) ?? null;
+  // Force-quit/relaunch scenarios deliberately close Playwright's channel.
+  // Keep the original process handle so cleanup can prove it already exited.
+  if (child !== null && (child.exitCode !== null || child.signalCode !== null)) return;
+  try {
+    child ??= app.process();
+  } catch (cause) {
+    reportCleanup(`could not inspect Electron process during cleanup: ${String(cause)}`);
+  }
+
+  let onExit: (() => void) | undefined;
+  const processExited = new Promise<void>((resolve) => {
+    if (child === null) return;
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else {
+      onExit = resolve;
+      child.once('exit', onExit);
+    }
+  });
+
+  let closeFailure: unknown = null;
+  let timedOut = false;
+  let close: Promise<void>;
+  try {
+    close = app.close().catch((cause: unknown) => {
+      closeFailure = cause;
+    });
+  } catch (cause) {
+    closeFailure = cause;
+    close = Promise.resolve();
+  }
+  const killOwned = (): void => {
+    if (child === null || child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      child.kill('SIGKILL');
+    } catch (cause) {
+      console.error(`[electron-smoke] could not kill owned Electron process: ${String(cause)}`);
+    }
+  };
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      close,
+      // The process exiting is authoritative even if Playwright's transport
+      // is still waiting for its close acknowledgement.
+      processExited,
+      new Promise<void>((resolve) => {
+        closeTimer = setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, APP_CLOSE_TIMEOUT);
+      }),
+    ]);
+  } finally {
+    if (closeTimer !== undefined) clearTimeout(closeTimer);
+    if (onExit !== undefined) child?.off('exit', onExit);
+  }
+
+  if (closeFailure !== null) {
+    reportCleanup(`Electron close failed: ${String(closeFailure)}`);
+  }
+  if (timedOut) {
+    const pid = child?.pid;
+    reportCleanup(
+      `Electron close timed out after ${String(APP_CLOSE_TIMEOUT)}ms` +
+      (pid === undefined ? '' : `; killing owned test process ${String(pid)}`),
+    );
+    if (child !== null && child.exitCode === null && child.signalCode === null) {
+      // This ChildProcess is the exact process returned by this launch. Do not
+      // use a process-group or name-based kill: other tests/apps are out of scope.
+      killOwned();
+    }
+  }
+
+  if (child !== null && child.exitCode === null && child.signalCode === null) {
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
+    const exited = await Promise.race([
+      new Promise<boolean>((resolve) => child?.once('exit', () => resolve(true))),
+      new Promise<boolean>((resolve) => {
+        exitTimer = setTimeout(() => resolve(false), APP_EXIT_GRACE);
+        exitTimer.unref?.();
+      }),
+    ]);
+    if (exitTimer !== undefined) clearTimeout(exitTimer);
+    if (!exited && child.exitCode === null && child.signalCode === null) {
+      const pid = child.pid;
+      reportCleanup(
+        `Electron process remained alive after cleanup grace` +
+        (pid === undefined ? '' : `; killing owned test process ${String(pid)}`),
+      );
+      killOwned();
+    }
+  }
+}
+
 /** Everything a run made is thrown away, whether it passed or not. */
 function dispose(app: ElectronApplication, profile: string, project?: string): () => Promise<void> {
-  const stop = async (): Promise<void> => {
-    await app.close().catch(() => undefined);
-    for (const folder of [profile, project]) {
-      if (folder !== undefined) rmSync(folder, { recursive: true, force: true });
-    }
+  let stopped: Promise<void> | null = null;
+  const stop = (): Promise<void> => {
+    if (stopped !== null) return stopped;
+    stopped = (async (): Promise<void> => {
+      await closeAppBounded(app);
+      for (const folder of [profile, project]) {
+        if (folder === undefined) continue;
+        try {
+          rmSync(folder, { recursive: true, force: true });
+        } catch (cause) {
+          reportCleanup(`cleanup could not remove ${folder}: ${String(cause)}`);
+        }
+      }
+    })();
+    return stopped;
   };
   stopping.push(stop);
   return stop;
@@ -239,7 +395,9 @@ function dispose(app: ElectronApplication, profile: string, project?: string): (
 const stopping: (() => Promise<void>)[] = [];
 
 afterAll(async () => {
-  for (const stop of stopping.splice(0)) await stop().catch(() => undefined);
+  for (const stop of stopping.splice(0)) await stop();
+  for (const stop of serving.splice(0)) await stop();
+  expect(cleanupFailures, cleanupFailures.join('\n')).toEqual([]);
 });
 
 /** The project's folder in front, by pressing its row: the press is the open. */
@@ -398,21 +556,12 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       // switching back brings the first one's words with it.
       expect(await window.locator('.welcome__title').innerText()).toContain('a folder to work in');
       expect(await window.locator('.welcome').count()).toBe(1);
-      /* KNOWN DEFECT (finding register, owner phase 4). Switching back to a
-         conversation whose turn never reached a transcript - here because no
-         model is connected, so nothing was written to disk - shows the empty
-         state instead of the words that are still in memory: the shell answers
-         with an empty history and the window replaces the desk's turns with it.
-         The assertion below records what the product does today so the defect
-         cannot be forgotten; when it is fixed this test fails, and the fix is
-         to assert the opposite and delete this note. */
       await window.locator('.tabs__title').first().click();
-      await new Promise((go) => setTimeout(go, 1000));
-      const keptTheWords = (await window.locator('.welcome').count()) === 0;
-      expect(
-        keptTheWords,
-        'switching back to a conversation with unsaved turns now keeps them; assert that and delete the known-defect note above',
-      ).toBe(false);
+      await vi.waitFor(
+        async () => expect(await window.locator('.welcome').count()).toBe(0),
+        { timeout: 30_000 },
+      );
+      expect(await window.locator('.tabs__title').first().innerText()).toBe('say something');
 
       expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
       expect(thrown).toEqual([]);
@@ -1265,8 +1414,14 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       /* The machine is taken away: SIGKILL, so `before-quit` never runs and
          nothing gets a chance to write anything down on the way out. This is
          the app force quit, and the power going off is the same event. */
-      first.app.process().kill('SIGKILL');
-      await new Promise((done) => first.app.process().once('exit', done));
+      const firstProcess = ownedProcesses.get(first.app);
+      if (firstProcess === undefined) throw new Error('the launched process was not recorded');
+      const exited = new Promise<void>((done) => {
+        if (firstProcess.exitCode !== null || firstProcess.signalCode !== null) done();
+        else firstProcess.once('exit', () => done());
+      });
+      firstProcess.kill('SIGKILL');
+      await exited;
 
       // A new launch on the same profile, which is what somebody does next.
       const second = await launchApp(profile, files.url);
@@ -1329,6 +1484,120 @@ suite('the app in a real window, on a profile nothing else uses', () => {
     }
   }, 300_000);
 
+  it('opens an owned terminal, scrolls its output, resizes its pty, and keeps typing', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url);
+    const stop = dispose(app, profile, project);
+
+    try {
+      await openTheFolder(window);
+      await window.setViewportSize({ width: 1280, height: 800 });
+      await window.locator('.shelf__more').filter({ hasText: 'Commands' }).click();
+      await window.locator('.commands').waitFor({ timeout: 30_000 });
+      await window.locator('.commands__press').filter({ hasText: 'Terminal' }).click();
+      await window.locator('.termpane').waitFor({ timeout: 60_000 });
+      await window.locator('.xterm-screen').waitFor({ timeout: 60_000 });
+
+      // xterm's helper textarea must not paint a blue input rectangle over the
+      // shell. It is an off-screen, zero-sized input surface only.
+      const helper = window.locator('.xterm-helper-textarea');
+      expect(await helper.isVisible()).toBe(false);
+      expect(await helper.evaluate((node) => getComputedStyle(node).opacity)).toBe('0');
+
+      const shellInfo = async () => window.evaluate(async (path) => {
+        const api = globalThis.window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        const answer = await api.terminalList({ project: path });
+        if (!answer.ok) return { id: null, trouble: answer.trouble.because };
+        const one = answer.value[0];
+        return { id: one?.id ?? null, trouble: null };
+      }, project);
+      await vi.waitFor(async () => {
+        const state = await shellInfo();
+        if (state.trouble !== null) throw new Error(`terminalList refused: ${state.trouble}`);
+        expect(state.id, 'terminal session was not listed after opening the pane').not.toBeNull();
+      }, { timeout: 60_000 });
+      const beforeId = (await shellInfo()).id;
+      expect(beforeId).not.toBeNull();
+      // The xterm renderer is not required to be canvas-backed (the DOM
+      // renderer is valid too), so measure the screen surface itself.
+      const xtermShape = async () => window.locator('.xterm-screen').evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      });
+      const beforeResize = await xtermShape();
+
+      // A harmless shell builtin prints many lines without touching the
+      // project. Enough output must make the xterm viewport genuinely scroll.
+      const marker = `terminal-smoke-${String(Date.now())}`;
+      const lines = Array.from({ length: 120 }, (_, index) => String(index)).join(' ');
+      await window.locator('.xterm').click();
+      await window.keyboard.type(`printf '${marker}-%s\\n' ${lines}`);
+      await window.keyboard.press('Enter');
+      await vi.waitFor(
+        async () => expect(await window.locator('.xterm-rows').innerText()).toContain(marker),
+        { timeout: 30_000 },
+      );
+      // xterm 6 uses its own scroll model rather than native scrollHeight.
+      // Assert the visible buffer actually moves in response to the wheel.
+      const viewport = window.locator('.xterm-screen');
+      await vi.waitFor(async () => {
+        expect(await window.locator('.xterm-rows').innerText()).toContain(`${marker}-119`);
+      }, { timeout: 30_000 });
+      await viewport.hover();
+      await window.mouse.wheel(0, -600);
+      await vi.waitFor(async () => {
+        expect(await window.locator('.xterm-rows').innerText()).not.toContain(`${marker}-119`);
+      }, { timeout: 10_000 });
+      await window.mouse.wheel(0, 3000);
+      await vi.waitFor(async () => {
+        expect(await window.locator('.xterm-rows').innerText()).toContain(`${marker}-119`);
+      }, { timeout: 10_000 });
+
+      // A window resize changes the pty dimensions, not just the CSS box.
+      await window.setViewportSize({ width: 820, height: 800 });
+      await vi.waitFor(
+        async () => {
+          const after = await xtermShape();
+          expect(after.width !== beforeResize.width || after.height !== beforeResize.height).toBe(true);
+        },
+        { timeout: 30_000 },
+      );
+
+      // The same owned session remains the input target after the resize.
+      const afterResize = (await shellInfo()).id;
+      expect(afterResize).toBe(beforeId);
+      const afterMarker = `terminal-smoke-after-resize-${String(Date.now())}`;
+      await window.locator('.xterm').click();
+      await window.keyboard.type(`printf '${afterMarker}\\n'; stty size`);
+      await window.keyboard.press('Enter');
+      await vi.waitFor(
+        async () => {
+          const text = await window.locator('.xterm-rows').innerText();
+          expect(text).toContain(afterMarker);
+          // `stty size` reports rows then columns from the resized pty; require
+          // a complete numeric line, not merely numbers in the echoed command.
+          expect(text.split(/\r?\n/).some((line) => /^\d{1,3}\s+\d{1,3}$/.test(line.trim()))).toBe(true);
+        },
+        { timeout: 30_000 },
+      );
+      const sessions = await window.evaluate(async (path) => {
+        const api = globalThis.window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        const answer = await api.terminalList({ project: path });
+        return answer.ok ? answer.value.map((one) => one.id) : [];
+      }, project);
+      expect(sessions).toEqual([beforeId]);
+    } catch (cause) {
+      await captureFailure(window, 'terminal');
+      throw cause;
+    } finally {
+      await stop();
+    }
+  }, 180_000);
+
   it('runs two asks of a canvas in turn, in one conversation, with nothing prefixed', async () => {
     const profile = freshProfile();
     const project = fixtureProject(profile);
@@ -1350,6 +1619,46 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await window.locator('.composer__canvas').click();
       await window.locator('.canvas').first().waitFor({ timeout: 60_000 });
       expect(await window.locator('.canvas').count()).toBe(1);
+
+      // A canvas remains a real tab when the second pane is requested. At the
+      // supported desktop widths both surfaces must stay visible and occupy
+      // disjoint rectangles; a fixed pane painted over the board is unusable.
+      for (const size of [{ width: 1280, height: 800 }, { width: 1440, height: 900 }]) {
+        await window.setViewportSize(size);
+        await window.locator('.tabs__split').click();
+        await window.locator('.beside').waitFor({ timeout: 30_000 });
+        expect(await window.locator('.canvas').isVisible()).toBe(true);
+        const splitBoxes = await window.locator('.canvas, .beside').evaluateAll((nodes) =>
+          nodes.map((node) => {
+            const box = node.getBoundingClientRect();
+            return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+          }),
+        );
+        expect(splitBoxes).toHaveLength(2);
+        expect(splitBoxes.every((box) => box.width > 0 && box.height > 0)).toBe(true);
+        const [canvasBox, besideBox] = splitBoxes as [typeof splitBoxes[number], typeof splitBoxes[number]];
+        expect(canvasBox.right <= besideBox.left || besideBox.right <= canvasBox.left).toBe(true);
+        if (size.width !== 1440) {
+          await window.locator('.beside button[aria-label="Close secondary pane"]').click();
+          await window.locator('.beside').waitFor({ state: 'detached', timeout: 30_000 });
+        }
+      }
+
+      // Closing the canvas tab by its mouse cross only closes the view. The
+      // saved drawing is still reachable from the shelf and can be reopened
+      // with the keyboard, then closed with the platform's tab-close chord.
+      await window.locator('.tabs__tab').filter({ has: window.locator('.tabs__kind') }).locator('.tabs__close').click();
+      await window.locator('.canvas').waitFor({ state: 'detached', timeout: 30_000 });
+      expect(await window.locator('.tabs__tab').filter({ has: window.locator('.tabs__kind') }).count()).toBe(0);
+      const canvasShelfButton = window.locator('.shelf__more').filter({ hasText: 'Canvas' }).first();
+      await canvasShelfButton.focus();
+      await window.keyboard.press('Enter');
+      await window.locator('.canvas').waitFor({ timeout: 30_000 });
+      const closeChord = process.platform === 'darwin' ? 'Meta+W' : 'Control+W';
+      await window.keyboard.press(closeChord);
+      await window.locator('.canvas').waitFor({ state: 'detached', timeout: 30_000 });
+      await canvasShelfButton.click();
+      await window.locator('.canvas').waitFor({ timeout: 30_000 });
 
       /* A second ask behind the first. The panel places it and opens on what it
          just made, so the words go into the new card rather than into the one
@@ -1375,6 +1684,16 @@ suite('the app in a real window, on a profile nothing else uses', () => {
         { timeout: 120_000 },
       );
 
+      // Start is repeatable after a successful run. Every block gets a scripted
+      // answer again, so a second click cannot silently consume the fallback.
+      model.replies([{ says: ['Drew it again.'] }, { says: ['Made it sticky again.'] }]);
+      const asksBeforeRepeat = model.asked.length;
+      await window.locator('.canvas__start').first().click();
+      await vi.waitFor(
+        async () => expect(model.asked.length).toBe(asksBeforeRepeat + 2),
+        { timeout: 120_000 },
+      );
+
       /* What the model was actually sent. The second block's prompt carries no
          prefix: two asks in one lane are already in one transcript, so repeating
          what the first came to would be the conversation talking to itself. */
@@ -1393,11 +1712,87 @@ suite('the app in a real window, on a profile nothing else uses', () => {
 
       expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
       expect(thrown).toEqual([]);
+    } catch (cause) {
+      await captureFailure(window, 'canvas');
+      throw cause;
     } finally {
       await model.stop();
       await stop();
     }
   }, 300_000);
+
+  it('stops a canvas at a gate and starts it again', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    model.replies([{ says: ['The first step is ready.'] }, { says: ['The second step is ready.'] }]);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(window);
+
+      // Put an ask and a gate in one lane. The ask proves that the gate is
+      // reached by a real model turn, rather than by a fabricated run file.
+      await window.locator('.composer__input').fill('Prepare the first step');
+      await window.locator('.composer__canvas').click();
+      await window.locator('.canvas').first().waitFor({ timeout: 60_000 });
+      await window.locator('.canvas__palette button[data-kind="gate"]').click();
+      await window.keyboard.press('Escape');
+
+      await window.locator('.canvas__start').first().click();
+      const atGate = async (): Promise<{ id: string; state: string | null }> =>
+        window.evaluate(async (path) => {
+          const api = globalThis.window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          const answer = await api.flowList({ project: path });
+          if (!answer.ok) throw new Error(answer.trouble.because);
+          const flow = answer.value[0];
+          if (flow === undefined) throw new Error('canvas was not saved');
+          return { id: flow.id, state: flow.runs[0]?.state ?? null };
+        }, project);
+      await vi.waitFor(async () => expect((await atGate()).state).toBe('needs-you'), {
+        timeout: 120_000,
+        interval: 250,
+      });
+
+      // Stop through the real preload bridge while the run is held by the
+      // gate. A later Start must be accepted; this catches stale live-run
+      // ownership surviving a stop at a non-running terminal point.
+      const flow = await atGate();
+      const stopped = await window.evaluate(async ({ path, id }) => {
+        const api = globalThis.window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        return api.flowStop(id, { project: path });
+      }, { path: project, id: flow.id });
+      expect(stopped.ok).toBe(true);
+      if (stopped.ok) expect(stopped.value.state).toBe('stopped');
+      await vi.waitFor(
+        async () => expect(await window.locator('.canvas__start').first().innerText()).toBe('Start'),
+        { timeout: 30_000, interval: 100 },
+      );
+
+      model.replies([{ says: ['The second step is ready.'] }]);
+      await window.locator('.canvas__start').first().click();
+      await vi.waitFor(async () => expect((await atGate()).state).toBe('needs-you'), {
+        timeout: 120_000,
+        interval: 250,
+      });
+      expect(model.asked.length).toBe(2);
+      expect(await window.locator('.canvas__card--needs-you').count()).toBe(1);
+      expect(thrown).toEqual([]);
+    } catch (cause) {
+      await captureFailure(window, 'canvas-gate-stop-start');
+      throw cause;
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  }, 240_000);
 
   it('stays answering while an add-on holds its own thread, in a child runtime', async () => {
     const profile = freshProfile();

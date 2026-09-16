@@ -5,8 +5,14 @@
  * two can never drift apart.
  */
 
-import { changesAnything, evaluate } from './guard/policy';
+import { changesAnything, evaluate, type HowFar } from './guard/policy';
 import type { ToolCall } from './types';
+
+/** A plan is not permission to execute it. Only explicit full access outside
+ * read-only planning permits the renderer to approve a questionless plan. */
+export function mayApproveWithoutAsking(howFar: HowFar, planOnly: boolean): boolean {
+  return howFar === 'doing' && !planOnly;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Tools that cannot change anything                                           */

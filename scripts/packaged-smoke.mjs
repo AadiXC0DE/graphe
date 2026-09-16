@@ -188,7 +188,8 @@ async function runInTheTerminal(window) {
     said.drawer = true;
 
     const at = window.locator('.termpane .xterm-helper-textarea');
-    await at.waitFor({ timeout: 30_000 });
+    // The correctly styled xterm input is intentionally invisible.
+    await at.waitFor({ state: 'attached', timeout: 30_000 });
     /* The textarea exists as soon as xterm is drawn, which is before the pty
        has answered and the pane knows its session id. Keystrokes sent in that
        window are dropped on purpose (`TerminalPane` writes through a ref and

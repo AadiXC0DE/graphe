@@ -10,6 +10,7 @@
 
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -21,6 +22,7 @@ import {
   listTrash,
   moveToTrash,
   restoreFromTrash,
+  type TrashIo,
   trashFolder,
 } from '../electron/services/trash';
 
@@ -57,22 +59,67 @@ describe('a deleted conversation', () => {
     const profile = await scratch();
     const sessions = join(profile, 'sessions');
     await mkdir(sessions, { recursive: true });
-    const first = join(sessions, 'one.jsonl');
-    const second = join(sessions, 'two.jsonl');
+    const first = join(sessions, 'same.jsonl');
     await writeFile(first, 'first\n');
-    await writeFile(second, 'second\n');
 
     await moveToTrash(first, profile, 1_700_000_000_000);
-    await moveToTrash(second, profile, 1_700_000_000_000);
+    // The same conversation basename can be reused after a delete. This is
+    // the collision that a timestamp-only destination used to overwrite.
+    await writeFile(first, 'second\n');
+    await moveToTrash(first, profile, 1_700_000_000_000);
     const kept = await readdir(trashFolder(profile));
-    // Different names, because the file's own name is part of the name it is
-    // kept under. Nothing is lost to a collision.
+    // Different names, despite the same timestamp and basename. Nothing is
+    // lost to a collision, and both copies remain independently recoverable.
     expect(new Set(kept).size).toBe(2);
+    expect(await Promise.all(kept.map((name) => readFile(join(trashFolder(profile), name), 'utf8')))).toEqual(
+      expect.arrayContaining(['first\n', 'second\n']),
+    );
   });
 
   it('says so rather than claiming a delete when the file will not move', async () => {
     const profile = await scratch();
     expect(await moveToTrash(join(profile, 'sessions', 'never-written.jsonl'), profile)).toBeNull();
+  });
+
+  it('falls back to an exclusive copy when hard links are unavailable', async () => {
+    const profile = await scratch();
+    const sessions = join(profile, 'sessions');
+    await mkdir(sessions, { recursive: true });
+    const transcript = join(sessions, 'cross-device.jsonl');
+    await writeFile(transcript, 'copied safely\n');
+    const io: TrashIo = {
+      link: async () => {
+        throw Object.assign(new Error('hard links are not supported here'), { code: 'EOPNOTSUPP' });
+      },
+      copyFile: fsPromises.copyFile,
+      rm: fsPromises.rm,
+    };
+    const kept = await moveToTrash(transcript, profile, 1_700_000_000_000, io);
+    expect(kept).not.toBeNull();
+    expect(existsSync(transcript)).toBe(false);
+    expect(await readFile(kept ?? '', 'utf8')).toBe('copied safely\n');
+  });
+
+  it('removes a newly linked candidate when unlinking the source fails', async () => {
+    const profile = await scratch();
+    const sessions = join(profile, 'sessions');
+    await mkdir(sessions, { recursive: true });
+    const transcript = join(sessions, 'kept-here.jsonl');
+    await writeFile(transcript, 'still here\n');
+    let sourceUnlinks = 0;
+    const io: TrashIo = {
+      link: fsPromises.link,
+      copyFile: fsPromises.copyFile,
+      rm: async (path, options) => {
+        if (String(path) === transcript && sourceUnlinks++ === 0) {
+          throw Object.assign(new Error('source is locked'), { code: 'EACCES' });
+        }
+        return fsPromises.rm(path, options);
+      },
+    };
+    expect(await moveToTrash(transcript, profile, 1_700_000_000_000, io)).toBeNull();
+    expect(await readFile(transcript, 'utf8')).toBe('still here\n');
+    expect(await readdir(trashFolder(profile))).toEqual([]);
   });
 });
 
@@ -105,6 +152,15 @@ describe('the trash as a person sees it', () => {
 
   it('is empty, and says so, when nothing has ever been deleted', async () => {
     const profile = await scratch();
+    expect(await listTrash(profile)).toEqual([]);
+  });
+
+  it('does not present unrelated files as restorable conversations', async () => {
+    const profile = await scratch();
+    const trash = trashFolder(profile);
+    await mkdir(trash, { recursive: true });
+    await writeFile(join(trash, 'notes.txt'), 'not a transcript\n');
+    await mkdir(join(trash, 'folder.jsonl'), { recursive: true });
     expect(await listTrash(profile)).toEqual([]);
   });
 

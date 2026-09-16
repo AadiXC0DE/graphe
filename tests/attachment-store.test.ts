@@ -9,7 +9,7 @@
  *  it.
  */
 
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -185,5 +185,55 @@ describe('the attachment store', () => {
     expect(await copyOf(here, '../../etc/passwd')).toBeNull();
     expect(await copyOf(here, id.slice(0, 12))).toBeNull();
     expect(await copyOf(here, 'f'.repeat(64))).toBeNull();
+  });
+
+  it('rejects and repairs metadata that points at the wrong content or path', async () => {
+    const here = await profile();
+    const bytes = new TextEncoder().encode('repair me');
+    const kept = await keep(here, [picture('repair.png', 'repair me', new Uint8Array([1, 2, 3]))]);
+    const id = kept.kept[0]?.id ?? '';
+    const metadata = join(attachmentsFolder(here), `${id}.json`);
+
+    // A corrupted row must not be trusted by reads, even though the bytes file
+    // itself is present. Re-importing the same content repairs the row from the
+    // caller-owned id/kind/mime/path rather than preserving hostile fields.
+    await writeFile(
+      metadata,
+      JSON.stringify({
+        id: 'f'.repeat(64),
+        name: 'wrong',
+        kind: 'other',
+        mimeType: 'text/plain',
+        byteSize: bytes.length + 1,
+        keptAt: 'not-a-date',
+        thumbName: '../../outside.jpg',
+      }),
+      'utf8',
+    );
+    expect(await copyOf(here, id)).toBeNull();
+
+    const repaired = await keep(here, [picture('repair.png', 'repair me', new Uint8Array([1, 2, 3]))]);
+    expect(repaired.kept[0]?.id).toBe(id);
+    expect((JSON.parse(await readFile(metadata, 'utf8')) as Record<string, unknown>)).toMatchObject({
+      id,
+      kind: 'image',
+      mimeType: 'image/png',
+      byteSize: bytes.length,
+      thumbName: `${id}.thumb.jpg`,
+    });
+    expect(await copyOf(here, id)).not.toBeNull();
+  });
+
+  it('rejects metadata whose kept timestamp is not a date', async () => {
+    const here = await profile();
+    const kept = await keep(here, [picture('dated.png', 'dated')]);
+    const id = kept.kept[0]?.id ?? '';
+    const metadata = join(attachmentsFolder(here), `${id}.json`);
+    const valid = JSON.parse(await readFile(metadata, 'utf8')) as Record<string, unknown>;
+    await writeFile(metadata, JSON.stringify({ ...valid, keptAt: 'not-a-date' }), 'utf8');
+
+    expect(await copyOf(here, id)).toBeNull();
+    await keep(here, [picture('dated.png', 'dated')]);
+    expect(await copyOf(here, id)).not.toBeNull();
   });
 });

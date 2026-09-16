@@ -70,9 +70,11 @@ export type RunnerPort = {
   openLane(lane: Lane): Promise<Lane>;
   send(lane: Lane, block: Block, text: string, options: TurnOptions): Promise<Settled>;
   checks(lane: Lane): Promise<{ passed: boolean; report: string }>;
-  review(lane: Lane): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string }>;
-  pullRequest(lane: Lane): Promise<{ url: string } | { failure: string }>;
+  review(lane: Lane, options?: TurnOptions): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string; turns?: number; spent?: Money | null }>;
+  pullRequest(lane: Lane, options?: TurnOptions): Promise<{ url: string; turns?: number; spent?: Money | null } | { failure: string; turns?: number; spent?: Money | null }>;
   stop(lane: Lane): Promise<void>;
+  /** Release any whole-run workspace leases held by the shell adapter. */
+  release?(): Promise<void>;
   /** Persist and push, once per change. */
   changed(run: Run): void;
   now(): number;
@@ -228,7 +230,14 @@ async function endIt(m: Machine): Promise<void> {
   const going = m.run.lanes.filter((lane) =>
     Object.values(m.run.blocks).some((one) => one.lane === lane.id && one.state === 'running'),
   );
-  for (const lane of going) await m.port.stop(lane);
+  for (const lane of going) {
+    try {
+      await m.port.stop(lane);
+    } catch {
+      // The run is already failing; a cleanup refusal must not leave its state
+      // as an unhandled rejected promise.
+    }
+  }
 }
 
 /** The lane, opened if it has no conversation yet. A lane that already has one is
@@ -327,25 +336,28 @@ async function checks(m: Machine, block: Block, lane: Lane, options: TurnOptions
  *  turn and one more verdict; `needs-work` with none, and `do-not-land`, are
  *  failures. */
 async function review(m: Machine, block: Block, lane: Lane, options: TurnOptions): Promise<void> {
-  const first = await m.port.review(lane);
+  const first = await m.port.review(lane, options);
   if (abandoned(m)) return;
+  // The initial verdict is a model turn too, including a review that ships or
+  // is rejected without a repair round.
+  m.run.spent = spentTogether(m.run.spent, first.spent ?? null);
   if (first.verdict === 'ships') {
-    return succeed(m, block, lane.id, { result: first.line, said: first.line });
+    return succeed(m, block, lane.id, { result: first.line, said: first.line, turns: first.turns ?? 0, spent: first.spent ?? null });
   }
   if (first.verdict === 'do-not-land' || roundsLeft(block) <= 0) {
-    return broke(m, block, lane.id, first.line, { result: first.line, said: first.line });
+    return broke(m, block, lane.id, first.line, { result: first.line, said: first.line, turns: first.turns ?? 0, spent: first.spent ?? null });
   }
   const settled = await tookTurn(m, block, lane, runnerWords.reviewing(first.line), options);
   if (settled === null) return;
   put(m, block, lane.id, { turns: settled.turns, spent: settled.spent, rounds: 1 });
   m.port.changed(snapshot(m.run));
-  const again = await m.port.review(lane);
+  const again = await m.port.review(lane, options);
   if (abandoned(m)) return;
   const over: Partial<BlockRun> = {
     result: again.line,
     said: again.line,
-    turns: settled.turns,
-    spent: settled.spent,
+    turns: (first.turns ?? 0) + settled.turns + (again.turns ?? 0),
+    spent: spentTogether(spentTogether(first.spent ?? null, settled.spent), again.spent ?? null),
     rounds: 1,
   };
   if (again.verdict === 'ships') return succeed(m, block, lane.id, over);
@@ -353,18 +365,33 @@ async function review(m: Machine, block: Block, lane: Lane, options: TurnOptions
 }
 
 async function pull(m: Machine, block: Block, lane: Lane): Promise<void> {
-  const asked = await m.port.pullRequest(lane);
+  const asked = await m.port.pullRequest(lane, {
+    model: block.model ?? m.flow.model ?? null,
+    thinking: block.thinking ?? m.flow.thinking ?? null,
+    lookFirst: false,
+    attachments: block.attachments,
+    howFar: m.flow.howFar,
+  });
   if (abandoned(m)) return;
-  if ('url' in asked) return succeed(m, block, lane.id, { result: asked.url, said: asked.url });
-  return broke(m, block, lane.id, asked.failure);
+  m.run.spent = spentTogether(m.run.spent, asked.spent ?? null);
+  if ('url' in asked) return succeed(m, block, lane.id, {
+    result: asked.url,
+    said: asked.url,
+    turns: asked.turns ?? 0,
+    spent: asked.spent ?? null,
+  });
+  return broke(m, block, lane.id, asked.failure, {
+    turns: asked.turns ?? 0,
+    spent: asked.spent ?? null,
+  });
 }
 
 /** One block, run to the end of its kind. What it comes to is written as it goes,
  *  so a card is never further behind than the turn is. */
 async function oneBlock(m: Machine, block: Block, lane: Lane): Promise<void> {
   const options: TurnOptions = {
-    model: block.model,
-    thinking: block.thinking,
+    model: block.model ?? m.flow.model ?? null,
+    thinking: block.thinking ?? m.flow.thinking ?? null,
     // A plan block is the one that must not touch anything, whatever the panel
     // was left on.
     lookFirst: block.kind === 'plan' || block.lookFirst,
@@ -402,12 +429,20 @@ async function oneLane(m: Machine, id: string, blocks: readonly Block[]): Promis
     try {
       lane = await opened(m, id);
     } catch (cause) {
+      if (abandoned(m)) return;
       broke(m, block, id, runnerWords.noLane(cause instanceof Error ? cause.message : String(cause)));
       await endIt(m);
       return;
     }
     if (abandoned(m)) return;
-    await oneBlock(m, block, lane);
+    try {
+      await oneBlock(m, block, lane);
+    } catch (cause) {
+      if (abandoned(m)) return;
+      broke(m, block, id, cause instanceof Error ? cause.message : String(cause));
+      await endIt(m);
+      return;
+    }
     if (abandoned(m) || m.gate !== null) return;
     if (m.run.blocks[block.id]?.state === 'failed') {
       await endIt(m);
@@ -570,7 +605,13 @@ export async function stopped(flow: Flow, run: Run, port: RunnerPort): Promise<R
     const going = Object.values(run.blocks).some(
       (one) => one.lane === lane.id && one.state === 'running',
     );
-    if (going) await port.stop(lane);
+    if (going) {
+      try {
+        await port.stop(lane);
+      } catch {
+        // Stopping is best effort; the persisted run still becomes stopped.
+      }
+    }
   }
   const over = givenUpAs(flow, run, port.now());
   port.changed(over);

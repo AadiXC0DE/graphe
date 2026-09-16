@@ -421,35 +421,72 @@ export function readMarker(text: string): MigrationMarker | null {
   if (counts === null || typeof counts !== 'object' || Array.isArray(counts)) return null;
   const verdicts = counts as Record<string, unknown>;
   /* Rows are counted whichever shape they were written in. The shell writes
-     these two lists out whole, so somebody recovering can see which chat and
-     why; a list of ids reads the same. */
-  const named = (value: unknown): readonly string[] =>
-    Array.isArray(value)
-      ? value.flatMap((one) => {
-          if (typeof one === 'string') return [one];
-          if (one === null || typeof one !== 'object') return [];
-          const row = one as Record<string, unknown>;
-          const id = row['conversationId'] ?? row['address'];
-          return typeof id === 'string' ? [id] : [];
-        })
-      : [];
+     these lists out whole, so a truncated marker must be rejected rather than
+     mistaken for a completed migration. */
+  const named = (value: unknown): readonly string[] | null => {
+    if (!Array.isArray(value)) return null;
+    const ids: string[] = [];
+    for (const one of value) {
+      if (typeof one === 'string' && one !== '') {
+        ids.push(one);
+        continue;
+      }
+      if (one !== null && typeof one === 'object') {
+        const row = one as Record<string, unknown>;
+        const id = row['conversationId'] ?? row['address'];
+        if (typeof id === 'string' && id !== '') {
+          ids.push(id);
+          continue;
+        }
+      }
+      return null;
+    }
+    return ids;
+  };
+  const workspaces = named(one['workspaces']);
+  const conversations = named(one['conversations']);
+  const unlinked = named(one['unlinked']);
+  const quarantined = named(one['quarantined']);
+  if (workspaces === null || conversations === null || unlinked === null || quarantined === null) {
+    return null;
+  }
+  const sources = one['sources'];
+  if (typeof sources !== 'number' || !Number.isInteger(sources) || sources < 0) return null;
+  const verified = verdicts['verified'];
+  const missing = verdicts['missing'];
+  const gone = verdicts['gone'];
+  const foreign = verdicts['foreign'];
+  const countsAreWhole = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0;
+  if (
+    !countsAreWhole(verified) ||
+    !countsAreWhole(missing) ||
+    !countsAreWhole(gone) ||
+    !countsAreWhole(foreign) ||
+    verified + missing + gone + foreign + quarantined.length !== sources
+  ) {
+    return null;
+  }
+  const backupsValue = one['backups'];
+  const backups = backupsValue === undefined ? null : named(backupsValue);
+  if (backupsValue !== undefined && backups === null) return null;
   return {
     version: MIGRATION_VERSION,
     completedAt,
-    sources: typeof one['sources'] === 'number' ? one['sources'] : 0,
+    sources,
     verdicts: {
-      verified: typeof verdicts['verified'] === 'number' ? verdicts['verified'] : 0,
-      missing: typeof verdicts['missing'] === 'number' ? verdicts['missing'] : 0,
-      gone: typeof verdicts['gone'] === 'number' ? verdicts['gone'] : 0,
-      foreign: typeof verdicts['foreign'] === 'number' ? verdicts['foreign'] : 0,
+      verified,
+      missing,
+      gone,
+      foreign,
     },
-    workspaces: named(one['workspaces']),
-    conversations: named(one['conversations']),
-    unlinked: named(one['unlinked']),
-    quarantined: named(one['quarantined']),
+    workspaces,
+    conversations,
+    unlinked,
+    quarantined,
     // Absent is not empty: an older record named no copies, which is a
     // different claim from one that kept none.
-    backups: Array.isArray(one['backups']) ? named(one['backups']) : null,
+    backups,
   };
 }
 

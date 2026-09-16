@@ -177,6 +177,30 @@ describe('landing squashes by default', () => {
     }
   });
 
+  it('reports a merged change separately when checkout cleanup fails', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'cleanup-fails', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'merged before cleanup\n');
+      await raw(made.value.folder, 'commit', '-am', 'conversation work');
+
+      const refusingBranchDelete: RunGit = async (args, options) => {
+        if (args[0] === 'branch' && args[1] === '-D') return { code: 1, out: 'permission denied' };
+        return git()(args, options);
+      };
+      const landed = await landWorktree(refusingBranchDelete, repo, made.value.folder);
+      expect(landed).toEqual({ ok: false, because: worktreeWords.landedButCleanupFailed });
+      expect((await raw(repo, 'show', 'HEAD:a.txt')).trim()).toBe('merged before cleanup');
+      expect((await raw(repo, 'branch', '--list', 'graphe/cleanup-fails')).trim()).toContain(
+        'graphe/cleanup-fails',
+      );
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('puts the project back when both sides changed the same lines', async () => {
     const repo = await freshRepo();
     try {

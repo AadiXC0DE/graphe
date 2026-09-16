@@ -742,6 +742,29 @@ export function viewInPane(index: WorkspaceIndex, pane: 0 | 1): ViewRecord | nul
   return null;
 }
 
+/** Whether a view belongs to the project that owns its conversation. Views are
+ *  stored in one profile-wide index, but pane numbers are local to each open
+ *  project window; callers must not let one project's panes replace another's.
+ */
+export function viewInProject(
+  index: WorkspaceIndex,
+  view: ViewRecord,
+  projectId: string,
+): boolean {
+  return index.conversations[view.conversation]?.projectId === projectId;
+}
+
+/** The view in one pane of one project. */
+export function viewInPaneForProject(
+  index: WorkspaceIndex,
+  pane: 0 | 1,
+  projectId: string,
+): ViewRecord | null {
+  return Object.values(index.views).find(
+    (view) => view.pane === pane && viewInProject(index, view, projectId),
+  ) ?? null;
+}
+
 /**
  * Write down that a view is showing a conversation in a pane.
  *
@@ -770,6 +793,41 @@ export function noteView(
   const views: Record<string, ViewRecord> = {};
   for (const [id, view] of Object.entries(index.views)) {
     if (id !== wanted.viewId && view.pane !== wanted.pane) views[id] = view;
+  }
+  const view: ViewRecord = { ...wanted };
+  views[wanted.viewId] = view;
+  return { index: { ...index, views }, view, made: true };
+}
+
+/** Write a view without touching another project's panes. The profile index is
+ *  shared by all projects, while pane 0/1 are window-local. A foreign view id
+ *  is refused rather than overwritten, and a foreign conversation is never
+ *  accepted from the wire. */
+export function noteViewForProject(
+  index: WorkspaceIndex,
+  wanted: { viewId: string; conversation: string; pane: 0 | 1 },
+  projectId: string,
+): { index: WorkspaceIndex; view: ViewRecord | null; made: boolean } {
+  if (!viewInProject(index, { ...wanted }, projectId)) {
+    return { index, view: null, made: false };
+  }
+  const known = index.views[wanted.viewId];
+  if (known !== undefined && !viewInProject(index, known, projectId)) {
+    return { index, view: null, made: false };
+  }
+  if (
+    known !== undefined &&
+    known.conversation === wanted.conversation &&
+    known.pane === wanted.pane
+  ) {
+    return { index, view: known, made: false };
+  }
+  const views: Record<string, ViewRecord> = {};
+  for (const [id, view] of Object.entries(index.views)) {
+    if (viewInProject(index, view, projectId) && (id === wanted.viewId || view.pane === wanted.pane)) {
+      continue;
+    }
+    views[id] = view;
   }
   const view: ViewRecord = { ...wanted };
   views[wanted.viewId] = view;

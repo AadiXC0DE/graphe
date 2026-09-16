@@ -1,7 +1,7 @@
 /** A project's flows, on a real disk.
  *
  * Three things this file is about, and each of them is a way a drawing gets lost
- * rather than a way it is read: a corrupt file must read as no flows at all, the
+ * rather than a way it is read: a corrupt file must be refused without overwrite, the
  * file an earlier version wrote must be imported exactly once, and an empty list
  * must be the file gone rather than a file holding `[]` that the next read
  * prefers over the old one.
@@ -15,8 +15,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { FlowFile } from '../src/projects/flows';
-import { change, newFlow, place, type Flow } from '../src/work/canvas';
+import { FlowFile, FlowFileUnreadable } from '../src/projects/flows';
+import { change, newFlow, place, readFlowStrict, type Flow } from '../src/work/canvas';
 
 const made: string[] = [];
 
@@ -102,14 +102,14 @@ describe('a flow written and read back', () => {
 });
 
 describe('a file that will not parse', () => {
-  it('is a project with no flows rather than a screen with an error on it', async () => {
+  it('is refused without overwriting the damaged bytes', async () => {
     const userData = await profile();
     await putBytes(FlowFile.pathFor('project-1', userData), '{ not json at all');
 
-    expect(await FlowFile.read('project-1', userData)).toEqual([]);
+    await expect(FlowFile.read('project-1', userData)).rejects.toBeInstanceOf(FlowFileUnreadable);
   });
 
-  it('is no flows whether it holds an object, a string or nothing', async () => {
+  it('refuses an object, string, null or empty file as unreadable', async () => {
     const userData = await profile();
     for (const [id, held] of [
       ['object', '{"id":"flow-1"}'],
@@ -118,19 +118,70 @@ describe('a file that will not parse', () => {
       ['empty', ''],
     ] as const) {
       await putBytes(FlowFile.pathFor(id, userData), held);
-      expect(await FlowFile.read(id, userData), id).toEqual([]);
+      await expect(FlowFile.read(id, userData), id).rejects.toBeInstanceOf(FlowFileUnreadable);
     }
   });
 
-  it('drops one unreadable flow rather than the whole file', async () => {
+  it('leaves corrupt bytes untouched for recovery', async () => {
+    const userData = await profile();
+    const file = FlowFile.pathFor('damaged', userData);
+    const bytes = '{ not json at all';
+    await putBytes(file, bytes);
+
+    await expect(FlowFile.read('damaged', userData)).rejects.toBeInstanceOf(FlowFileUnreadable);
+    expect(await readFile(file, 'utf8')).toBe(bytes);
+  });
+
+  it('refuses a partially unreadable flow array rather than rewriting the remainder', async () => {
     const userData = await profile();
     const good = place({ ...newFlow(), name: 'Good' }, 'ask');
     await putBytes(FlowFile.pathFor('project-1', userData), JSON.stringify([{ nonsense: true }, good]));
 
-    const read = await FlowFile.read('project-1', userData);
+    await expect(FlowFile.read('project-1', userData)).rejects.toBeInstanceOf(FlowFileUnreadable);
+  });
 
-    expect(read.length).toBe(1);
-    expect(read[0]?.name).toBe('Good');
+  it('refuses duplicate flow ids rather than choosing one silently', async () => {
+    const userData = await profile();
+    const first = place({ ...newFlow(), name: 'First' }, 'ask');
+    const second = { ...place({ ...newFlow(), name: 'Second' }, 'ask'), id: first.id };
+    await putBytes(FlowFile.pathFor('project-1', userData), JSON.stringify([first, second]));
+
+    await expect(FlowFile.read('project-1', userData)).rejects.toBeInstanceOf(FlowFileUnreadable);
+  });
+
+  it('does not treat an existing unreadable path as an absent file', async () => {
+    const userData = await profile();
+    await mkdir(FlowFile.pathFor('directory', userData), { recursive: true });
+
+    await expect(FlowFile.read('directory', userData)).rejects.toBeInstanceOf(FlowFileUnreadable);
+  });
+
+  it('serializes concurrent changes to one project document', async () => {
+    const userData = await profile();
+    const first = place({ ...newFlow(), name: 'First' }, 'ask');
+    const second = place({ ...newFlow(), name: 'Second' }, 'ask');
+    await FlowFile.write('project-1', userData, [first]);
+
+    await Promise.all([
+      FlowFile.transact('project-1', userData, null, (flows) => [...flows, second]),
+      FlowFile.transact('project-1', userData, null, (flows) => flows.map((flow) =>
+        flow.id === first.id ? { ...flow, name: 'Renamed' } : flow,
+      )),
+    ]);
+
+    const read = await FlowFile.read('project-1', userData);
+    expect(read.map((flow) => flow.name)).toEqual(['Renamed', 'Second']);
+  });
+});
+
+describe('renderer flow validation', () => {
+  it('rejects malformed blocks and edges instead of repairing them', () => {
+    const flow = place(newFlow(), 'ask');
+    expect(readFlowStrict(flow)).toEqual(flow);
+    expect(readFlowStrict({ ...flow, blocks: [{ ...flow.blocks[0]!, after: ['missing'] }] })).toBeNull();
+    expect(readFlowStrict({ ...flow, blocks: [{ ...flow.blocks[0]!, kind: 'not-a-block' }] })).toBeNull();
+    expect(readFlowStrict({ ...flow, howFar: undefined })).toBeNull();
+    expect(readFlowStrict({ ...flow, lanes: undefined })).toBeNull();
   });
 });
 

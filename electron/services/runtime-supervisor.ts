@@ -91,6 +91,10 @@ const READY_PATIENCE_MS = 30_000;
  *  this exists so a signal that never lands cannot hold up a project closing. */
 const STOP_GRACE_MS = 3_000;
 
+/** A command that receives no response must not hold a session forever while
+ * the child process remains alive. */
+const COMMAND_PATIENCE_MS = 120_000;
+
 /** How much of a child's own output is kept for a log line. */
 const SAID_MOST = 4_000;
 
@@ -244,7 +248,14 @@ export class ChildRuntimes {
     for (const spare of this.#quietestFirst()) {
       if (this.#held.size < this.ceiling) return;
       this.#held.delete(spare.token);
-      if (!(await spare.child.unload())) this.#held.set(spare.token, spare.child);
+      try {
+        if (!(await spare.child.unload())) this.#held.set(spare.token, spare.child);
+      } catch {
+        // A failed unload did not prove that the process went away. Restore its
+        // token before admitting another child, or the ceiling would silently
+        // stop counting a still-live runtime.
+        this.#held.set(spare.token, spare.child);
+      }
     }
   }
 
@@ -372,7 +383,9 @@ export type StartOptions = {
   /** An extension's question, put to the window and answered. Left out, every
    *  question is cancelled rather than answered — the same honest default the
    *  in-process path has. */
-  ask?: (ask: ExtensionAsk) => Promise<ExtensionAnswer>;
+  ask?: (ask: ExtensionAsk, requestId?: string) => Promise<ExtensionAnswer>;
+  /** Remove the matching host-side renderer request when this child dies. */
+  cancelAsk?: (requestId: string) => void;
   /** The child's own output, for the log. Never shown as a sentence. */
   onChatter?: (line: string) => void;
   /** An extension UI request this version does not know how to draw. Reported
@@ -586,7 +599,10 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
   const eventListeners = new Set<(event: Record<string, unknown>) => void>();
   const exitListeners = new Set<(how: ChildExit) => void>();
   /** Pi's own answers, by the id this side sent. */
-  const pending = new Map<string, (answer: Record<string, unknown>) => void>();
+  const pending = new Map<
+    string,
+    { resolve: (answer: Record<string, unknown>) => void; timer: NodeJS.Timeout }
+  >();
   /** The one question the child is holding. Answered once. */
   let judging: { id: string; call: ToolCall } | null = null;
   let chatter = '';
@@ -601,6 +617,9 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
 
   /** Question ids the child is holding answers for, oldest first. */
   const openAsks = new Set<string>();
+  /** Local cancellation gates so a dead child never leaves routeUi awaiting a
+   * window promise forever. The host may also cancel its own UI registry. */
+  const cancelAsks = new Map<string, () => void>();
 
   const tellEveryone = (how: ChildExit): void => {
     if (finished !== null) return;
@@ -624,8 +643,17 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       writeToChild(answers, asVerdict({ type: 'verdict', id: judging.id, block: true, reason: CANCELLED_REASON }, nonce));
       judging = null;
     }
-    for (const settle of pending.values()) settle({ type: 'response', success: false, error: 'the runtime ended' });
+    for (const settle of pending.values()) {
+      clearTimeout(settle.timer);
+      // Resolve with the protocol's ordinary failed-response shape. Some
+      // callers intentionally fire-and-forget (for example abort), so rejecting
+      // here would create an unhandled rejection while still doing the right
+      // thing for callers that inspect `success`.
+      settle.resolve({ type: 'response', success: false, error: 'the runtime ended' });
+    }
     pending.clear();
+    for (const cancel of cancelAsks.values()) cancel();
+    cancelAsks.clear();
   };
 
   const onChildLine = (line: string): void => {
@@ -660,7 +688,8 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       const settle = pending.get(id);
       if (settle !== undefined) {
         pending.delete(id);
-        settle(event);
+        clearTimeout(settle.timer);
+        settle.resolve(event);
         return;
       }
     }
@@ -709,7 +738,20 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       return;
     }
     openAsks.add(request.id);
-    const answer = options.ask === undefined ? cancelled(ask) : await options.ask(ask).catch(() => cancelled(ask));
+    const gate = Promise.withResolvers<ExtensionAnswer>();
+    const hostId = `${nonce}:${request.id}`;
+    cancelAsks.set(request.id, () => {
+      options.cancelAsk?.(hostId);
+      gate.resolve(cancelled(ask));
+    });
+    let answerPromise: Promise<ExtensionAnswer>;
+    try {
+      answerPromise = Promise.resolve(options.ask?.(ask, hostId) ?? cancelled(ask)).catch(() => cancelled(ask));
+    } catch {
+      answerPromise = Promise.resolve(cancelled(ask));
+    }
+    const answer = await Promise.race([answerPromise, gate.promise]);
+    cancelAsks.delete(request.id);
     openAsks.delete(request.id);
     if (finished !== null) return;
     writeToChild(child.stdin, asRecord({ type: 'extension_ui_response', ...responseFor(request, answer) }));
@@ -810,7 +852,18 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       answered += 1;
       const id = `graphe-${String(answered)}`;
       const done = Promise.withResolvers<Record<string, unknown>>();
-      pending.set(id, done.resolve);
+      const timer = setTimeout(() => {
+        const held = pending.get(id);
+        if (held === undefined) return;
+        pending.delete(id);
+        held.resolve({
+          type: 'response',
+          success: false,
+          error: 'the runtime did not answer that command in time',
+        });
+      }, COMMAND_PATIENCE_MS);
+      timer.unref?.();
+      pending.set(id, { resolve: done.resolve, timer });
       writeToChild(child.stdin, asRecord({ id, ...command }));
       return done.promise;
     },
@@ -832,12 +885,31 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
     async stop(): Promise<void> {
       if (finished !== null) return;
       stopping = true;
-      child.kill('SIGTERM');
       const gone = Promise.withResolvers<void>();
-      const once = (): void => gone.resolve();
+      let heardExit = false;
+      const once = (): void => {
+        if (heardExit) return;
+        heardExit = true;
+        gone.resolve();
+      };
+      // Install the waiter before signalling. A fast child can exit in the
+      // same turn as SIGTERM; registering afterward leaves stop hung forever.
       child.once('exit', once);
+      if (child.exitCode !== null || child.signalCode !== null) once();
+      else {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // The exit listener and the force-kill fallback below still get a
+          // chance to finalize a process that vanished between the checks.
+        }
+      }
       const grace = setTimeout(() => {
-        child.kill('SIGKILL');
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already gone; the exit listener will settle `gone`.
+        }
       }, STOP_GRACE_MS);
       (grace as unknown as { unref?: () => void }).unref?.();
       await gone.promise;

@@ -28,6 +28,8 @@ class FakeChild implements Evictable {
   readonly unloads: number[] = [];
   /** What `unload` answers. False stands for a child that would not stop. */
   letsGo = true;
+  /** A rejected unload is not evidence that the process disappeared. */
+  rejects = false;
   private readonly when: number | null;
   private readonly doing: boolean;
 
@@ -46,6 +48,7 @@ class FakeChild implements Evictable {
 
   unload(): Promise<boolean> {
     this.unloads.push(Date.now());
+    if (this.rejects) return Promise.reject(new Error('unload failed'));
     return Promise.resolve(this.letsGo);
   }
 }
@@ -133,6 +136,22 @@ describe('the ceiling', () => {
     expect(stubborn.unloads).toHaveLength(1);
     expect(other.unloads).toHaveLength(1);
     // Still holding the one that would not stop, because it is really alive.
+    expect(runtimes.count).toBe(1);
+  });
+
+  it('keeps counting a child when unload rejects', async () => {
+    const { runtimes } = registryAt();
+    const rejected = new FakeChild({ at: 1 });
+    rejected.rejects = true;
+    runtimes.register(rejected);
+    const other = new FakeChild({ at: 2 });
+    runtimes.register(other);
+
+    await runtimes.makeRoom();
+    expect(rejected.unloads).toHaveLength(1);
+    expect(other.unloads).toHaveLength(1);
+    // A rejected stop attempt leaves the child alive and counted, just like a
+    // truthful `false` result; only the other child was evicted.
     expect(runtimes.count).toBe(1);
   });
 

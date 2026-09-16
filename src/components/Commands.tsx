@@ -55,6 +55,7 @@ type Props = {
    *  never mixed — one is a shell nobody is watching and the other is the
    *  Guard's account of the agent — so the switch swaps the whole body. */
   terminal?: {
+    conversation?: string | null;
     /** The folder the shell opens in. */
     workspace: string | null;
     /** Whether the terminal is the pane being shown. */
@@ -252,6 +253,7 @@ export default function Commands(props: Props) {
       {terminal !== undefined && terminal.open ? (
         <TerminalPane
           workspace={terminal.workspace}
+          conversation={terminal.conversation}
           open
           onClose={() => terminal.onOpen(false)}
         />

@@ -258,6 +258,21 @@ describe('a chain of two asks', () => {
     expect(port.turns()[0]?.options.howFar).toBe(flow.howFar);
   });
 
+  it('uses flow model and thinking defaults when a block leaves them unset', async () => {
+    const base = chained('ask');
+    const flow = {
+      ...base,
+      model: { providerId: 'openai', modelId: 'gpt-test' },
+      thinking: 'high' as const,
+    };
+    const port = new FakePort();
+
+    await drive(flow, begun(flow), port);
+
+    expect(port.turns()[0]?.options.model).toEqual({ providerId: 'openai', modelId: 'gpt-test' });
+    expect(port.turns()[0]?.options.thinking).toBe('high');
+  });
+
   it('adds what every turn cost to the run’s own', async () => {
     const flow = chained('ask', 'ask');
     const [first, second] = flow.blocks;

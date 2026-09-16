@@ -183,6 +183,7 @@ export async function scriptedModel(): Promise<ScriptedModel> {
   await listening.promise;
   const address = server.address() as AddressInfo | null;
   if (address === null) throw new Error('the scripted model has no port');
+  let stoppingServer: Promise<void> | null = null;
 
   return {
     url: `http://127.0.0.1:${String(address.port)}`,
@@ -196,14 +197,31 @@ export async function scriptedModel(): Promise<ScriptedModel> {
     asked,
     cutOff: () => cut,
     stop: () => {
+      if (stoppingServer !== null) return stoppingServer;
       // A reply still held at a gate keeps its connection open, so releasing
       // it and refusing the next are what let the server close at all.
       stopped = true;
       release?.();
       release = null;
-      const closed = Promise.withResolvers<void>();
-      server.close(() => closed.resolve());
-      return closed.promise;
+      stoppingServer = new Promise<void>((resolve) => {
+        // Abort keep-alive/streaming sockets immediately. Otherwise a model
+        // stop in a test's finally block can wait forever on a client that is
+        // no longer being observed.
+        server.closeAllConnections();
+        server.closeIdleConnections?.();
+        try {
+          server.close((error) => {
+            if (error !== undefined && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
+              console.error(`[electron-smoke] scripted model close failed: ${String(error)}`);
+            }
+            resolve();
+          });
+        } catch (cause) {
+          console.error(`[electron-smoke] scripted model close failed: ${String(cause)}`);
+          resolve();
+        }
+      });
+      return stoppingServer;
     },
   };
 }

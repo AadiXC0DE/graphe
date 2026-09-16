@@ -35,9 +35,27 @@
  */
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 import type { Money } from '../agent/types';
+
+/** Compare aliases without changing the path displayed to the person. Resolve
+ * the nearest surviving ancestor too, so a deleted /var folder still matches
+ * the same remembered /private/var folder on macOS. */
+function identity(path: string): string {
+  let at = resolve(path);
+  const tail: string[] = [];
+  for (;;) {
+    try { return join(realpathSync(at), ...tail); }
+    catch {
+      const parent = dirname(at);
+      if (parent === at) return resolve(path);
+      tail.unshift(basename(at));
+      at = parent;
+    }
+  }
+}
 
 /** One project, as the picker shows it. */
 export type RememberedProject = {
@@ -133,7 +151,8 @@ export class Recents {
    *  reopens a project would make the number worse than useless. */
   async remember(project: { path: string; name?: string }, at = Date.now()): Promise<void> {
     const path = resolve(project.path);
-    const known = this.#projects.find((one) => one.path === path);
+    const target = identity(path);
+    const known = this.#projects.find((one) => identity(one.path) === target);
 
     const entry: RememberedProject = {
       path,
@@ -142,7 +161,7 @@ export class Recents {
       lastSpend: known?.lastSpend ?? null,
     };
 
-    this.#projects = [entry, ...this.#projects.filter((one) => one.path !== path)].slice(
+    this.#projects = [entry, ...this.#projects.filter((one) => identity(one.path) !== target)].slice(
       0,
       MOST_REMEMBERED,
     );
@@ -153,10 +172,10 @@ export class Recents {
    *  heard of — spend without a visit cannot happen, and inventing the entry
    *  would put a project in the list that nobody opened. */
   async recordSpend(path: string, spent: Money | null): Promise<void> {
-    const target = resolve(path);
+    const target = identity(path);
     let changed = false;
     this.#projects = this.#projects.map((one) => {
-      if (one.path !== target) return one;
+      if (identity(one.path) !== target) return one;
       changed = true;
       return { ...one, lastSpend: spent };
     });
@@ -167,9 +186,9 @@ export class Recents {
    *  answer to "I cannot find that folder any more", and a feature that deleted
    *  something in response to that sentence would be a catastrophe. */
   async forget(path: string): Promise<void> {
-    const target = resolve(path);
+    const target = identity(path);
     const before = this.#projects.length;
-    this.#projects = this.#projects.filter((one) => one.path !== target);
+    this.#projects = this.#projects.filter((one) => identity(one.path) !== target);
     if (this.#projects.length !== before) await this.#write();
   }
 
@@ -195,8 +214,8 @@ export class Recents {
     const kept: RememberedProject[] = [];
     for (const candidate of projects) {
       const project = asProject(candidate);
-      if (project === null || seen.has(project.path)) continue;
-      seen.add(project.path);
+      if (project === null || seen.has(identity(project.path))) continue;
+      seen.add(identity(project.path));
       kept.push(project);
     }
     this.#projects = kept.sort(newestFirst).slice(0, MOST_REMEMBERED);

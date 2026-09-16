@@ -991,6 +991,8 @@ export type CreateSessionOptions = {
    * though somebody agreed is the failure this exists to prevent.
    */
   ask?: AskTheWindow;
+  /** Cancel one outstanding add-on dialog when its child runtime exits. */
+  cancelAsk?: (requestId: string) => void;
   /**
    * Graphe's own standing block, asked for at the top of every model call.
    *
@@ -1493,6 +1495,13 @@ let shipped = true;
 /** Said once by the shell, at whatever it knows `app.isPackaged` to be. */
 export function notePackagedApp(packaged: boolean): void {
   shipped = packaged;
+}
+
+/** Whether the shell said this copy is a packaged app. Kept read-only so the
+ * child-runtime switch cannot mistake an inherited test environment for a
+ * product opt-in. */
+export function isPackagedApp(): boolean {
+  return shipped;
 }
 
 /**

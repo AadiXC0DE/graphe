@@ -10,7 +10,7 @@ import WorkingMark from "./components/WorkingMark";
 import ProjectPicker from "./components/ProjectPicker";
 import { ATTACH_WORDS, pictureType, readsPictures } from "./lib/attachments";
 import type { Answers } from "./agent/asking";
-import { PLAN_WORDS, decidedMessage, type PlanDecision } from "./agent/plan";
+import { PLAN_WORDS, decidedMessage, mayApproveWithoutAsking, type PlanDecision } from "./agent/plan";
 import { NOTHING_WATCHED, watching, type Watched } from "./preview/watching";
 import { liveFrames } from "./preview/live";
 import { whenHidden } from "./lib/onscreen";
@@ -105,7 +105,8 @@ import { bridge } from "./lib/bridge";
 import { isAdvisor } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
 import { durationInWords } from "./lib/when";
-import { heldWrites } from "./lib/heldwrites";
+import { CanvasWrites, canvasWriteKey } from "./lib/canvas-writes";
+import { canvasDrafts, clearCanvasDraft, keepCanvasDraft } from "./lib/canvas-drafts";
 import {
   showWords,
   swapWords,
@@ -197,15 +198,12 @@ import {
   focusPane,
   focusedConversation,
   focusedPane,
-  inspectorPane,
-  isPinned,
   onePane,
   paneAt,
   panesFrom,
-  pin,
-  pinnedWords,
   showIn,
   shownNow,
+  withoutConversation,
   type Panes,
   type ViewId,
 } from "./domain/views";
@@ -334,7 +332,7 @@ function arriving(holding: string) {
 
 /** The same rectangle, over the screen being left rather than under the one
  *  arriving. */
-const COVER = <div className="sheet sheet--arriving sheet--cover" aria-hidden="true" />;
+const COVER = <div className="sheet sheet--arriving sheet--cover" role="status" aria-busy="true" aria-label="Loading view" />;
 
 /** /?gallery renders every component on one page instead of the app, so the UI
  *  can be screenshotted and reviewed in both themes. Read once, at module load. */
@@ -571,6 +569,7 @@ function Conversation() {
    * another pane does not create a session".
    */
   const [panes, setPanes] = useState<Panes>(() => onePane());
+  const [viewsRestored, setViewsRestored] = useState<string | null>(null);
   /* The conversation this window's controls act on. With one pane it is the
      desk's, which is why the ordinary case does not change shape at all. */
   const aimedAt = focusedConversation(panes);
@@ -1381,8 +1380,15 @@ function Conversation() {
      like a conversation is: only one thing is in front at a time, and the row
      above says which. */
   const [flows, setFlows] = useState<readonly Flow[]>([]);
+  const [flowProject, setFlowProject] = useState<string | null>(null);
+  const [openCanvases, setOpenCanvases] = useState<readonly string[]>([]);
+  const flowRevision = useRef(new Map<string, number>());
+  const flowActions = useRef(new Map<string, number>());
+  const dirtyFlows = useRef(new Set<string>());
+  const deletingFlows = useRef(new Set<string>());
+  const removedFlows = useRef(new Set<string>());
   const flowsNow = useRef<readonly Flow[]>([]);
-  flowsNow.current = flows;
+  flowsNow.current = flowProject === openProject ? flows : [];
   const [canvasAt, setCanvasAt] = useState<string | null>(null);
   const canvasNow = useRef<string | null>(null);
   canvasNow.current = canvasAt;
@@ -1559,7 +1565,7 @@ function Conversation() {
 
   /** The project's own page beside the conversation, and everything the window
    *  can say about it. See src/hooks/usePreview.ts. */
-  const preview = usePreview({ desksNow });
+  const preview = usePreview({ desksNow, project: openProject, conversation: desk?.address });
   const {
     pane,
     paneNow,
@@ -1907,17 +1913,34 @@ function Conversation() {
          and the one the other pane was showing when there was one. Asked after
          the desk is open, because the answer is only useful against the
          conversations this project actually has. */
-      void bridge.viewsLook({ project: opened.value.path }).then((answer) => {
+      setPanes(onePane(opened.value.address ?? null));
+      setViewsRestored(null);
+      void bridge.viewsLook({ project: opened.value.path }).then(async (answer) => {
         if (request !== navigation.current || !answer.ok) return;
         const held = currentDesk(desksNow.current);
         if (held === null || held.path !== opened.value.path) return;
+        const known = new Set(Object.keys(held.conversations));
+        for (const view of answer.value) {
+          if (known.has(view.conversation)) continue;
+          const restored = await bridge.openConversation(view.conversation, null, null, { project: held.path });
+          if (request !== navigation.current || desksNow.current.current !== held.path) return;
+          if (!restored.ok) continue;
+          const address = restored.value.address ?? view.conversation;
+          known.add(address);
+          setDesks((current) => {
+            const front = current.byPath[held.path]?.address ?? null;
+            const loaded = showThread(current, held.path, address, { turns: foldEvents(restored.value.history) });
+            return showThread(loaded, held.path, front);
+          });
+        }
         setPanes((current) => {
-          const next = panesFrom(answer.value, Object.keys(held.conversations), held.address);
+          const next = panesFrom(answer.value, [...known], held.address);
           return next.open.length === current.open.length &&
             next.open.every((one, at) => one.conversation === current.open[at]?.conversation)
             ? current
             : next;
         });
+        setViewsRestored(opened.value.path);
       });
       refreshRoom({
         project: opened.value.path,
@@ -2001,7 +2024,15 @@ function Conversation() {
       setInConversation(opened.conversation);
       setOwnCopyHere(opened.ownCopy === true);
       setUnavailable(opened.unavailable ?? null);
-      setDesks((current) => showThread(current, opened.path, opened.address ?? null, { turns }));
+      setDesks((current) => {
+        const address = opened.address ?? null;
+        const held = conversationIn(current.byPath[opened.path], address);
+        // A refused send may exist only in memory. An empty disk snapshot must
+        // not erase the words or error the person is coming back to.
+        return showThread(current, opened.path, address, {
+          turns: turns.length === 0 && held.turns.length > 0 ? held.turns : turns,
+        });
+      });
       refreshRoom({
         project: opened.path,
         ...(opened.address == null ? {} : { conversation: opened.address }),
@@ -2037,11 +2068,15 @@ function Conversation() {
       setTokensHere(null);
       return;
     }
-    void bridge.tokensRead({ project }).then((answer) => {
-      if (desksNow.current.current !== project) return;
+    const conversation = desk?.address ?? null;
+    let live = true;
+    setTokensHere(null);
+    void bridge.tokensRead({ project, ...(conversation === null ? {} : { conversation }) }).then((answer) => {
+      if (!live || desksNow.current.current !== project) return;
       setTokensHere(answer.ok ? answer.value : null);
     });
-  }, [openProject]);
+    return () => { live = false; };
+  }, [openProject, desk?.address]);
 
   /** The canvas in front, or null when a conversation is. */
   const canvasHere = canvasAt === null ? null : flowsNow.current.find((one) => one.id === canvasAt) ?? null;
@@ -2109,16 +2144,25 @@ function Conversation() {
      nothing until Start: a canvas is a drawing, and the run is the shell's. */
   useEffect(() => {
     const project = openProject;
+    let live = true;
     setCanvasTrouble(null);
+    setCanvasAt(null);
+    setCanvasFull(false);
+    setOpenCanvases([]);
+    setFlows([]);
+    setFlowProject(project);
     if (project === null) {
-      setFlows([]);
-      setCanvasAt(null);
       return;
     }
+    const revision = flowRevision.current.get(project) ?? 0;
     void bridge.flowList({ project }).then((answer) => {
-      if (desksNow.current.current !== project) return;
-      setFlows(answer.ok ? answer.value : []);
+      if (!live || desksNow.current.current !== project) return;
+      if (!answer.ok) { setCanvasTrouble(answer.trouble.because); return; }
+      const existing = answer.value.filter((one) => !removedFlows.current.has(canvasWriteKey(project, one.id)));
+      setFlows((held) => (flowRevision.current.get(project) ?? 0) === revision
+        ? existing : held.reduce<readonly Flow[]>((all, flow) => withFlow(all, flow), existing));
     });
+    return () => { live = false; };
   }, [openProject]);
 
   /* Every run change the shell makes, folded in where it belongs. The shell
@@ -2128,33 +2172,60 @@ function Conversation() {
     () =>
       bridge.onFlow((notice) => {
         if (notice.project !== desksNow.current.current) return;
-        setFlows((held) => withFlow(held, notice.flow));
+        const key = canvasWriteKey(notice.project, notice.flow.id);
+        if (deletingFlows.current.has(key) || removedFlows.current.has(key)) return;
+        setFlows((held) => {
+          const local = held.find((one) => one.id === notice.flow.id);
+          return withFlow(held, dirtyFlows.current.has(key) && local !== undefined
+            ? { ...local, runs: notice.flow.runs } : notice.flow);
+        });
       }),
     [],
   );
 
   /* On screen at once, on disk a moment later. A canvas is edited a keystroke at
      a time and a file per keystroke is a file written for nothing. */
-  const savingFlows = useRef(heldWrites());
-  /** The write in flight, so Start can wait for it. A canvas draws a keystroke
-   *  at a time and its file is written a moment later; the run reads that file,
-   *  so a press in the same breath as the last word has to let it land. */
-  const lastSave = useRef<Promise<unknown>>(Promise.resolve());
-  useEffect(() => () => savingFlows.current.now(), []);
-
-  const changeFlow = useCallback((next: Flow) => {
-    setFlows((held) => withFlow(held, next));
-    const path = desksNow.current.current;
-    if (path === null) return;
-    const send = (): void => {
-      lastSave.current = bridge.flowSave(next, { project: path }).then((answer) => {
-        // What the shell kept, runs included, is what the canvas draws: the
-        // drawing is the window's, and the record of what ran is not.
-        if (answer.ok) setFlows((held) => withFlow(held, answer.value));
-      });
-    };
-    savingFlows.current.soon(next.id, send);
+  const savingFlows = useRef(new CanvasWrites());
+  useEffect(() => {
+    const flush = () => { void savingFlows.current.flush().catch(() => undefined); };
+    window.addEventListener('beforeunload', flush);
+    return () => { window.removeEventListener('beforeunload', flush); flush(); };
   }, []);
+
+  const changeFlow = useCallback((next: Flow, project?: string) => {
+    const path = project ?? desksNow.current.current;
+    if (path === null) return;
+    const key = canvasWriteKey(path, next.id);
+    if (deletingFlows.current.has(key)) return;
+    const run = latestRun(next);
+    if (run?.state === 'running' || run?.state === 'needs-you') return;
+    dirtyFlows.current.add(key);
+    try { keepCanvasDraft(localStorage, path, next); }
+    catch { setCanvasTrouble('The recovery copy could not be saved. Keep this window open until the canvas is saved.'); }
+    const revision = (flowRevision.current.get(key) ?? 0) + 1;
+    flowRevision.current.set(key, revision);
+    flowRevision.current.set(path, (flowRevision.current.get(path) ?? 0) + 1);
+    if (desksNow.current.current === path) setFlows((held) => withFlow(held, next));
+    savingFlows.current.schedule(key, async () => {
+      const answer = await bridge.flowSave(next, { project: path });
+      if (!answer.ok) {
+        if (desksNow.current.current === path) setCanvasTrouble(answer.trouble.because);
+        throw new Error(answer.trouble.because);
+      }
+      if (flowRevision.current.get(key) !== revision) return;
+      dirtyFlows.current.delete(key);
+      try { clearCanvasDraft(localStorage, path, next.id, next); } catch { /* Retry recovery on the next launch. */ }
+      if (desksNow.current.current !== path) return;
+      setFlows((held) => withFlow(held, answer.value));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (openProject === null) return;
+    try {
+      for (const draft of canvasDrafts(localStorage, openProject)) changeFlow(draft, openProject);
+    } catch { setCanvasTrouble('Canvas recovery could not be read.'); }
+  }, [openProject, changeFlow]);
 
   /** What the box was holding, written into the store and answered with the
    *  content ids a canvas block can carry. The same road a send takes, so the
@@ -2177,7 +2248,9 @@ function Conversation() {
       }
       if (files.length === 0) return [];
       const kept = await bridge.keepAttachments(files);
-      return kept.ok ? kept.value.kept.map((one) => one.id) : [];
+      if (!kept.ok) throw new Error(kept.trouble.because);
+      if (kept.value.kept.length !== files.length) throw new Error('Some attachments could not be saved. Try attaching them again.');
+      return kept.value.kept.map((one) => one.id);
     },
     [],
   );
@@ -2185,9 +2258,13 @@ function Conversation() {
   /** A canvas of its own, open, with the first block already placed when
    *  somebody came from a draft. */
   const newCanvas = useCallback(
-    (first: { says: string; attachments: readonly string[] } | null) => {
+    (first: { says: string; attachments: readonly string[] } | null, project?: string) => {
+      const path = project ?? desksNow.current.current;
+      if (path === null) return;
       const made = first === null ? newFlow() : placeFirstAsk(newFlow(), first);
-      changeFlow(made);
+      changeFlow(made, path);
+      if (desksNow.current.current !== path) return;
+      setOpenCanvases((held) => [...held, made.id]);
       setCanvasTrouble(null);
       goToScreen('canvas');
       startScreen(() => setCanvasAt(made.id));
@@ -2204,16 +2281,42 @@ function Conversation() {
       return;
     }
     setCanvasTrouble(null);
+    setOpenCanvases((held) => held.includes(last.id) ? held : [...held, last.id]);
     goToScreen('canvas');
     startScreen(() => setCanvasAt(last.id));
   }, [newCanvas, goToScreen, startScreen]);
 
   const forgetCanvas = useCallback((id: string) => {
-    setFlows((held) => withoutFlow(held, id));
-    setCanvasAt((was) => (was === id ? null : was));
     const path = desksNow.current.current;
-    if (path !== null) void bridge.flowDelete(id, { project: path });
-  }, []);
+    if (path === null) return;
+    const key = canvasWriteKey(path, id);
+    if (deletingFlows.current.has(key)) return;
+    const draft = flowsNow.current.find((one) => one.id === id);
+    let refused = false;
+    deletingFlows.current.add(key);
+    flowActions.current.set(key, (flowActions.current.get(key) ?? 0) + 1);
+    flowRevision.current.set(path, (flowRevision.current.get(path) ?? 0) + 1);
+    flowRevision.current.set(key, (flowRevision.current.get(key) ?? 0) + 1);
+    void savingFlows.current.cancel(key).then(() => bridge.flowDelete(id, { project: path })).then((answer) => {
+      if (!answer.ok) {
+        refused = true;
+        if (desksNow.current.current === path) setCanvasTrouble(answer.trouble.because);
+        return;
+      }
+      dirtyFlows.current.delete(key);
+      removedFlows.current.add(key);
+      try { clearCanvasDraft(localStorage, path, id); } catch { /* The shell has confirmed deletion. */ }
+      if (desksNow.current.current !== path) return;
+      setFlows((held) => withoutFlow(held, id));
+      setOpenCanvases((held) => held.filter((one) => one !== id));
+      setCanvasAt((was) => (was === id ? null : was));
+    }).catch((cause: unknown) => {
+      if (desksNow.current.current === path) setCanvasTrouble(String(cause));
+    }).finally(() => {
+      deletingFlows.current.delete(key);
+      if (refused && draft !== undefined) changeFlow(draft, path);
+    });
+  }, [changeFlow]);
 
   /** Where the project stands, for the one refusal that depends on it: a pull
    *  request off the default branch is not a pull request. Read off the desk,
@@ -2242,10 +2345,21 @@ function Conversation() {
        while somebody draws, and Start pressed in the same breath as the last
        word would otherwise reach a file that does not have it yet — and be
        refused for a sentence that is on screen. */
-    savingFlows.current.now();
-    void lastSave.current.then(() => bridge.flowStart(id, { project: path })).then((answer) => {
+    const conversation = currentDesk(desksNow.current)?.address;
+    const key = canvasWriteKey(path, id);
+    const action = (flowActions.current.get(key) ?? 0) + 1;
+    flowActions.current.set(key, action);
+    void savingFlows.current.flush(key).then(() => {
+      if (flowActions.current.get(key) !== action || deletingFlows.current.has(key) || removedFlows.current.has(key)) return null;
+      return bridge.flowStart(id, {
+        project: path, ...(conversation == null ? {} : { conversation }),
+      });
+    }).then((answer) => {
+      if (answer === null || desksNow.current.current !== path || flowActions.current.get(key) !== action) return;
       if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
       else setCanvasTrouble(answer.trouble.because);
+    }).catch((cause: unknown) => {
+      if (desksNow.current.current === path && flowActions.current.get(key) === action) setCanvasTrouble(String(cause));
     });
   }, [standingHere]);
 
@@ -2253,9 +2367,15 @@ function Conversation() {
     const id = canvasNow.current;
     const path = desksNow.current.current;
     if (id === null || path === null) return;
+    const key = canvasWriteKey(path, id);
+    const action = (flowActions.current.get(key) ?? 0) + 1;
+    flowActions.current.set(key, action);
     void bridge.flowStop(id, { project: path }).then((answer) => {
+      if (desksNow.current.current !== path || flowActions.current.get(key) !== action) return;
       if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
       else setCanvasTrouble(answer.trouble.because);
+    }).catch((cause: unknown) => {
+      if (desksNow.current.current === path && flowActions.current.get(key) === action) setCanvasTrouble(String(cause));
     });
   }, []);
 
@@ -2263,9 +2383,15 @@ function Conversation() {
     const id = canvasNow.current;
     const path = desksNow.current.current;
     if (id === null || path === null) return;
+    const key = canvasWriteKey(path, id);
+    const action = (flowActions.current.get(key) ?? 0) + 1;
+    flowActions.current.set(key, action);
     void bridge.flowContinue(id, block, { project: path }).then((answer) => {
+      if (desksNow.current.current !== path || flowActions.current.get(key) !== action) return;
       if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
       else setCanvasTrouble(answer.trouble.because);
+    }).catch((cause: unknown) => {
+      if (desksNow.current.current === path && flowActions.current.get(key) === action) setCanvasTrouble(String(cause));
     });
   }, []);
 
@@ -2273,10 +2399,16 @@ function Conversation() {
     const id = canvasNow.current;
     const path = desksNow.current.current;
     if (id === null || path === null) return;
+    const key = canvasWriteKey(path, id);
+    const action = (flowActions.current.get(key) ?? 0) + 1;
+    flowActions.current.set(key, action);
     setCanvasTrouble(null);
     void bridge.flowResume(id, { project: path }).then((answer) => {
+      if (desksNow.current.current !== path || flowActions.current.get(key) !== action) return;
       if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
       else setCanvasTrouble(answer.trouble.because);
+    }).catch((cause: unknown) => {
+      if (desksNow.current.current === path && flowActions.current.get(key) === action) setCanvasTrouble(String(cause));
     });
   }, []);
 
@@ -2302,7 +2434,7 @@ function Conversation() {
         setPanes((current) => {
           const other = current.open.find((one) => one.id !== focusedPane(current).id);
           return other === undefined
-            ? addPane(current, conversation)
+            ? focusPane(addPane(current, conversation), current.focused)
             : showIn(current, other.id, conversation);
         });
       });
@@ -2319,7 +2451,7 @@ function Conversation() {
    * conversation, so they stay.
    */
   const swapConversation = useCallback(
-    async (path: string | null, force = false) => {
+    async (path: string | null, _force = false) => {
       // Already here. Silent, because pressing the row you are on is a person
       // checking where they are, not asking for anything. A conversation
       // nothing has been said in yet is the same case: "new" from an empty
@@ -2333,17 +2465,11 @@ function Conversation() {
       // being asked for, so the way out of it comes first.
       goToScreen('chat');
       const showing = desksNow.current.byPath[desksNow.current.current ?? '']?.address ?? null;
-      if (path !== null && path === inConversation && path === showing) return;
+      if (path !== null && path === inConversation && path === showing) return path;
       // `force` is for the one caller that has just thrown the conversation on
       // screen away: whatever the desk still holds belongs to a transcript that
       // no longer exists, and the empty-thread guard read that as "already
       // looking at a new one" and left the window with nothing.
-      if (!force && path === null && chat.turns.length === 0) {
-        // Already looking at an empty one. Still worth getting out of the way
-        // of it, since that is what was pressed.
-        toChat();
-        return;
-      }
       toChat();
       setTidying(false);
       setRoom(null);
@@ -2368,9 +2494,11 @@ function Conversation() {
         troubleAt(projectAtStart === null ? {} : { project: projectAtStart }, opened.trouble);
         return;
       }
-      showOpened(opened.value);
+      if (!showOpened(opened.value)) return;
+      setViewsRestored(opened.value.path);
+      return opened.value.address ?? null;
     },
-    [inConversation, chat.turns.length, showOpened, toChat, troubleAt, goToScreen],
+    [inConversation, showOpened, toChat, troubleAt, goToScreen],
   );
 
   /** Throw a conversation away. If it is the one on screen, open a fresh one
@@ -2398,6 +2526,7 @@ function Conversation() {
          fails the moment it is pressed. */
       const project = here?.path;
       if (project !== undefined) setDesks((current) => parkThread(current, project, path));
+      if (desksNow.current.current === project) setPanes((current) => withoutConversation(current, path, null));
       if (wasHere) await swapConversation(null, true);
     },
     [busy, inConversation, swapConversation, troubleHere],
@@ -2520,8 +2649,8 @@ function Conversation() {
    * files, because a fork branches the conversation and never the folder.
    */
   const forkHere = useCallback(
-    (said: number): void => {
-      const here = currentDesk(desksNow.current);
+    (said: number, owner?: Owned): void => {
+      const here = owner ?? currentDesk(desksNow.current);
       if (here === null || here.address === null) return;
       void startFrom(here.address, "fork", said);
     },
@@ -3525,32 +3654,36 @@ function Conversation() {
    * estimate from a guess into a measurement (COST-DESIGN §2).
    */
   const deliver = useCallback(
-    async (text: string, task: Task, ways?: PromptOptions) => {
+    async (text: string, task: Task, ways?: PromptOptions, explicitOwner?: Owned) => {
       // Ownership is captured before reading attachments: a large image can
       // take long enough to decode for somebody to switch tabs meanwhile.
-      const desk = currentDesk(desksNow.current);
+      const desk = explicitOwner === undefined ? currentDesk(desksNow.current) : desksNow.current.byPath[explicitOwner.project] ?? null;
+      const address = explicitOwner === undefined ? desk?.address ?? null : explicitOwner.address;
+      if (explicitOwner !== undefined && (desk === null || address === null || desk.conversations[address] === undefined)) return;
+      const source = conversationIn(desk, address);
       const target: Where = {
         ...(desk === null ? {} : { project: desk.path }),
-        ...(desk?.address == null ? {} : { conversation: desk.address }),
+        ...(address === null ? {} : { conversation: address }),
       };
-      const owner = desk === null ? null : keyOf(desk.path, desk.address ?? '');
+      const owner = desk === null ? null : keyOf(desk.path, address ?? '');
       /* The conversation this message belongs to, as an address rather than a
          key. What was said in it, what it brought in and the mode it is working
          in all go there, whether or not it is still the one on screen. */
       const mine: Owned | null =
-        desk === null ? null : { project: desk.path, address: desk.address };
+        desk === null ? null : { project: desk.path, address };
       // What is in the box at the moment of sending: the box of the
       // conversation in front now — the one this message belongs to — read off
       // the desk here rather than from whenever this callback was last rebuilt
       // (see `attachmentsNow`).
-      const inTheBox = desk === null ? attachmentsNow.current : chat.attachments;
+      const inTheBox = desk === null ? attachmentsNow.current : source.attachments;
+      const shared = desk === null ? [] : keptShared(desk.path);
       // A model that cannot read pictures never gets sent one, whichever door
       // the message came through. The composer stops this at the box; a note
       // drawn on the page goes straight to here, and used to carry the picture
       // past that check and into the slow provider refusal it exists to
       // pre-empt. The pictures stay put, so the line explaining why is still
       // on screen beside them.
-      const blind = readsPictures(connection) === false;
+      const blind = explicitOwner === undefined && readsPictures(connection) === false;
       const held = blind && inTheBox.some((one) => one.kind === "image");
 
       // The pictures go along for the ride: read into the base64 the shell
@@ -3625,7 +3758,6 @@ function Conversation() {
            A new chat carries the project's context and none of another chat's
            attachments, output or questions; those are the other chat's. Read at
            the moment of sending, so a list somebody has just edited travels. */
-        const shared = sharedNow.current;
         const carried: PromptOptions =
           shared.length === 0 ? { ...ways } : { ...ways, context: shared };
         const reply = await bridge.prompt(said, pictures, carried, target);
@@ -3652,7 +3784,7 @@ function Conversation() {
         putBack();
         troubleAt(target, {
           what: STOPPED_PART_WAY,
-          because: "Something went wrong on my side. Nothing has been changed.",
+          because: "The operation did not finish. Review the conversation and files before retrying.",
           actionLabel: "Got it",
           details:
             cause instanceof Error ? (cause.stack ?? cause.message) : undefined,
@@ -3662,7 +3794,7 @@ function Conversation() {
         if (owner !== null) letSendGo(owner);
       }
     },
-    [troubleAt, emptyTheBox, putBackInBox, holdSend, letSendGo, connection, writeDraft, chat.attachments],
+    [troubleAt, emptyTheBox, putBackInBox, holdSend, letSendGo, connection, writeDraft],
   );
 
   /**
@@ -4341,18 +4473,17 @@ function Conversation() {
       // small x on a tab. Closing a tab is closing a tab: the project stays
       // open and a fresh conversation takes the place of the one put down.
       if ((desk.address ?? '') === address && threadsIn(desk).length <= 1) {
-        // Nothing said in it yet, so there is nothing to put down and nothing
-        // a new one would be different from. The press does nothing, which is
-        // better than a flicker that ends where it started.
-        if (conversationIn(desk, address).turns.length === 0) return;
-        await swapConversation(null);
+        const replacement = await swapConversation(null);
+        if (replacement === undefined || desksNow.current.current !== project) return;
         setDesks((current) => parkThread(current, project, address));
+        setPanes((current) => withoutConversation(current, address, replacement));
         void bridge.closeConversation({ project, conversation: address });
         return;
       }
       // Closing the one you are looking at moves to its neighbour first, so
       // there is never a moment with nothing on screen. The window already
       // holds them all, so this is a swap and not a fetch.
+      let replacement = desk.address;
       if (desk.address === address) {
         // The neighbour, the way every tab strip has gone for twenty years:
         // the one on the left, or the one on the right when there is no left.
@@ -4360,15 +4491,17 @@ function Conversation() {
         const here = row.indexOf(address);
         const next = row[here - 1] ?? row[here + 1];
         if (next === undefined) return;
-        await swapConversation(next);
+        const switched = await swapConversation(next);
+        if (switched === undefined || desksNow.current.current !== project) return;
+        replacement = switched;
       }
       setDesks((current) => parkThread(current, project, address));
+      if (desksNow.current.current === project) setPanes((current) => withoutConversation(current, address, replacement));
       void bridge.closeConversation({ project, conversation: address });
     },
     [swapConversation],
   );
 
-  tabRow.handles(goToTab, closeTab);
   goToTabRef.current = (id) => void goToTab(id);
   closeTabRef.current = (id) => void closeTab(id);
 
@@ -4396,14 +4529,13 @@ function Conversation() {
    * it, or it opens again at the next launch as a window they did not leave.
    */
   useEffect(() => {
-    if (openProject === null) return;
+    if (openProject === null || viewsRestored !== openProject) return;
     const shown = shownNow(panes);
-    if (shown.length === 0) return;
     const timer = setTimeout(() => {
       void bridge.viewsNote(shown, { project: openProject });
     }, 400);
     return () => clearTimeout(timer);
-  }, [openProject, panes]);
+  }, [openProject, panes, viewsRestored]);
 
   /**
    * Put the hand in a pane.
@@ -4418,6 +4550,7 @@ function Conversation() {
     (id: ViewId) => {
       const wanted = paneAt(panes, id);
       if (wanted === null || wanted.id === panes.focused) return;
+      setCanvasAt(null);
       setPanes((current) => focusPane(current, id));
       const desk = currentDesk(desksNow.current);
       if (desk === null || wanted.conversation === null) return;
@@ -4431,17 +4564,22 @@ function Conversation() {
    *  asked of the shell: the desk already holds every open conversation whole,
    *  so two views of one chat cost no second session. */
   const splitPane = useCallback((): void => {
-    setPanes((current) => addPane(current, aimedAt));
+    setPanes((current) => {
+      const next = addPane(current, aimedAt);
+      return canvasNow.current === null ? next : focusPane(next, current.focused);
+    });
   }, [aimedAt]);
 
   const dropPane = useCallback((id: ViewId): void => {
-    setPanes((current) => closePane(current, id));
-  }, []);
+    const next = closePane(panes, id);
+    if (next === panes) return;
+    setPanes(next);
+    const remaining = focusedConversation(next);
+    if (panes.focused === id && remaining !== null && remaining !== currentDesk(desksNow.current)?.address) {
+      void swapConversation(remaining);
+    }
+  }, [panes, swapConversation]);
 
-  /** Follow the focus, or stay where it was put. */
-  const togglePin = useCallback((): void => {
-    setPanes((current) => pin(current, isPinned(current) ? null : current.focused));
-  }, []);
 
 
 
@@ -4518,7 +4656,7 @@ function Conversation() {
       // ahead". Sized again rather than remembered: the same sentence gives the
       // same answer, and one fewer thing on the turn is one fewer thing to keep
       // in step.
-      if (go) void deliver(answered.text, sizeUp(answered.text));
+      if (go) void deliver(answered.text, sizeUp(answered.text), undefined, owner);
     },
     [deliver],
   );
@@ -4567,12 +4705,12 @@ function Conversation() {
       // so every message straight after an accepted plan got none.
       lookAround.answering(owner.project, owner.address);
       if (go) {
-        if (plansNow.current === 'plan') {
-          holdWrites(false);
-          setPlans('auto');
+        if (mine.plans === 'plan') {
+          void bridge.setPlanMode(false, { project: owner.project, ...(owner.address === null ? {} : { conversation: owner.address }) });
           setDesks((current) =>
             changeThread(current, owner, (one) => ({
               ...one,
+              plans: 'auto',
               turns: [...one.turns, said('graphe', 'Out of Plan, going ahead with it.')],
             })),
           );
@@ -4585,7 +4723,7 @@ function Conversation() {
         // Already in the order somebody put them in, which is why this reads
         // the kept list even when nothing was struck out.
         const agreed = chosen?.kept ?? steps;
-        const path = openProject;
+        const path = owner.project;
         if (path !== null && agreed.length > 0) {
           void bridge.buildSave(
             agreed.map((step) => ({ title: step, acceptance: "" })),
@@ -4606,7 +4744,7 @@ function Conversation() {
         const withExtra = extra === null ? text : `${text}\n\n${extra}`;
         // A list nobody told the model about is a list nobody ticks.
         const say = agreed.length > 0 ? `${withExtra}\n\n${PLAN_WORDS.ticking}` : withExtra;
-        void deliver(say, sizeUp(say), { lookFirst: false });
+        void deliver(say, sizeUp(say), { lookFirst: false }, owner);
       } else {
         /* "Change something first" used to put the original sentence back in
            the box, which threw away the strikes, the moves and the notes just
@@ -4619,10 +4757,10 @@ function Conversation() {
           return;
         }
         const revise = `${text}\n\n${again}\n\n${PLAN_WORDS.planAgain}`;
-        void deliver(revise, sizeUp(revise), { lookFirst: true });
+        void deliver(revise, sizeUp(revise), { lookFirst: true }, owner);
       }
     },
-    [deliver, openProject, holdWrites, lookAround, refreshBuildPlan, writeDraft, setPlans],
+    [deliver, lookAround, refreshBuildPlan, writeDraft],
   );
 
   /**
@@ -4662,7 +4800,7 @@ function Conversation() {
       );
       const text =
         "Fix the blocking findings from the review I just asked for, the P0 and P1 ones, and tell me what you changed.";
-      void deliver(text, sizeUp(text), { lookFirst: false });
+      void deliver(text, sizeUp(text), { lookFirst: false }, owner);
     },
     [deliver],
   );
@@ -4673,6 +4811,7 @@ function Conversation() {
      so a big document can be kicked off and left alone.*/
   useEffect(() => {
     if (desk === null) return;
+    if (!mayApproveWithoutAsking(howFar, chat.plans === 'plan')) return;
     // "Until it's done" is itself the answer: somebody who picked it has
     // already said not to stop and ask.
     const waiting = chat.turns.find((one) => one.kind === 'plan' && one.answered === null);
@@ -4684,7 +4823,7 @@ function Conversation() {
     // not one asking for approval — answering it sends "do these: nothing".
     if (waiting.steps.length === 0) return;
     answerPlan({ project: desk.path, address: desk.address }, waiting.id, true);
-  }, [desk, chat.turns, answerPlan, howFar]);
+  }, [desk, chat.turns, chat.plans, answerPlan, howFar]);
 
   /** The model answered in prose. The card says so; this is the press under it,
    *  which asks again in the same words the look-around uses rather than
@@ -4692,7 +4831,7 @@ function Conversation() {
   const askForAPlanAgain = useCallback(
     (owner: Owned, turnId: string) => {
       answerPlan(owner, turnId, false);
-      void deliver(PLAN_WORDS.asked, sizeUp(PLAN_WORDS.asked), { lookFirst: true });
+      void deliver(PLAN_WORDS.asked, sizeUp(PLAN_WORDS.asked), { lookFirst: true }, owner);
     },
     [answerPlan, deliver],
   );
@@ -5434,7 +5573,7 @@ function Conversation() {
      of thing to the hand: something open, which can be switched to. Its state
      is the run's, read from the newest one — a canvas with no run has never
      done anything and wears no mark. */
-  const canvasTabs: readonly Tab[] = desk === null ? [] : flowsNow.current.flatMap((flow) => {
+  const canvasTabs: readonly Tab[] = desk === null ? [] : flowsNow.current.filter((flow) => openCanvases.includes(flow.id)).flatMap((flow) => {
       const run = latestRun(flow);
       const state: TabState =
         run === null ? 'idle' : run.state === 'running' ? 'working' : run.state === 'needs-you' ? 'asking' : 'idle';
@@ -5497,9 +5636,6 @@ function Conversation() {
     title: titleOf(conversationIn(desk, one.conversation).turns),
     focused: one.id === panes.focused,
   }));
-  const pinnedTo = isPinned(panes)
-    ? pinnedWords(titleOf(conversationIn(desk, inspectorPane(panes).conversation).turns))
-    : null;
 
 
   /* Where a tab sits is the person's to decide: the row is spatial memory, and
@@ -5518,6 +5654,7 @@ function Conversation() {
     (id: string) => {
       if (id.startsWith('canvas:')) {
         const which = id.slice('canvas:'.length);
+        setOpenCanvases((held) => held.includes(which) ? held : [...held, which]);
         setCanvasTrouble(null);
         goToScreen('canvas');
         startScreen(() => setCanvasAt(which));
@@ -5531,6 +5668,7 @@ function Conversation() {
   const closeTabRow = useCallback((id: string) => {
     if (id.startsWith('canvas:')) {
       const which = id.slice('canvas:'.length);
+      setOpenCanvases((held) => held.filter((one) => one !== which));
       // Closing a tab closes the view. The drawing stays, and the run — if one
       // is going — carries on in the shell where nobody's window can lose it.
       setCanvasAt((was) => (was === which ? null : was));
@@ -5538,6 +5676,8 @@ function Conversation() {
     }
     void closeTabRef.current(id);
   }, []);
+
+  tabRow.handles(async (id) => openTab(id), async (id) => closeTabRow(id));
 
   const tabAt =
     openProject === null || desk === null
@@ -5605,7 +5745,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed && canvasHere === null ? "app--overviewed" : ""} ${canvasHere !== null ? "app--canvas" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed && canvasHere === null && otherPane === null ? "app--overviewed" : ""} ${otherPane !== null ? "app--panes" : ""} ${canvasHere !== null ? "app--canvas" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -6101,6 +6241,7 @@ function Conversation() {
             servers={running}
             terminal={{
               workspace: desk.path,
+              conversation: desk.address,
               open: terminalOpen,
               onOpen: setTerminalOpen,
             }}
@@ -6156,10 +6297,9 @@ function Conversation() {
           <Suspense fallback={null}>
             <PaneBand
               panes={paneRows}
-              pinned={pinnedTo}
+              pinned={null}
               onFocus={focusOn}
               onClose={dropPane}
-              onTogglePin={togglePin}
             />
           </Suspense>
         )}
@@ -6543,9 +6683,14 @@ function Conversation() {
               onCanvas={(says, box) => {
                 // The composer's own rows, kept exactly as its send keeps them:
                 // by content id, so a flow file holds ids and never bytes.
+                const project = desksNow.current.current;
+                if (project === null) return;
+                if (says.trim() === '' && box.length === 0) { openCanvas(); return; }
                 void keepBoxAttachments(box).then((ids) =>
-                  newCanvas({ says, attachments: ids }),
-                );
+                  newCanvas({ says, attachments: ids }, project),
+                ).catch((cause: unknown) => {
+                  if (desksNow.current.current === project) setCanvasTrouble(String(cause));
+                });
               }}
               connection={connection}
               room={room}
@@ -6596,8 +6741,10 @@ function Conversation() {
             <h2 className="beside__name">
               {titleOf(conversationIn(desk, otherPane.conversation).turns)}
             </h2>
+            <button type="button" onClick={() => focusOn(otherPane.id)}>Focus</button>
+            <button type="button" aria-label="Close secondary pane" onClick={() => dropPane(otherPane.id)}>Close</button>
           </header>
-          <div className="beside__scroll scroll--auto">
+          <div className="beside__scroll scroll--auto" ref={besideRef}>
             <ThreadRows
               rows={drawnFrom(conversationIn(desk, otherPane.conversation).turns, AT_FIRST).rows}
               scroller={besideRef}
@@ -6627,7 +6774,7 @@ function Conversation() {
                       onPostReview={postReview}
                       showMe={preferences.showMe}
                       isLast={idx === allThere - 1}
-                      onForkHere={forkHere}
+                      onForkHere={(said) => forkHere(said, ownerThere)}
                         forkWaits={busyThere && idx === allThere - 1}
                       />
                     </Suspense>
@@ -6640,7 +6787,7 @@ function Conversation() {
         </aside>
       ) : null}
 
-      {overviewed && canvasHere === null && desk !== null ? (
+      {overviewed && canvasHere === null && otherPane === null && desk !== null ? (
         <Overview
           key={keyOf(desk.path, desk.address ?? '')}
           tokens={tokensHere}
@@ -6786,18 +6933,40 @@ function Conversation() {
             key={canvasHere.id}
             flow={canvasHere}
             onFlow={changeFlow}
-            onSave={changeFlow}
             onStart={startCanvas}
             onStop={stopCanvas}
             onContinue={continueCanvas}
             onResume={resumeCanvas}
-            connection={connection}
+            connection={connection === null ? null : {
+              ...connection,
+              chosen: canvasHere.model ?? connection.chosen,
+              chosenThinking: canvasHere.thinking ?? connection.chosenThinking,
+            }}
             thinking={preferences.thinking}
-            onThinking={changeThinking}
-            onModel={(choice) => selectModel(choice)}
+            onThinking={(choice, level) => changeFlow({ ...canvasHere, model: choice, thinking: level }, desk.path)}
+            onModel={(choice) => changeFlow({ ...canvasHere, model: choice, thinking: null }, desk.path)}
             onConnect={openConnect}
             standing={standingHere}
             attachments={canvasAttachments}
+            onKeepAttachments={async (files) => {
+              const project = desk.path;
+              const incoming: PromptAttachment[] = [];
+              for (const file of files) {
+                const bytes = await pictureBytes(file);
+                if (bytes === null) throw new Error(`Could not read ${file.name}.`);
+                const mimeType = pictureType(file.name, file.type);
+                incoming.push({ kind: mimeType.startsWith('image/') ? 'image' : 'document', name: file.name, mimeType, bytes });
+              }
+              const saved = await bridge.keepAttachments(incoming);
+              if (!saved.ok) throw new Error(saved.trouble.because);
+              if (saved.value.kept.length !== incoming.length) throw new Error('Some attachments could not be saved.');
+              if (desksNow.current.current !== project) return [];
+              const rows: BlockAttachment[] = saved.value.kept.map((one) => ({
+                id: one.id, name: one.name, kind: one.kind, mimeType: one.mimeType, thumb: null,
+              }));
+              setCanvasAttachments((held) => [...held, ...rows.filter((one) => !held.some((known) => known.id === one.id))]);
+              return rows;
+            }}
             full={canvasFull}
             onFull={setCanvasFull}
             onWatch={watchLane}
@@ -6806,7 +6975,10 @@ function Conversation() {
             canvases={flowsNow.current
               .filter((one) => one.id !== canvasHere.id)
               .map((one) => ({ id: one.id, name: one.name }))}
-            onOpenCanvas={(id) => setCanvasAt(id)}
+            onOpenCanvas={(id) => {
+              setOpenCanvases((held) => held.includes(id) ? held : [...held, id]);
+              setCanvasAt(id);
+            }}
             onRenameCanvas={(id, name) => {
               const found = flowsNow.current.find((one) => one.id === id);
               if (found !== undefined) changeFlow({ ...found, name });

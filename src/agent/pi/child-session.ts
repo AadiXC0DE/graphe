@@ -33,7 +33,7 @@
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 
-import { createSession, guardFor, readTranscript } from './adapter';
+import { AdapterError, createSession, guardFor, isPackagedApp, readTranscript } from './adapter';
 import type {
   Carried,
   CreateSessionOptions,
@@ -58,6 +58,11 @@ import { childRuntimes, startRuntime } from '../../../electron/services/runtime-
 import type { ChildExit, ChildRuntime } from '../../../electron/services/runtime-supervisor';
 import type { ThinkingLevel } from '../../lib/ipc';
 import type { AgentEvent, ImageCard } from '../types';
+import { admit } from '../../work/admission';
+
+/** A cooperative abort should settle quickly; a wedged child is force-stopped
+ *  before this host lets another prompt use the session. */
+const STOP_SETTLE_PATIENCE_MS = 10_000;
 
 /* -------------------------------------------------------------------------- */
 /* Which half hosts the agent                                                  */
@@ -90,6 +95,13 @@ export function runtimeChoice(setting?: RuntimeChoice): RuntimeChoice {
   }
 }
 
+/** The child protocol is still a spike and does not yet expose the complete
+ * Graphe session surface. Keep spike tests usable while preventing a product
+ * session from silently losing custom tools and session controls. */
+function childRuntimeAllowed(): boolean {
+  return !isPackagedApp() && (process.env['VITEST'] === 'true' || process.env['NODE_ENV'] === 'test');
+}
+
 /**
  * One conversation's agent, hosted wherever this run asks for it.
  *
@@ -108,6 +120,14 @@ export function runtimeChoice(setting?: RuntimeChoice): RuntimeChoice {
  */
 export async function openSession(options: CreateSessionOptions): Promise<GrapheSession> {
   if (runtimeChoice(options.runtime) === 'in-process' || shallow(options.sessionKind)) {
+    return createSession(options);
+  }
+  if (!childRuntimeAllowed()) {
+    options.onEvent({
+      type: 'notice',
+      what:
+        'The separate-process runtime is still experimental and does not yet support all Graphe tools, so this conversation is staying in the main process.',
+    });
     return createSession(options);
   }
   /* The Guard is built first and in this process, which is the whole point: a
@@ -244,6 +264,7 @@ export async function childSession(
       args,
       judge: guard.judge,
       ...(options.ask === undefined ? {} : { ask: options.ask }),
+      ...(options.cancelAsk === undefined ? {} : { cancelAsk: options.cancelAsk }),
       // The child's own output is for the log and never a sentence on screen.
       onChatter: () => undefined,
       // A widget, a title or a status line has no dialog and is reported rather
@@ -309,6 +330,10 @@ export class Hosted implements GrapheSession {
   /** When somebody last asked this conversation for something. Null until they
    *  have, which is the oldest thing there is. */
   private askedAt: number | null = null;
+  /** Ignore late Pi events after this host has already reported an abort. */
+  private stopping = false;
+  /** Resolves only on Pi's authoritative settle event or child exit. */
+  private stopSettled: (() => void) | null = null;
 
   constructor(
     private readonly options: CreateSessionOptions,
@@ -340,6 +365,7 @@ export class Hosted implements GrapheSession {
     this.links.push(
       this.runtime.onEvent((event) => {
         this.heard(event);
+        if (this.stopping) return;
         this.guard.relay.fromPi(event);
       }),
       this.runtime.onExit((how) => this.exited(how)),
@@ -398,6 +424,8 @@ export class Hosted implements GrapheSession {
     if (!this.givenBack) return;
     const runtime = await this.startChild();
     this.runtime = runtime;
+    // Eviction removes the old handle; a restarted child must be counted again.
+    this.token = childRuntimes.register(this);
     this.givenBack = false;
     this.attend();
     await this.reread();
@@ -406,6 +434,8 @@ export class Hosted implements GrapheSession {
   /** Every event, before the relay burns what it needs. */
   heard(event: Record<string, unknown>): void {
     if (event['type'] === 'agent_settled') {
+      this.stopSettled?.();
+      this.stopSettled = null;
       this.inFlight = 0;
       for (const resolve of this.rest.splice(0)) resolve();
       this.options.onEvent({ type: 'busy', on: false });
@@ -418,6 +448,8 @@ export class Hosted implements GrapheSession {
   /** The child is gone. Everything waiting is settled as cancelled. */
   exited(how: ChildExit): void {
     this.gone = how;
+    this.stopSettled?.();
+    this.stopSettled = null;
     /* Given back for being idle: not a death and not a stop. The transcript is
        whole, nothing was in flight, and the next prompt starts another child in
        the same session file — so nothing is said on the stream at all. */
@@ -476,10 +508,14 @@ export class Hosted implements GrapheSession {
     images?: readonly ImageCard[],
     options?: { lookFirst?: boolean; queue?: 'followUp' },
   ): Promise<void> {
+    if (this.closed) throw new AdapterError('That project is no longer open.');
+    const admission = admit({ origin: 'user' }, { going: this.inFlight > 0 });
+    if (admission.verdict === 'refused') throw new AdapterError(admission.said);
+    this.stopping = false;
     if (this.inFlight === 0) this.options.onEvent({ type: 'busy', on: true });
     this.inFlight += 1;
     try {
-      await this.send({
+      const answer = await this.send({
         type: 'prompt',
         message: text,
         ...withPictures(images),
@@ -487,6 +523,11 @@ export class Hosted implements GrapheSession {
         // how to queue it, which is Pi's own rule.
         ...(options?.queue === 'followUp' ? { streamingBehavior: 'followUp' } : {}),
       });
+      if (answer['success'] !== true) {
+        throw new Error(
+          typeof answer['error'] === 'string' ? answer['error'] : 'the runtime refused the prompt',
+        );
+      }
       await this.untilItRests();
     } finally {
       this.inFlight = Math.max(0, this.inFlight - 1);
@@ -502,10 +543,19 @@ export class Hosted implements GrapheSession {
   }
 
   async steer(text: string, images?: readonly ImageCard[]): Promise<void> {
-    await this.send({ type: 'steer', message: text, ...withPictures(images) });
+    if (this.closed) throw new AdapterError('That project is no longer open.');
+    const admission = admit({ origin: 'steer' }, { going: this.inFlight > 0 });
+    if (admission.verdict === 'refused') throw new AdapterError(admission.said);
+    const answer = await this.send({ type: 'steer', message: text, ...withPictures(images) });
+    if (answer['success'] !== true) {
+      throw new Error(typeof answer['error'] === 'string' ? answer['error'] : 'the runtime refused the steer');
+    }
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    const settled = Promise.withResolvers<void>();
+    this.stopSettled = settled.resolve;
     // A held turn is let go first: stopping a turn that waits must end it.
     this.guard.paused.hold(false);
     const open = this.guard.releaseEverything();
@@ -516,6 +566,21 @@ export class Hosted implements GrapheSession {
       this.options.onEvent({ type: 'asking-withdrawn', ids: open.askedIds });
     }
     await this.send({ type: 'abort' }).catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    const waited = await Promise.race([
+      settled.promise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), STOP_SETTLE_PATIENCE_MS);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer !== undefined) clearTimeout(timer);
+
+    /* A child that will not report its own settle is no longer safe to reuse:
+       stop it through the supervisor, which waits for exit and force-kills
+       after its grace period. The exit callback settles this host as killed. */
+    if (!waited && this.gone === null) await this.runtime.stop().catch(() => undefined);
+    if (this.gone !== null) return;
     this.inFlight = 0;
     for (const resolve of this.rest.splice(0)) resolve();
     /* `stopped` rather than a bare settle: a stop that reads as success

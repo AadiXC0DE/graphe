@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { readTranscript } from '../src/agent/pi/adapter';
+import { notePackagedApp, readTranscript } from '../src/agent/pi/adapter';
 import type { CreateSessionOptions } from '../src/agent/pi/adapter';
 import {
   CHILD_RUNTIME_ENV,
@@ -157,6 +157,10 @@ const ASKS_FOREVER = `export default function asks(pi) {
 `;
 
 beforeAll(async () => {
+  // Child sessions are exercised here in an unpackaged test harness. The
+  // production gate defaults closed so an inherited Vitest marker cannot
+  // authorize a packaged app.
+  notePackagedApp(false);
   root = await mkdtemp(join(tmpdir(), 'graphe-child-session-'));
   project = join(root, 'project');
   sessions = join(root, 'sessions');
@@ -195,6 +199,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  notePackagedApp(true);
   delete process.env[CHILD_RUNTIME_ENV];
   delete process.env['GRAPHE_RUNTIME_CHILD'];
   delete process.env['GRAPHE_SPIKE_MODEL'];
@@ -245,6 +250,25 @@ describe('the switch that picks the process', () => {
     expect(runtimeChoice('child')).toBe('in-process');
     delete process.env[CHILD_RUNTIME_ENV];
   });
+
+  it('never offers the child to a packaged app with inherited test markers', async () => {
+    const previousVitest = process.env['VITEST'];
+    process.env['VITEST'] = 'true';
+    process.env[CHILD_RUNTIME_ENV] = '1';
+    notePackagedApp(true);
+    try {
+      const events: AgentEvent[] = [];
+      const session = await openSession(optionsFor(events));
+      expect(session.conversation).not.toBeNull();
+      expect(events.some((event) => event.type === 'notice' && event.what.includes('experimental'))).toBe(true);
+      session.dispose();
+    } finally {
+      notePackagedApp(false);
+      delete process.env[CHILD_RUNTIME_ENV];
+      if (previousVitest === undefined) delete process.env['VITEST'];
+      else process.env['VITEST'] = previousVitest;
+    }
+  }, 120_000);
 
   it('treats anything else as not a decision, so the profile under it stands', () => {
     // A shell that set the variable to something meaningless has not asked for

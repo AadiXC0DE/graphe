@@ -1171,6 +1171,8 @@ export function stopChild(child: ChildProcess): void {
 type Watching = {
   /** Given the way to end this child, for as long as it is alive. */
   begun: (stop: () => void) => void;
+  /** Whether the fleet stopped this run while setup was awaiting. */
+  stopped?: () => boolean;
   spent: (line: { amount: Money; label: string; reason: SpendReason }) => void;
 };
 
@@ -1196,6 +1198,9 @@ async function runSubagent(
   const cwd = job.cwd ?? process.cwd();
   const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
   if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
+  if (signal?.aborted || watching?.stopped?.()) {
+    return { outcome: { ok: false, error: 'This piece of work was stopped.' }, boundary };
+  }
 
   // Which addresses this helper may reach, before the boundary is built: the
   // profile has to name the door, or the door is something the child may
@@ -1207,6 +1212,9 @@ async function runSubagent(
   const bound = await hold(process.execPath, [runner], helperBounds(cwd, job.agentDir, through));
   boundary.asked = bound.held;
   if (!bound.held) boundary.because = bound.sentence;
+  if (signal?.aborted || watching?.stopped?.()) {
+    return { outcome: { ok: false, error: 'This piece of work was stopped.' }, boundary };
+  }
 
   return new Promise((resolve) => {
     const child = spawn(
@@ -1259,6 +1267,10 @@ async function runSubagent(
       if (signal?.aborted === true) finish({ ok: false, error: 'This piece of work was stopped.' });
     };
     signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted || watching?.stopped?.()) {
+      finish({ ok: false, error: 'This piece of work was stopped.' });
+      return;
+    }
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
@@ -1400,6 +1412,7 @@ export const taskTool = (
     // word: anything else is the helper this tool has always been.
     if (taskMode(params.mode) === 'background') {
       const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+      if (signal?.aborted === true) return say('This piece of work was stopped.');
       if (putOnBoard === undefined) return say(TASK_BACKGROUND_WORDS.noBoard);
       const answer = await putOnBoard(helperBrief(spec, params.task), null);
       if (!answer.ok) return say(TASK_BACKGROUND_WORDS.refused(answer.because));
@@ -1411,7 +1424,14 @@ export const taskTool = (
     // The project this helper's spending belongs to. The model's `cwd` is a
     // suggestion; the folder the session was opened on is the fact.
     const project = helperWorkingDirectory(projectRoot, params.cwd);
-    const admitted = fleet.begin({ id: callId, kind: 'helper', stop: () => {} });
+    let stoppedByFleet = false;
+    const admitted = fleet.begin({
+      id: callId,
+      kind: 'helper',
+      stop: () => {
+        stoppedByFleet = true;
+      },
+    });
     if (!admitted.ok) {
       return { content: [{ type: 'text', text: admitted.because }], details: {} };
     }
@@ -1420,12 +1440,19 @@ export const taskTool = (
     // rule is measured from the folder it is given, so the copy is not a
     // convenience — it is the entire reason a helper may write at all.
     let copy: BuilderCopy | null = null;
-    if (spec.needsCopy) {
-      copy = await makeBuilderCopy(project, callId);
-      if (copy === null) {
-        fleet.ended(callId);
-        return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+    try {
+      if (spec.needsCopy) {
+        copy = await makeBuilderCopy(project, callId);
+        if (copy === null) {
+          fleet.ended(callId);
+          return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+        }
       }
+    } catch (cause) {
+      // The reservation is taken before copy creation. Never strand it when
+      // setup fails before the main run finally block exists.
+      fleet.ended(callId);
+      throw cause;
     }
     const where = copy?.folder ?? project;
 
@@ -1459,6 +1486,7 @@ export const taskTool = (
         },
         {
           begun: (stop) => fleet.watch(callId, stop),
+          stopped: () => stoppedByFleet,
           spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
         },
         (text) => {

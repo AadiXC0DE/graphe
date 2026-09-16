@@ -112,13 +112,14 @@ import {
   withRun,
   withFlow,
   withoutFlow,
+  readFlowStrict,
   canStart,
   type Flow as CanvasFlow,
   type Lane,
   type Run as CanvasRun,
   type Standing,
 } from '../src/work/canvas';
-import { FlowFile } from '../src/projects/flows';
+import { FlowFile, FlowFileUnreadable } from '../src/projects/flows';
 import { readTokensFor } from './services/tokens';
 import { noteRuntimeLog } from './services/runtime-supervisor';
 import {
@@ -191,6 +192,7 @@ import {
   type ShowProgress,
   type SpendLimit,
   type SpendSummary,
+  type PromptAttachment,
   type ThinkingLevel,
   modelKey,
   type Trouble,
@@ -352,14 +354,16 @@ import {
   dropView,
   emptyIndex,
   ensureProject,
-  noteView,
+  markDeleted,
+  noteViewForProject,
   parseIndex,
   projectAtPath,
   serializeIndex,
   setRepoKey,
   updateConversation,
   verdictOn,
-  viewInPane,
+  viewInPaneForProject,
+  viewInProject,
   workspaceAtPath,
   workspaceById,
   workspaceForConversation,
@@ -429,6 +433,7 @@ import {
 } from '../src/work/goal';
 import { openingFor, openingIn, type Opening } from '../src/agent/pi/conversations';
 import { artifactsAmong, paletteFrom } from '../src/design/artifacts';
+import { capsNow } from '../src/work/capacity';
 import { bothChanged, holdWords, nothingToTake, Workbench, type PieceOfWork } from '../src/history/attempts';
 import {
   checkServer,
@@ -1988,7 +1993,9 @@ const states = new Sessions({
     if (project === null) return;
     // Not awaited: nothing downstream waits on the file, and the note is
     // answered by the next launch reading it rather than by this call.
-    void wroteRunNote(app.getPath('userData'), facts, project);
+    void wroteRunNote(app.getPath('userData'), facts, project).catch((cause) => {
+      log.line('warn', 'could not save run note', { cause: String(cause), project });
+    });
   },
 });
 
@@ -2018,7 +2025,9 @@ function tookInterruptedNote(address: string): string | null {
   const said = interruptedRuns.get(address);
   if (said === undefined) return null;
   interruptedRuns.delete(address);
-  void tookRunNoteAway(app.getPath('userData'), address);
+  void tookRunNoteAway(app.getPath('userData'), address).catch((cause) => {
+    log.line('warn', 'could not clear interrupted run note', { cause: String(cause), address });
+  });
   return said;
 }
 
@@ -2046,7 +2055,10 @@ function readWhatWasRunning(): void {
 /** The project named, or the one in front. Never the nearest one: a project that
  *  is not open is nothing, the same way `Workspaces.find` says it. */
 function projectAt(where: Where): Workspace<Held> | null {
-  return addressed(workspaces, where.project === undefined ? undefined : resolve(where.project));
+  // The live list and durable registry must use the same identity. `openProject`
+  // stores the canonical real path, so resolving a symlink alias here would miss
+  // the already-open project and make every scoped IPC call report "not open".
+  return addressed(workspaces, where.project === undefined ? undefined : canonical(where.project));
 }
 
 /** The conversation named, or the one in front of this project. */
@@ -3602,13 +3614,23 @@ async function runWorkspaceMigration(): Promise<void> {
       remembered.map(async (one) => {
         const checkoutFile = checkoutIndexFile(one.path);
         const raw = await readFile(checkoutFile, 'utf8').catch(() => null);
+        let checkouts: unknown;
+        if (raw !== null) {
+          try {
+            checkouts = JSON.parse(raw) as unknown;
+          } catch {
+            // Keep the unreadable source in the manifest as a quarantined
+            // non-map rather than aborting every other project's migration.
+            checkouts = { __unreadable_source__: raw };
+          }
+        }
         return {
           path: one.path,
           checkoutFile,
           // The whole file, not the filtered map: a row whose folder is outside
           // the managed root is exactly what has to be seen and marked, not
           // quietly dropped on the way in.
-          ...(raw === null ? {} : { checkouts: JSON.parse(raw) as unknown }),
+          ...(raw === null ? {} : { checkouts }),
           managedRoot: worktreesFolder(one.path),
         };
       }),
@@ -3770,10 +3792,12 @@ async function loadWorkspaceIndex(): Promise<WorkspaceIndex> {
 function saveWorkspaceIndex(): Promise<void> {
   if (workspaceIndexTooNew) return Promise.resolve();
   const text = serializeIndex(workspaceIndex);
-  writingWorkspaceIndex = writingWorkspaceIndex
-    .then(() => writeAtomically(workspaceIndexFile(), text))
-    .catch(() => undefined);
-  return writingWorkspaceIndex;
+  // Keep the queue alive after a failed write, while returning that failure to
+  // the operation that asked for persistence. Swallowing here made relink,
+  // view and conversation updates report success although a restart lost them.
+  const write = writingWorkspaceIndex.then(() => writeAtomically(workspaceIndexFile(), text));
+  writingWorkspaceIndex = write.catch(() => undefined);
+  return write;
 }
 
 /**
@@ -3884,6 +3908,7 @@ async function noteWhereItWorks(
   open: { path: string; held: Held },
   address: string,
   folder: string | null,
+  session: GrapheSession,
   lineage: { from: string; kind: 'continue' | 'fork' } | null = null,
 ): Promise<void> {
   const home =
@@ -3895,7 +3920,6 @@ async function noteWhereItWorks(
           open.held.checkouts.get(address)?.branch ?? null,
           null,
         );
-  const found = open.held.sessions.find(address);
   await loadWorkspaceIndex();
   // The record first, then the transcript: a conversation exists from the
   // moment it starts, so its folder is answerable before Pi has written a word
@@ -3903,12 +3927,17 @@ async function noteWhereItWorks(
   const added = addConversation(workspaceIndex, {
     conversationId: address,
     workspaceId: home.workspaceId,
-    title: found?.name ?? '',
+    title: session.name ?? '',
     lineage,
     now: Date.now(),
   });
   workspaceIndex = updateConversation(added.index, address, {
-    sessionFile: found?.held.conversation ?? null,
+    // The session is intentionally passed explicitly: this function runs
+    // before the new address is adopted by `held.sessions`, so looking it up
+    // there records a newly-created conversation with no transcript. That
+    // loses the stable id on restart and leaves a blank duplicate tab when a
+    // saved view is restored.
+    sessionFile: session.conversation,
     updatedAt: Date.now(),
     ...(lineage === null ? {} : { lineage }),
   });
@@ -3936,7 +3965,7 @@ async function spreadOutAgain(
     // holding somebody else's project at the path this conversation recorded is
     // not where its work is, and handing it over would edit the wrong files.
     if (!(await sameRepository(gitRunHereFor(), project, record.cwd))) return fail(workspaceGone(record));
-    await rememberRepo(record).catch(() => undefined);
+    await rememberRepo(record);
     return done({ folder: record.cwd, branch: record.branch ?? '' });
   }
   if (record.branch === null || record.branch === '') return fail(workspaceGone(record));
@@ -3944,7 +3973,7 @@ async function spreadOutAgain(
     () => null,
   );
   if (back === null || !back.ok) return fail(workspaceGone(record));
-  await rememberRepo(record).catch(() => undefined);
+  await rememberRepo(record);
   return done({ folder: record.cwd, branch: record.branch });
 }
 
@@ -4002,7 +4031,61 @@ async function startInNewWorktree(
 /** Every run this shell is driving, by flow. A stop, a continue and a resume
  *  are presses about a run that is already going, so each finds the live one
  *  rather than working it out again from a file the runner owns. */
-const liveRuns = new Map<string, { project: string; flow: CanvasFlow; run: CanvasRun; port: RunnerPort }>();
+type LiveCanvasRun = {
+  project: string;
+  flow: CanvasFlow;
+  run: CanvasRun;
+  port: RunnerPort;
+  generation: number;
+  driverDone: Promise<void>;
+};
+const liveRuns = new Map<string, LiveCanvasRun>();
+const startingFlowRuns = new Map<string, number>();
+/** A live run may have one driver only; Continue and a late Start response
+ *  must not advance the same gate/wave twice. */
+const drivingFlowRuns = new Set<string>();
+let activeFlowWorktreeLanes = 0;
+/** Owner-qualified run keys prevent an id from one project controlling another. */
+const liveRunKey = (project: string, flow: string): string => `${canonical(project)}\u0000${flow}`;
+/** A deleted flow invalidates callbacks already queued by its runner. */
+const invalidatedFlowRuns = new Set<string>();
+/** A Stop/Delete may return the run's stopped snapshot before its driver has
+ * drained. Keep the owner blocked until that driver is genuinely finished. */
+const stoppingFlowRuns = new Map<string, Promise<void>>();
+/** Monotonic in-process generations reject callbacks from an older execution
+ * even after a later Start clears its invalidation marker. */
+const flowRunGenerations = new Map<string, number>();
+
+function nextFlowRunGeneration(key: string): number {
+  const next = (flowRunGenerations.get(key) ?? 0) + 1;
+  flowRunGenerations.set(key, next);
+  return next;
+}
+
+function clearStartingFlowRun(key: string, generation: number): void {
+  if (startingFlowRuns.get(key) === generation) startingFlowRuns.delete(key);
+}
+
+function canvasRunNote(project: string, flow: string, generation: number, run: string): string {
+  return `canvas-run:${JSON.stringify([canonical(project), flow, generation, run])}`;
+}
+
+function stoppingBarrier(key: string, live: LiveCanvasRun): Promise<void> {
+  const prior = stoppingFlowRuns.get(key);
+  if (prior !== undefined) return prior;
+  invalidatedFlowRuns.add(key);
+  const barrier = live.driverDone.finally(() => {
+    if (stoppingFlowRuns.get(key) === barrier) stoppingFlowRuns.delete(key);
+  });
+  stoppingFlowRuns.set(key, barrier);
+  return barrier;
+}
+
+function driverGate(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 /**
  * Listen to one conversation's events as they are sent to the window.
@@ -4065,6 +4148,12 @@ async function standingAt(project: string): Promise<Standing> {
  *  rounds the model answered, and what those rounds cost. */
 type Turned = { said: string; turns: number; spent: Money | null };
 
+function addCanvasSpend(one: Money | null, other: Money | null): Money | null {
+  if (one === null) return other;
+  if (other === null || one.currency !== other.currency) return one;
+  return { minor: one.minor + other.minor, currency: one.currency };
+}
+
 /**
  * Send one turn into a lane's conversation and settle when it has finished.
  *
@@ -4095,18 +4184,25 @@ async function turnInLane(
     if (event.type === 'message-delta') said += event.text;
     // One round of the model answering is what a card counts as a turn.
     if (event.type === 'message-end') turns += 1;
-    if (event.type === 'spend') spent = event.amount;
+    if (event.type === 'spend') spent = addCanvasSpend(spent, event.amount);
     if (event.type === 'error') failure = event.message;
   });
 
   const before = session.model;
+  const beforeThinking = session.thinking;
   try {
     if (options.model !== null && !(await session.useModel(options.model))) {
       return { failure: 'That model could not be brought into this conversation.' };
     }
     if (options.thinking !== null) session.setThinking(options.thinking);
     session.goAsFarAs(options.howFar);
-    await session.prompt(text, await picturesFor(app.getPath('userData'), options.attachments), {
+    const attachments = await promptAttachments(app.getPath('userData'), options.attachments);
+    if (attachments.missing.length > 0) {
+      return { failure: `I could not find ${String(attachments.missing.length)} attachment${attachments.missing.length === 1 ? '' : 's'} for this block.` };
+    }
+    const papers = await paperWords(attachments.files);
+    const asked = [text, papers].filter((one) => one !== '').join('\n\n');
+    await session.prompt(asked, imageCards(attachments.files), {
       lookFirst: options.lookFirst,
     });
   } catch (cause) {
@@ -4115,7 +4211,8 @@ async function turnInLane(
     hearing();
     // The model goes back, so the next block — or the person typing in this
     // conversation — gets the model it was in rather than this block's choice.
-    if (options.model !== null && before !== null) await session.useModel(before).catch(() => false);
+    if (options.model !== null) await session.useModel(before).catch(() => false);
+    if (options.thinking !== null) session.setThinking(beforeThinking);
   }
   if (failure !== null) return { failure };
   return { said: said.trim(), turns, spent };
@@ -4132,17 +4229,23 @@ async function nameConversation(address: string, name: string): Promise<void> {
   await saveWorkspaceIndex();
 }
 
-/** The pictures a block was given, resolved out of the attachment store by
- *  content id. One that no longer resolves is left out rather than sent as a
- *  broken picture. */
-async function picturesFor(userData: string, ids: readonly string[]): Promise<readonly ImageCard[]> {
-  const cards: ImageCard[] = [];
+/** Resolve a canvas block's content ids through the same store used by chats.
+ * Documents become extracted words, while images keep their original bytes. */
+async function promptAttachments(
+  userData: string,
+  ids: readonly string[],
+): Promise<{ files: readonly PromptAttachment[]; missing: readonly string[] }> {
+  const files: PromptAttachment[] = [];
+  const missing: string[] = [];
   for (const id of ids) {
     const kept = await copyOf(userData, id).catch(() => null);
-    if (kept === null || kept.kind !== 'image') continue;
-    cards.push({ mimeType: kept.mimeType, bytes: kept.bytes });
+    if (kept === null) {
+      missing.push(id);
+      continue;
+    }
+    files.push({ kind: kept.kind, name: kept.name, mimeType: kept.mimeType, bytes: kept.bytes });
   }
-  return cards;
+  return { files, missing };
 }
 
 /**
@@ -4194,7 +4297,7 @@ async function reviewInLane(
   lane: Lane,
   change: string,
   options: TurnOptions,
-): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string }> {
+): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string; turns?: number; spent?: Money | null }> {
   const folder = (await laneFolderAt(project, lane)) ?? project;
   const own = await projectChecks(folder);
   const checks = own.length > 0 ? own : usualChecks();
@@ -4207,8 +4310,8 @@ async function reviewInLane(
   const turned = await turnInLane(project, lane, asked, { ...options, lookFirst: false });
   if ('failure' in turned) return { verdict: 'needs-work', line: turned.failure };
   const parsed = parseReview(turned.said);
-  if (parsed === null) return { verdict: 'needs-work', line: CANVAS_WORDS.noVerdict };
-  return { verdict: parsed.kind, line: parsed.summary };
+  if (parsed === null) return { verdict: 'needs-work', line: CANVAS_WORDS.noVerdict, turns: turned.turns, spent: turned.spent };
+  return { verdict: parsed.kind, line: parsed.summary, turns: turned.turns, spent: turned.spent };
 }
 
 /**
@@ -4219,7 +4322,38 @@ async function reviewInLane(
  * every other — checks are the project's own file, review is one turn and the
  * verdict parser, and a pull request is one turn and what `gh` answers after it.
  */
-function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: CanvasRun) => void): RunnerPort {
+function runnerPortFor(
+  project: string,
+  flow: CanvasFlow,
+  onChanged: (run: CanvasRun) => void,
+  runId = `flow-${flow.id}`,
+  originWorkspaceId: string | null = null,
+): RunnerPort {
+  const leases = new Map<string, { key: string; newlyHeld: boolean }>();
+  const reserved = new Set<string>();
+  const queued = new Map<string, string>();
+  let released = false;
+
+  async function lease(lane: Lane, folder: string): Promise<void> {
+    if (released) throw new Error('This flow has stopped.');
+    const key = canonical(folder);
+    const prior = leases.get(lane.id);
+    if (prior !== undefined) return;
+    const admission = workspaceLocks.request({
+      key,
+      runId,
+      label: `${flow.name} · ${lane.id}`,
+    });
+    if (!admission.granted) {
+      queued.set(lane.id, key);
+      const outcome = await admission.when;
+      queued.delete(lane.id);
+      if (outcome !== 'granted' || released) throw new Error('This flow has stopped.');
+      leases.set(lane.id, { key, newlyHeld: true });
+      return;
+    }
+    leases.set(lane.id, { key, newlyHeld: admission.newlyHeld });
+  }
   function changed(run: CanvasRun): void {
     onChanged(run);
   }
@@ -4238,36 +4372,104 @@ function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: Canva
       const home = projectAt({ project });
       if (home === null) throw new Error(CANVAS_WORDS.noProject);
       const open = { path: home.path, held: home.held };
+      if (lane.conversationId !== null) {
+        const index = await loadWorkspaceIndex();
+        const recorded = workspaceById(index, lane.workspaceId) ?? await recordedWorkspace(lane.conversationId);
+        const local = await localWorkspaceFor(home.path);
+        const target = recorded !== null && recorded.projectId === local.projectId && recorded.state !== 'deleted' && recorded.state !== 'deleting'
+          ? recorded
+          : null;
+        if (target === null && conversationAt(open.held, { conversation: lane.conversationId }) === null) {
+          throw new Error(CANVAS_WORDS.noConversation);
+        }
+        const folder = target?.cwd ?? folderFor(home, { conversation: lane.conversationId });
+        await lease(lane, folder);
+        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(folder)) ?? '');
+        return { ...lane, ...(target === null ? {} : { workspaceId: target.workspaceId, branch: target.branch }) };
+      }
       if (lane.id === LANE_0) {
-        // The flow runs where it was started: the conversation the project
-        // keeps, which is the folder somebody pressed Start in.
-        const started = await startConversation(open, { kind: 'most-recent' });
+        // Start in the workspace captured at the Start press. Falling back to
+        // the local workspace is only for callers without a focused chat (and
+        // for old persisted runs whose lane had no workspace id).
+        const local = await localWorkspaceFor(home.path);
+        const index = await loadWorkspaceIndex();
+        const captured = workspaceById(index, lane.workspaceId) ??
+          (originWorkspaceId === null ? null : workspaceById(index, originWorkspaceId));
+        const target = captured !== null && captured.projectId === local.projectId && captured.state !== 'deleted' && captured.state !== 'deleting'
+          ? captured
+          : local.workspace;
+        const started = await startConversation(open, openingIn(target.workspaceId));
         if (!started.ok) throw new Error(started.trouble.because);
-        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(home.path)) ?? '');
-        return { ...lane, conversationId: started.value.address };
+        await noteConversationWorkspace(started.value.address, target.workspaceId);
+        await lease(lane, target.cwd);
+        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(target.cwd)) ?? '');
+        return { ...lane, workspaceId: target.workspaceId, conversationId: started.value.address, branch: target.branch };
       }
       // The same copy the New worktree press makes, by the same call, so a
       // canvas branch is an ordinary branch and lands through Review.
+      if (!reserved.has(lane.id)) {
+        if (activeFlowWorktreeLanes >= capsNow().board) {
+          throw new Error('There is no room for another worktree lane right now.');
+        }
+        activeFlowWorktreeLanes += 1;
+        reserved.add(lane.id);
+      }
       const named = freshCheckout(open.held, open.path);
       const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
         folder: named.folder,
       });
       if (!made.ok || made.value === null) {
+        if (reserved.delete(lane.id)) activeFlowWorktreeLanes = Math.max(0, activeFlowWorktreeLanes - 1);
         throw new Error(made.ok ? CANVAS_WORDS.noRoom : made.because);
       }
-      const workspace = await worktreeWorkspaceFor(
-        open.path,
-        made.value.folder,
-        made.value.branch,
-        await headSha(open.path),
-      );
-      const started = await startConversation(open, openingIn(workspace.workspaceId));
-      if (!started.ok) throw new Error(started.trouble.because);
-      await noteConversationWorkspace(started.value.address, workspace.workspaceId);
-      await nameConversation(started.value.address, `${flow.name} · ${made.value.branch}`);
-      await rememberLineage(started.value.address, { from: flow.id, kind: 'flow' });
-      laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(made.value.folder)) ?? '');
-      return { ...lane, conversationId: started.value.address, branch: made.value.branch };
+      let workspace: WorkspaceRecord | null = null;
+      let started: Started | null = null;
+      try {
+        workspace = await worktreeWorkspaceFor(
+          open.path,
+          made.value.folder,
+          made.value.branch,
+          await headSha(open.path),
+        );
+        const result = await startConversation(open, openingIn(workspace.workspaceId));
+        if (!result.ok) throw new Error(result.trouble.because);
+        started = result.value;
+        await noteConversationWorkspace(started.address, workspace.workspaceId);
+        await lease(lane, made.value.folder);
+        await nameConversation(started.address, `${flow.name} · ${made.value.branch}`);
+        await rememberLineage(started.address, { from: flow.id, kind: 'flow' });
+        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(made.value.folder)) ?? '');
+        return { ...lane, conversationId: started.address, branch: made.value.branch };
+      } catch (cause) {
+        // Setup has not sent a turn yet, so the newly-created conversation can
+        // be stopped and closed without discarding user work. If the physical
+        // cleanup refuses, keep its registry records so recovery can reopen the
+        // branch/folder instead of silently losing ownership.
+        if (started !== null) {
+          await started.session.stop().catch(() => undefined);
+          putDown(open.held, started.address);
+        }
+        let dropped: Awaited<ReturnType<typeof dropWorktree>> | null = null;
+        let cleanupFailure: string | null = null;
+        try {
+          dropped = await dropWorktree(gitRunHereFor(), open.path, made.value.folder);
+        } catch (cleanup) {
+          cleanupFailure = cleanup instanceof Error ? cleanup.message : String(cleanup);
+        }
+        if (dropped?.ok === true) {
+          if (workspace !== null) {
+            workspaceIndex = markDeleted(workspaceIndex, workspace.workspaceId);
+            await saveWorkspaceIndex().catch(() => undefined);
+          }
+        }
+        const original = cause instanceof Error ? cause.message : String(cause);
+        if (dropped?.ok !== true) {
+          throw new Error(
+            `${original} Cleanup was incomplete: ${cleanupFailure ?? dropped?.because ?? 'the worktree could not be removed.'}`,
+          );
+        }
+        throw cause;
+      }
     },
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the port's shape
@@ -4281,7 +4483,7 @@ function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: Canva
       return runTheChecks(await folderOf(lane));
     },
 
-    async review(lane) {
+    async review(lane, options) {
       const folder = await folderOf(lane);
       const since = laneHeads.get(`${project}\u0000${lane.id}`) ?? '';
       const working = await new ProjectHistory(folder)
@@ -4291,8 +4493,8 @@ function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: Canva
       // rather than since the last commit in it.
       const reached = since === '' ? '' : ((await gitRun(folder, ['diff', since])).out ?? '');
       const verdict = await reviewInLane(project, lane, `${reached}\n${working}`.trim(), {
-        model: null,
-        thinking: null,
+        model: options?.model ?? flow.model ?? null,
+        thinking: options?.thinking ?? flow.thinking ?? null,
         lookFirst: false,
         attachments: [],
         howFar: flow.howFar,
@@ -4300,15 +4502,18 @@ function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: Canva
       return verdict;
     },
 
-    async pullRequest(lane) {
+    async pullRequest(lane, options) {
       const branch = lane.branch;
+      if (branch === null && (await standingAt(project)) === 'default-branch') {
+        return { failure: 'A pull request needs a branch. Run this block in a worktree or switch the project to a branch first.' };
+      }
       const asked =
         branch === null
           ? 'Open a pull request for the work in this folder with the `gh` command you already have.'
           : `Open a pull request from the branch ${branch} with the \`gh\` command you already have.`;
       const turned = await turnInLane(project, lane, asked, {
-        model: null,
-        thinking: null,
+        model: options?.model ?? flow.model ?? null,
+        thinking: options?.thinking ?? flow.thinking ?? null,
         lookFirst: false,
         attachments: [],
         howFar: flow.howFar,
@@ -4316,16 +4521,33 @@ function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: Canva
       if ('failure' in turned) return { failure: turned.failure };
       const folder = await folderOf(lane);
       const found = await ghJSON(folder, ['pr', 'view'], 'url');
-      if (!found.ok) return { failure: found.because };
+      if (!found.ok) return { failure: found.because, turns: turned.turns, spent: turned.spent };
       const url = (found.value as Record<string, unknown>)['url'];
-      return typeof url === 'string' && url !== '' ? { url } : { failure: CANVAS_WORDS.noUrl };
+      return typeof url === 'string' && url !== ''
+        ? { url, turns: turned.turns, spent: turned.spent }
+        : { failure: CANVAS_WORDS.noUrl, turns: turned.turns, spent: turned.spent };
     },
 
     async stop(lane) {
+      const waiting = queued.get(lane.id);
+      if (waiting !== undefined) workspaceLocks.cancel(waiting, runId);
       const home = projectAt({ project });
       if (home === null || lane.conversationId === null) return;
       const found = conversationAt(home.held, { conversation: lane.conversationId });
       await found?.held.stop().catch(() => undefined);
+    },
+
+    async release() {
+      if (released) return;
+      released = true;
+      for (const key of queued.values()) workspaceLocks.cancel(key, runId);
+      queued.clear();
+      for (const held of leases.values()) {
+        if (held.newlyHeld) workspaceLocks.release(held.key, runId);
+      }
+      leases.clear();
+      activeFlowWorktreeLanes = Math.max(0, activeFlowWorktreeLanes - reserved.size);
+      reserved.clear();
     },
 
     changed,
@@ -4365,8 +4587,7 @@ const NOT_RUNNING: Trouble = {
 
 /** Write a flow back, replacing it by id and keeping the rest of the file. */
 async function keepFlows(projectId: string, userData: string, flow: CanvasFlow): Promise<void> {
-  const held = await FlowFile.read(projectId, userData);
-  await FlowFile.write(projectId, userData, withFlow(held, flow));
+  await FlowFile.transact(projectId, userData, null, (held) => withFlow(held, flow));
 }
 
 /**
@@ -4383,6 +4604,8 @@ async function beginRun(
   userData: string,
   flow: CanvasFlow,
   run: CanvasRun,
+  generation: number,
+  originWorkspaceId: string | null = null,
 ): Promise<CanvasRun> {
   const held = await FlowFile.read(projectId, userData);
   // The runs the runner already owns come from the file, never from the copy
@@ -4392,38 +4615,130 @@ async function beginRun(
     runs: held.find((one) => one.id === flow.id)?.runs ?? flow.runs,
     updatedAt: Date.now(),
   };
+  const driver = driverGate();
+  const driverDone = driver.promise;
   const port = runnerPortFor(project, starting, (moved) => {
-    const live = liveRuns.get(flow.id);
-    if (live !== undefined) live.run = moved;
+    const key = liveRunKey(project, flow.id);
+    if (invalidatedFlowRuns.has(key) || flowRunGenerations.get(key) !== generation) return;
+    const live = liveRuns.get(key);
+    if (live === undefined || live.generation !== generation) return;
+    live.run = moved;
     // Written on every step and pushed on every step: a card that says Running
     // while the file says otherwise is a card somebody stops trusting.
-    void keepFlowsOnDisk(projectId, userData, starting, moved).then(() =>
-      pushFlow(project, withRunFor(starting, moved)),
+    void keepFlowsOnDisk(project, projectId, userData, starting, moved, generation)
+      .then(() => {
+        const current = liveRuns.get(key);
+        if (!invalidatedFlowRuns.has(key) && flowRunGenerations.get(key) === generation && current?.generation === generation) {
+          pushFlow(project, withRunFor(starting, moved));
+        }
+      })
+      .catch(() => {
+        // A persistence failure must not become an unhandled rejection or leave
+        // the UI claiming that a run is still live. Invalidate later callbacks,
+        // publish a truthful terminal snapshot, and release the run's leases.
+        const current = liveRuns.get(key);
+        if (current === undefined || current.generation !== generation || current.run.state === 'failed') return;
+        invalidatedFlowRuns.add(key);
+        const was = current.run;
+        const failed: CanvasRun = { ...was, state: 'failed', endedAt: Date.now() };
+        current.run = failed;
+        pushFlow(project, withRunFor(starting, failed));
+        void (async () => {
+          // A persistence failure is a run failure, but stopping the runner is
+          // still required: otherwise a provider can keep sending turns after
+          // the UI has already drawn Failed and leases have been released.
+          const barrier = stoppingBarrier(key, current);
+          const over = await stopped(starting, was, current.port);
+          await barrier;
+          if (liveRuns.get(key) === current) await settledRun(current, over);
+        })().catch(() => undefined);
+      });
+  }, `flow-${run.id}`, originWorkspaceId);
+  const key = liveRunKey(project, flow.id);
+  liveRuns.set(key, { project, flow: starting, run, port, generation, driverDone });
+  const failSetup = async (): Promise<CanvasRun> => {
+    const failed: CanvasRun = { ...run, state: 'failed', endedAt: Date.now() };
+    liveRuns.delete(key);
+    await port.release?.().catch(() => undefined);
+    await keepFlowsOnDisk(project, projectId, userData, starting, failed, generation).catch(() => undefined);
+    pushFlow(project, withRunFor(starting, failed));
+    await finishRun(canvasRunNote(project, flow.id, generation, run.id)).catch((cause) => {
+      reportRunNoteFailure(project, flow.id, cause);
+    });
+    driver.resolve();
+    return failed;
+  };
+  try {
+    // Resumed runs already have conversations. Re-admit each of their workspaces
+    // before the first wave; the pure runner intentionally skips `openLane` for a
+    // known conversation and must not be asked to know about shell locks.
+    await Promise.all(run.lanes.filter((lane) => lane.conversationId !== null).map((lane) => port.openLane(lane)));
+    await keepFlows(projectId, userData, withRunFor(starting, run));
+    pushFlow(project, withRunFor(starting, run));
+    await wroteRunNote(
+      userData,
+      {
+        conversationId: asConversationId(canvasRunNote(project, flow.id, generation, run.id)),
+        workspaceId: null,
+        status: 'running',
+        ownerId: runOwner(run.id),
+        runtimeEpoch: null,
+        writtenAt: Date.now(),
+      },
+      project,
     );
-  });
-  liveRuns.set(flow.id, { project, flow: starting, run, port });
-  await keepFlows(projectId, userData, withRunFor(starting, run));
-  pushFlow(project, withRunFor(starting, run));
-  await wroteRunNote(
-    userData,
-    {
-      conversationId: asConversationId(flow.id),
-      workspaceId: null,
-      status: 'running',
-      ownerId: runOwner(run.id),
-      runtimeEpoch: null,
-      writtenAt: Date.now(),
-    },
-    project,
-  );
-  const driven = await drive(starting, run, port);
-  const live = liveRuns.get(flow.id);
+  } catch {
+    return failSetup();
+  }
+  // Setup is the only phase that needs the Start reservation. Once the run
+  // is admitted and its note is durable, Delete/Stop must be allowed to cancel
+  // the active driver through the live-run barrier.
+  clearStartingFlowRun(key, generation);
+  drivingFlowRuns.add(key);
+  let driven: CanvasRun;
+  try {
+    driven = await drive(starting, run, port);
+  } catch {
+    // A port/stream failure outside the runner's block boundary must still
+    // become a terminal run. Otherwise the live map and in-flight note strand
+    // a canvas as Running forever and a later Start is refused indefinitely.
+    const failed: CanvasRun = {
+      ...run,
+      state: 'failed',
+      endedAt: Date.now(),
+    };
+    const live = liveRuns.get(key);
+    if (live !== undefined) live.run = failed;
+    if (!invalidatedFlowRuns.has(key)) {
+      await keepFlowsOnDisk(project, projectId, userData, starting, failed, generation).catch(() => undefined);
+      pushFlow(project, withRunFor(starting, failed));
+    }
+    liveRuns.delete(key);
+    await port.release?.().catch(() => undefined);
+    await finishRun(canvasRunNote(project, flow.id, generation, run.id)).catch((cause) => {
+      reportRunNoteFailure(project, flow.id, cause);
+    });
+    driver.resolve();
+    return failed;
+  } finally {
+    drivingFlowRuns.delete(key);
+  }
+  const live = liveRuns.get(key);
   if (live !== undefined) live.run = driven;
   /* Pushed once more, from the run the machine came back with. Every tick has
      already pushed its own step, and the window folds them in order — but the
      last one is the one that says `done`, and a run must not be left on screen
      saying it is working when the file says it finished. */
-  pushFlow(project, withRunFor(starting, driven));
+  if (!invalidatedFlowRuns.has(key)) pushFlow(project, withRunFor(starting, driven));
+  if (live !== undefined) {
+    const answer = await settledRun(live, driven);
+    driver.resolve();
+    return answer;
+  }
+  await finishRun(canvasRunNote(project, flow.id, generation, run.id)).catch((cause) => {
+    reportRunNoteFailure(project, flow.id, cause);
+  });
+  driver.resolve();
   return driven;
 }
 
@@ -4436,32 +4751,71 @@ function withRunFor(flow: CanvasFlow, run: CanvasRun): CanvasFlow {
  *  the drawings and the runs live in one document and the window may have
  *  written a drawing in between. */
 async function keepFlowsOnDisk(
+  project: string,
   projectId: string,
   userData: string,
   flow: CanvasFlow,
   run: CanvasRun,
+  generation: number,
 ): Promise<void> {
-  const held = await FlowFile.read(projectId, userData);
-  const known = held.find((one) => one.id === flow.id) ?? flow;
-  await FlowFile.write(projectId, userData, withFlow(held, withRunFor(known, run)));
+  await FlowFile.transact(projectId, userData, null, (held) => {
+    const key = liveRunKey(project, flow.id);
+    if (invalidatedFlowRuns.has(key) || flowRunGenerations.get(key) !== generation) return held;
+    const known = held.find((one) => one.id === flow.id);
+    if (known === undefined) return held;
+    return withFlow(held, withRunFor(known, run));
+  });
+}
+
+/** Persist a terminal Stop snapshot after its generation has been invalidated.
+ * Ordinary callbacks are blocked once stopping starts, but Stop still needs a
+ * durable stopped record rather than letting recovery reinterpret it as stale
+ * running work. */
+async function keepStoppedOnDisk(
+  project: string,
+  projectId: string,
+  userData: string,
+  flow: CanvasFlow,
+  run: CanvasRun,
+  generation: number,
+): Promise<void> {
+  await FlowFile.transact(projectId, userData, null, (held) => {
+    const key = liveRunKey(project, flow.id);
+    if (flowRunGenerations.get(key) !== generation) return held;
+    const known = held.find((one) => one.id === flow.id);
+    return known === undefined ? held : withFlow(held, withRunFor(known, run));
+  });
 }
 
 /** Everything a press has to say once a drive has come back. */
 async function settledRun(
-  live: { project: string; flow: CanvasFlow; run: CanvasRun; port: RunnerPort },
+  live: LiveCanvasRun,
   run: CanvasRun,
 ): Promise<CanvasRun> {
   live.run = run;
   if (run.state === 'running' || run.state === 'needs-you') return run;
-  liveRuns.delete(live.flow.id);
-  await finishRun(live.flow.id);
+  const key = liveRunKey(live.project, live.flow.id);
+  liveRuns.delete(key);
+  drivingFlowRuns.delete(key);
+  await live.port.release?.().catch(() => undefined);
+  await finishRun(canvasRunNote(live.project, live.flow.id, live.generation, live.run.id)).catch((cause) => {
+    reportRunNoteFailure(live.project, live.flow.id, cause);
+  });
   return run;
 }
 
 /** A run that has ended: its note comes off disk, so the next launch reports
  *  nothing about a run that finished. */
-async function finishRun(flowId: string): Promise<void> {
-  await tookRunNoteAway(app.getPath('userData'), flowId).catch(() => undefined);
+async function finishRun(noteId: string): Promise<void> {
+  await tookRunNoteAway(app.getPath('userData'), noteId);
+}
+
+function reportRunNoteFailure(project: string, flow: string, cause: unknown): void {
+  log.line('warn', 'could not clear canvas run note', {
+    project,
+    flow,
+    cause: cause instanceof Error ? cause.message : String(cause),
+  });
 }
 
 /** Every run change, to the window. One place, so the push and the file never
@@ -5343,7 +5697,10 @@ async function buildPlanFilesFor(project: string): Promise<readonly string[]> {
 const opening = new Map<string, Promise<Result<OpenedProject>>>();
 
 function openProject(folder: string): Promise<Result<OpenedProject>> {
-  const path = resolve(folder);
+  // The durable registry follows symlinks, so live workspace lookup must use
+  // the same identity. Otherwise opening a project once by its real path and
+  // once through a link creates two sessions writing one folder.
+  const path = canonical(folder);
   const already = opening.get(path);
   if (already !== undefined) return already;
   const attempt = openTheProject(path).finally(() => opening.delete(path));
@@ -5566,6 +5923,7 @@ async function startConversationUnlocked(
       // What an add-on asks goes to the window that is watching this
       // conversation, and nowhere else.
       ask: askTheWindowFor(open, from),
+      cancelAsk: cancelAddonAsk,
       // Restore points must describe the tree this session is actually changing.
       timeline:
         checkout === null
@@ -5685,7 +6043,7 @@ async function startConversationUnlocked(
     held.checkouts.set(address, checkout);
     await saveCheckouts(open.path, held).catch(() => undefined);
   }
-  await noteWhereItWorks(open, address, checkout?.folder ?? null).catch(() => undefined);
+  await noteWhereItWorks(open, address, checkout?.folder ?? null, session);
   keepConversation(held, address, session);
   // Open and quiet: nothing is being asked of it yet, and a restart from here
   // leaves it exactly as it is.
@@ -6365,7 +6723,7 @@ function readAnswer(value: unknown): ExtensionAnswer | null {
  */
 const addonAsks = new Map<
   string,
-  { settle: (answer: ExtensionAnswer) => void; where: Where }
+  { settle: (answer: ExtensionAnswer) => void; cancel: () => void; where: Where }
 >();
 
 let addonAsksSoFar = 0;
@@ -6381,11 +6739,10 @@ function nothingToAsk(ask: ExtensionAsk): ExtensionAnswer {
 /** Settle every question that belongs to a conversation, as cancelled. Used
  *  when its run stops and when the project closes. */
 function withdrawAsks(where: Where): void {
-  for (const [id, one] of [...addonAsks]) {
+  for (const one of [...addonAsks.values()]) {
     if (where.project !== undefined && one.where.project !== where.project) continue;
     if (where.conversation !== undefined && one.where.conversation !== where.conversation) continue;
-    addonAsks.delete(id);
-    one.settle({ kind: 'confirm', value: false });
+    one.cancel();
   }
 }
 
@@ -6400,8 +6757,8 @@ function withdrawAsks(where: Where): void {
 function askTheWindowFor(
   open: { path: string },
   from: Speaking,
-): (ask: ExtensionAsk) => Promise<ExtensionAnswer> {
-  return (ask: ExtensionAsk) =>
+): (ask: ExtensionAsk, requestIdFromRuntime?: string) => Promise<ExtensionAnswer> {
+  return (ask: ExtensionAsk, requestIdFromRuntime?: string) =>
     new Promise<ExtensionAnswer>((resolve) => {
       const win = mainWindow;
       if (win === null || win.isDestroyed()) {
@@ -6409,7 +6766,7 @@ function askTheWindowFor(
         return;
       }
       addonAsksSoFar += 1;
-      const requestId = `addon-${String(addonAsksSoFar)}`;
+      const requestId = requestIdFromRuntime ?? `addon-${String(addonAsksSoFar)}`;
       const where: Where = {
         project: open.path,
         ...(from.address === null ? {} : { conversation: from.address }),
@@ -6421,7 +6778,8 @@ function askTheWindowFor(
         if (bell !== undefined) clearTimeout(bell);
         resolve(answer);
       };
-      addonAsks.set(requestId, { settle, where });
+      const cancel = (): void => settle(nothingToAsk(ask));
+      addonAsks.set(requestId, { settle, cancel, where });
       const patience = ask.kind === 'editor' ? null : ask.timeoutMs;
       if (patience !== null) {
         bell = setTimeout(() => settle(nothingToAsk(ask)), patience);
@@ -6434,6 +6792,11 @@ function askTheWindowFor(
         conversation: from.address,
       });
     });
+}
+
+/** Cancel exactly one child-originated renderer request. */
+function cancelAddonAsk(requestId: string): void {
+  addonAsks.get(requestId)?.cancel();
 }
 
 /**
@@ -9691,9 +10054,9 @@ function register(): void {
     return done(made.session);
   });
 
-  handle<string>(CHANNEL.terminalScrollback, (_event, args) => {
+  handle<{ data: string; sequence: number }>(CHANNEL.terminalScrollback, (_event, args) => {
     const [id] = args;
-    return Promise.resolve(done(typeof id === 'string' ? terminals.scrollback(id) : ''));
+    return Promise.resolve(done(typeof id === 'string' ? terminals.snapshot(id) : { data: '', sequence: 0 }));
   });
 
   handle<null>(CHANNEL.terminalWrite, (_event, args) => {
@@ -9719,11 +10082,12 @@ function register(): void {
   });
 
   handle<readonly TerminalSession[]>(CHANNEL.terminalList, (_event, args) => {
-    const open = projectAt(whereIn(args));
+    const where = whereIn(args);
+    const open = projectAt(where);
     if (open === null) return Promise.resolve(done<readonly TerminalSession[]>([]));
-    const folder = canonical(open.path);
+    const folder = canonical(folderFor(open, where));
     return Promise.resolve(
-      done(terminals.list().filter((one) => canonical(one.workspace).startsWith(folder))),
+      done(terminals.list().filter((one) => canonical(one.workspace) === folder)),
     );
   });
 
@@ -10476,6 +10840,20 @@ function register(): void {
     }
   }
 
+  /** Stop writes before touching a copy, while retaining the session until the
+   *  destructive operation has actually succeeded. A failed merge/drop must
+   *  leave its conversation reopenable beside the still-owned checkout. */
+  async function stopCopyConversation(open: Workspace<Held>, address: string): Promise<void> {
+    const found = open.held.sessions.open.find((one) => one.path === address);
+    if (found === undefined) return;
+    open.held.suppressCarry.add(address);
+    try {
+      await found.held.stop().catch(() => undefined);
+    } finally {
+      open.held.suppressCarry.delete(address);
+    }
+  }
+
   handle<null>(CHANNEL.worktreeLand, async (_event, args) => {
     const where = whereIn(args);
     const open = projectAt(where);
@@ -10560,7 +10938,7 @@ function register(): void {
       history = open.held.timeline;
     }
     if (history === null) return fail(SEVERAL_PROJECTS);
-    await putDownCopyConversation(open, entry.address);
+    await stopCopyConversation(open, entry.address);
     if ((await reopenCheckout(repo, entry)) === null) {
       return fail(mergeTrouble(source, target, worktreeWords.gone));
     }
@@ -10608,6 +10986,7 @@ function register(): void {
         ),
       );
     }
+    await putDownCopyConversation(open, entry.address);
     open.held.checkouts.delete(entry.address);
     await saveCheckouts(open.path, open.held).catch(() => undefined);
     return done(null);
@@ -10621,10 +11000,11 @@ function register(): void {
     const entry = checkoutEntryFor(open, where);
     if (entry === null) return fail(worktreeTrouble(NO_CHECKOUT_HERE));
     const repo = (childRepoFor(open as unknown as Workspace<Held>, where)?.path ?? open.path);
-    await putDownCopyConversation(open, entry.address);
+    await stopCopyConversation(open, entry.address);
     await reopenCheckout(repo, entry);
     const dropped = await dropWorktree(gitRunHereFor(), repo, entry.folder);
     if (dropped.ok) {
+      await putDownCopyConversation(open, entry.address);
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     }
@@ -10913,9 +11293,12 @@ function register(): void {
       // back. Its conversation is put down first: the session is rooted in that
       // folder, and left open the next thing it was asked to do would run
       // somewhere that no longer exists.
-      await putDownCopyConversation(open, entry.address);
+      await stopCopyConversation(open, entry.address);
       const landed = await landWorktree(gitRunHereFor(), repo, checkout.folder, landing);
-      if (!landed.ok) return fail(worktreeTrouble(landed.because));
+      if (!landed.ok) {
+        return fail(mergeTrouble(basename(checkout.folder), basename(repo), landed.because));
+      }
+      await putDownCopyConversation(open, entry.address);
       open.held.checkouts.delete(entry.address);
       await saveCheckouts(open.path, open.held).catch(() => undefined);
     } else {
@@ -11950,6 +12333,12 @@ function register(): void {
       const now = sessionAt(open, where);
       const stillHere = now === agent && now.commands().some((one) => one.name === addonCommand.name);
       if (!stillHere) {
+        // A queued request may have just been granted. Release the lock before
+        // returning from this validation path; the normal send try/finally is
+        // below and therefore cannot clean up this early exit.
+        if (admission.granted && admission.newlyHeld) {
+          workspaceLocks.release(workspaceKey, runId);
+        }
         states.move(named(conversation.path), 'idle', Date.now());
         return fail({
           what: `/${addonCommand.name} is not here any more.`,
@@ -12400,11 +12789,15 @@ function register(): void {
   /* What the panes were showing when the window was last closed.
      The view record lives in the registry index, which already knows every
      conversation, so a pane put back at launch is one the shell can open. */
-  handle<readonly ViewShown[]>(CHANNEL.viewsLook, async () => {
+  handle<readonly ViewShown[]>(CHANNEL.viewsLook, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done<readonly ViewShown[]>([]);
     const index = await loadWorkspaceIndex();
+    const project = projectAtPath(index, canonical(open.path));
+    if (project === null) return done<readonly ViewShown[]>([]);
     const shown: ViewShown[] = [];
     for (const pane of [0, 1] as const) {
-      const view = viewInPane(index, pane);
+      const view = viewInPaneForProject(index, pane, project.projectId);
       if (view !== null) shown.push({ ...view });
     }
     return done(shown);
@@ -12415,17 +12808,29 @@ function register(): void {
     if (!Array.isArray(raw)) return fail(NO_SUCH_ENTRY);
     const wanted = raw.map(asViewShown);
     if (wanted.some((one) => one === null)) return fail(NO_SUCH_ENTRY);
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
     await loadWorkspaceIndex();
+    const project = projectAtPath(workspaceIndex, canonical(open.path));
+    if (project === null) return fail(NO_SUCH_ENTRY);
+    // Validate the complete request before changing anything. A stale window
+    // from another project must not erase this project's saved panes.
+    if ((wanted as readonly ViewShown[]).some(
+      (one) => !viewInProject(workspaceIndex, one, project.projectId),
+    )) return fail(NO_SUCH_ENTRY);
     /* The whole set, so a pane somebody closed takes its view with it. A view
        the registry does not know a conversation for is dropped rather than
        stored: it is a pane that would fail the moment it was pressed. */
     let next = workspaceIndex;
     for (const one of wanted as readonly ViewShown[]) {
-      next = noteView(next, one).index;
+      next = noteViewForProject(next, one, project.projectId).index;
     }
     const keeping = new Set((wanted as readonly ViewShown[]).map((one) => one.viewId));
     for (const id of Object.keys(next.views)) {
-      if (!keeping.has(id)) next = dropView(next, id);
+      const view = next.views[id];
+      if (view !== undefined && viewInProject(next, view, project.projectId) && !keeping.has(id)) {
+        next = dropView(next, id);
+      }
     }
     if (next === workspaceIndex) return done(null);
     workspaceIndex = next;
@@ -12445,7 +12850,34 @@ function register(): void {
     if (open === null) return done<readonly CanvasFlow[]>([]);
     const userData = app.getPath('userData');
     const { projectId } = await localWorkspaceFor(open.path);
-    return done(await FlowFile.read(projectId, userData, open.path));
+    try {
+      const held = await FlowFile.read(projectId, userData, open.path);
+      const now = Date.now();
+      const recovered = held.map((flow) => {
+        const last = flow.runs[0];
+        const key = liveRunKey(open.path, flow.id);
+        if ((last?.state !== 'running' && last?.state !== 'needs-you') || liveRuns.has(key) || startingFlowRuns.has(key)) return flow;
+        return {
+          ...flow,
+          runs: [{ ...last, state: 'interrupted' as const, endedAt: now }, ...flow.runs.slice(1)],
+          updatedAt: now,
+        };
+      });
+      if (recovered.some((flow, index) => flow !== held[index])) {
+        await FlowFile.transact(projectId, userData, open.path, (current) => current.map((flow) => {
+          const last = flow.runs[0];
+          const key = liveRunKey(open.path, flow.id);
+          if ((last?.state !== 'running' && last?.state !== 'needs-you') || liveRuns.has(key) || startingFlowRuns.has(key)) return flow;
+          return { ...flow, runs: [{ ...last, state: 'interrupted' as const, endedAt: now }, ...flow.runs.slice(1)], updatedAt: now };
+        }));
+      }
+      return done(recovered);
+    } catch (cause) {
+      if (cause instanceof FlowFileUnreadable) {
+        return fail({ what: 'I could not read these canvases.', because: 'The canvas file was kept unchanged. Move it aside or restore a valid copy, then try again.', actionLabel: 'Try again' });
+      }
+      throw cause;
+    }
   });
 
   /**
@@ -12461,18 +12893,26 @@ function register(): void {
     const where = whereIn(args);
     const open = projectAt(where);
     if (open === null) return fail(NOTHING_OPEN);
-    const found = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
-    if (found === null || typeof found['id'] !== 'string' || found['id'] === '') {
+    const wanted = readFlowStrict(raw);
+    if (wanted === null) {
       return fail(NO_SUCH_ENTRY);
     }
     const userData = app.getPath('userData');
     const { projectId } = await localWorkspaceFor(open.path);
-    const held = await FlowFile.read(projectId, userData, open.path);
-    const known = held.find((one) => one.id === found['id']);
-    const wanted = found as unknown as CanvasFlow;
-    const kept: CanvasFlow =
-      known === undefined ? wanted : { ...wanted, runs: known.runs, createdAt: known.createdAt };
-    await FlowFile.write(projectId, userData, withFlow(held, kept));
+    const key = liveRunKey(open.path, wanted.id);
+    if (liveRuns.has(key) || startingFlowRuns.has(key) || stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    let kept: CanvasFlow | null = null;
+    await FlowFile.transact(projectId, userData, open.path, (held) => {
+      const known = held.find((one) => one.id === wanted.id);
+      kept = {
+        ...wanted,
+        runs: known?.runs ?? [],
+        createdAt: known?.createdAt ?? wanted.createdAt,
+        updatedAt: Date.now(),
+      };
+      return withFlow(held, kept);
+    });
+    if (kept === null) return fail(NO_SUCH_ENTRY);
     return done(kept);
   });
 
@@ -12483,13 +12923,34 @@ function register(): void {
     if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
     const userData = app.getPath('userData');
     const { projectId } = await localWorkspaceFor(open.path);
-    const held = await FlowFile.read(projectId, userData, open.path);
-    await FlowFile.write(projectId, userData, withoutFlow(held, id));
     // A run that is going is stopped first: a canvas somebody threw away must
     // not still be sending turns into a conversation nobody can see.
-    const live = liveRuns.get(id);
-    if (live !== undefined) await stopped(live.flow, live.run, live.port).catch(() => undefined);
-    liveRuns.delete(id);
+    const key = liveRunKey(open.path, id);
+    if (startingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    if (stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    invalidatedFlowRuns.add(key);
+    const live = liveRuns.get(key);
+    const barrier = live === undefined
+      ? (stoppingFlowRuns.get(key) ?? Promise.resolve())
+      : stoppingBarrier(key, live);
+    // Keep this generation invalidated for the rest of the sitting. A late
+    // callback must not repopulate a just-deleted flow after the barrier.
+    const deletion = (async () => {
+      // This await is inside the reserved operation: Start/Delete cannot slip
+      // through while stopped() is still asking the provider to cancel.
+      if (live !== undefined) await stopped(live.flow, live.run, live.port).catch(() => undefined);
+      await barrier;
+      if (live !== undefined && liveRuns.get(key) === live) {
+        await settledRun(live, { ...live.run, state: 'stopped', endedAt: Date.now() });
+      }
+      await FlowFile.transact(projectId, userData, open.path, (current) => withoutFlow(current, id));
+    })();
+    stoppingFlowRuns.set(key, deletion);
+    try {
+      await deletion;
+    } finally {
+      if (stoppingFlowRuns.get(key) === deletion) stoppingFlowRuns.delete(key);
+    }
     return done(null);
   });
 
@@ -12507,14 +12968,28 @@ function register(): void {
     if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
     const userData = app.getPath('userData');
     const { projectId } = await localWorkspaceFor(open.path);
+    const origin = where.conversation === undefined ? null : await recordedWorkspace(where.conversation);
+    const originWorkspaceId = origin !== null && origin.projectId === projectId ? origin.workspaceId : null;
     const held = await FlowFile.read(projectId, userData, open.path);
     const flow = held.find((one) => one.id === id);
     if (flow === undefined) return fail(NO_SUCH_ENTRY);
-    const may = canStart(flow, await standingAt(open.path));
+    const key = liveRunKey(open.path, id);
+    if (liveRuns.has(key) || startingFlowRuns.has(key) || stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    invalidatedFlowRuns.delete(key);
+    const generation = nextFlowRunGeneration(key);
+    startingFlowRuns.set(key, generation);
+    let standing: Standing;
+    try {
+      standing = await standingAt(origin?.projectId === projectId ? origin.cwd : open.path);
+    } catch {
+      clearStartingFlowRun(key, generation);
+      return fail({ what: 'I could not read this branch.', because: 'Git did not answer, so the canvas was not started.', actionLabel: 'Try again' });
+    }
+    const may = canStart(flow, standing);
     if (!may.ok) {
+      clearStartingFlowRun(key, generation);
       return fail({ what: 'This canvas cannot start yet.', because: may.because, actionLabel: 'Got it' });
     }
-    if (liveRuns.has(id)) return fail(RUNNING_ALREADY);
     const run: CanvasRun = {
       id: newRunId(),
       state: 'running',
@@ -12524,7 +12999,11 @@ function register(): void {
       blocks: {},
       spent: null,
     };
-    return done(await beginRun(open.path, projectId, userData, flow, run));
+    try {
+      return done(await beginRun(open.path, projectId, userData, flow, run, generation, originWorkspaceId));
+    } finally {
+      clearStartingFlowRun(key, generation);
+    }
   });
 
   handle<CanvasRun>(CHANNEL.flowStop, async (_event, args) => {
@@ -12532,11 +13011,50 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
-    const live = liveRuns.get(id);
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    const key = liveRunKey(open.path, id);
+    const live = liveRuns.get(key);
     if (live === undefined) return fail(NOT_RUNNING);
-    const over = await stopped(live.flow, live.run, live.port);
-    liveRuns.delete(id);
-    finishRun(id);
+    if (stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    const barrier = stoppingBarrier(key, live);
+    let over = live.run;
+    let persistenceFailure: unknown = null;
+    const stopping = (async () => {
+      over = await stopped(live.flow, live.run, live.port);
+      await barrier;
+      try {
+        await keepStoppedOnDisk(open.path, projectId, userData, live.flow, over, live.generation);
+      } catch (cause) {
+        persistenceFailure = cause;
+        log.line('warn', 'could not persist stopped canvas', {
+          project: open.path,
+          flow: id,
+          cause: cause instanceof Error ? cause.message : String(cause),
+        });
+      } finally {
+        if (liveRuns.get(key) === live) await settledRun(live, over);
+      }
+    })();
+    // Keep Start blocked through the terminal stopped write and lease cleanup,
+    // not merely through the driver's own promise.
+    stoppingFlowRuns.set(key, stopping);
+    try {
+      await stopping;
+    } finally {
+      if (stoppingFlowRuns.get(key) === stopping) stoppingFlowRuns.delete(key);
+    }
+    // The normal runner callback is generation-invalidated during Stop, so
+    // publish the terminal snapshot explicitly after its persistence attempt;
+    // this also keeps the renderer truthful when that persistence attempt fails.
+    pushFlow(open.path, withRunFor(live.flow, over));
+    if (persistenceFailure !== null) {
+      return fail({
+        what: 'The canvas stopped, but its final state was not saved.',
+        because: persistenceFailure instanceof Error ? persistenceFailure.message : String(persistenceFailure),
+        actionLabel: 'Try again',
+      });
+    }
     return done(over);
   });
 
@@ -12545,14 +13063,34 @@ function register(): void {
     const open = projectAt(whereIn(args));
     if (open === null) return fail(NOTHING_OPEN);
     if (typeof id !== 'string' || typeof block !== 'string') return fail(NO_SUCH_ENTRY);
-    const live = liveRuns.get(id);
+    const key = liveRunKey(open.path, id);
+    const live = liveRuns.get(key);
     if (live === undefined) return fail(NOT_RUNNING);
+    if (stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    if (drivingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    const driver = driverGate();
+    live.driverDone = driver.promise;
     // The gate opens in the live run, which `changed` has already written and
     // pushed, so the wave below starts from where the run really is.
-    const over = continued(live.flow, live.run, live.port, block);
+    let over: CanvasRun;
+    try {
+      over = continued(live.flow, live.run, live.port, block);
+    } catch (cause) {
+      driver.resolve();
+      throw cause;
+    }
     live.run = over;
-    if (over.state !== 'running') return done(over);
-    return done(await drive(live.flow, over, live.port).then((run) => settledRun(live, run)));
+    if (over.state !== 'running') {
+      driver.resolve();
+      return done(over);
+    }
+    drivingFlowRuns.add(key);
+    try {
+      return done(await drive(live.flow, over, live.port).then((run) => settledRun(live, run)));
+    } finally {
+      driver.resolve();
+      drivingFlowRuns.delete(key);
+    }
   });
 
   /**
@@ -12575,13 +13113,24 @@ function register(): void {
     if (flow === undefined) return fail(NO_SUCH_ENTRY);
     const last = flow.runs[0];
     if (last === undefined) return fail(NOT_RUNNING);
-    if (liveRuns.has(id)) return fail(RUNNING_ALREADY);
+    const key = liveRunKey(open.path, id);
+    if (liveRuns.has(key) || startingFlowRuns.has(key) || stoppingFlowRuns.has(key)) return fail(RUNNING_ALREADY);
+    invalidatedFlowRuns.delete(key);
+    const generation = nextFlowRunGeneration(key);
+    startingFlowRuns.set(key, generation);
     // Everything that did not finish is cleared so it runs again from its own
     // beginning: a turn nobody was waiting on any more is not half done.
     const carried = { ...flow, runs: flow.runs.slice(1) };
-    const port = runnerPortFor(open.path, carried, () => undefined);
-    const going = resumed(last, port);
-    return done(await beginRun(open.path, projectId, userData, carried, going));
+    const port = runnerPortFor(open.path, carried, () => undefined, last.id);
+    const recoverable = last.state === 'running'
+      ? { ...last, state: 'interrupted' as const, endedAt: Date.now() }
+      : last;
+    const going = resumed(recoverable, port);
+    try {
+      return done(await beginRun(open.path, projectId, userData, carried, going, generation));
+    } finally {
+      clearStartingFlowRun(key, generation);
+    }
   });
 
   /** The custom properties this project's stylesheets declare.

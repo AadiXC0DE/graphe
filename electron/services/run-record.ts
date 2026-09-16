@@ -86,9 +86,9 @@ export function readRunNotes(userData: string): readonly RunNote[] {
 /* Writes are chained rather than run side by side. Two notes for one
    conversation arrive in the same breath — a run starting, then the next one
    starting — and each reads the file before it writes it, so a removal landing
-   between them would put back the run that had already ended. The chain never
-   rejects: a profile that will not take a note is a note nobody is told about,
-   not a run that stops because of it. */
+   between them would put back the run that had already ended. The queue itself
+   never rejects, so one failed profile write cannot poison every later note, but
+   each operation keeps its own rejection for the caller that must report it. */
 let writing: Promise<void> = Promise.resolve();
 
 /**
@@ -98,8 +98,9 @@ let writing: Promise<void> = Promise.resolve();
  * finished turn all leave nothing behind, and the next launch has nothing to
  * say about them.
  *
- * Returns when the file has been written, for a caller that needs to know — a
- * test, or the end of a launch. Nothing has to wait on it.
+ * Resolves when the file has been written, or rejects with this operation's
+ * failure. The shared queue remains usable after that rejection, so a later
+ * note can still be attempted.
  */
 export function wroteRunNote(
   userData: string,
@@ -108,26 +109,24 @@ export function wroteRunNote(
 ): Promise<void> {
   const conversation = facts.conversationId;
   const keep: RunNote | null = inFlight(facts.status) ? { ...facts, project } : null;
-  writing = writing
-    .then(async () => {
-      const others = readRunNotes(userData).filter((one) => one.conversationId !== conversation);
-      const all = keep === null ? others : [...others, keep];
-      await writeAtomically(runNotesFile(userData), `${JSON.stringify(all, null, 2)}\n`);
-    })
-    .catch(() => undefined);
-  return writing;
+  const operation = writing.then(async () => {
+    const others = readRunNotes(userData).filter((one) => one.conversationId !== conversation);
+    const all = keep === null ? others : [...others, keep];
+    await writeAtomically(runNotesFile(userData), `${JSON.stringify(all, null, 2)}\n`);
+  });
+  writing = operation.catch(() => undefined);
+  return operation;
 }
 
 /** Take one conversation's note away, because nothing of its is in flight any
  *  more. Used where a launch has answered the note it found. */
 export function tookRunNoteAway(userData: string, conversation: string): Promise<void> {
-  writing = writing
-    .then(async () => {
-      const others = readRunNotes(userData).filter((one) => one.conversationId !== conversation);
-      await writeAtomically(runNotesFile(userData), `${JSON.stringify(others, null, 2)}\n`);
-    })
-    .catch(() => undefined);
-  return writing;
+  const operation = writing.then(async () => {
+    const others = readRunNotes(userData).filter((one) => one.conversationId !== conversation);
+    await writeAtomically(runNotesFile(userData), `${JSON.stringify(others, null, 2)}\n`);
+  });
+  writing = operation.catch(() => undefined);
+  return operation;
 }
 
 /**

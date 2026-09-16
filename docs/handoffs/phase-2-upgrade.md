@@ -146,10 +146,10 @@ baseline and at the next wave boundary. A row with its own reason says so.
 | `electron-builder` 25.1.8 to 26.15.3 | upgrade with packaging fixtures, native assets and signing verification | Same session as the Electron row, by the handoff's own instruction: one packaging pass rather than two. `scripts/verify-package.mjs` and the `afterPack` ad-hoc sign hook are what a new builder has to be re-verified against | with Electron |
 | `glob` 7.2.3 | locate all consumers; prefer removing the direct dependency if supported discovery covers them | **Done in this pass by removal** (see above). The direct dependency is gone; the lockfile copy remains only because four transitive packages require it | done |
 | `vite` 6.4.3 to 8.3.0 | follow the major path and compare the bundle graph | **Done in this pass** (see above). The Rolldown/Oxc comparison, `base: './'`, lazy chunks and sourcemaps were all exercised | done |
-| `vitest` 2.1.9 to 5.0.0 | read intermediate migration requirements; verify mocks, timers, pools, reporters | Not attempted. Vitest 5 requires Node `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`; this machine runs 22.21.1 and `.nvmrc` pins 22, so the row is coupled to a Node decision before it is coupled to any API | 2026-10-16 |
+| `vitest` 2.1.9 to 5.0.0 | read intermediate migration requirements; verify mocks, timers, pools, reporters | **Not a Node problem**: engines are `^22.12.0 \|\| ^24.0.0 \|\| >=26.0.0`, this machine runs 22.21.1, and the peers are already here. The migration surface on this tree is small — no `vitest.config.*`, `bench` is not used as a fixture, the two held `.rejects` promises are awaited. Not taken in this pass | 2026-10-16 |
 | `jsdom` 25.0.1 to 29.1.1 | validate Node engine and changed DOM/layout assumptions | Not attempted. It is a stand-in for Chromium, and the assumption changes have to be checked against a real window, which is the same pass as the visual matrix | 2026-10-16 |
 | `eslint` 9.39.5 to 10.10.0, `eslint-plugin-react-hooks` 5.2.0 to 7.1.1 | compatible parser/plugins; review new findings, especially lifecycle effects and stale closures | Not attempted. ESLint 10 changes the peer set the two plugins sit in, and the hooks plugin's new rules report on components this branch is midway through deleting | 2026-10-16 |
-| `typescript` 5.9.3 to 7.0.2 | "stay on a supported intermediate release if the compiler API migration is not ready. Record the exact reason and reassessment date" | Not attempted. The compiler API has three consumers — `scripts/no-dashes.mjs` (`npm run copy:check`), `tests/asking-wired.test.ts`, `tests/overview-roots.test.ts` — and a probe of the three has not been run. 5.9.3 is a supported release, not a broken "latest" | 2026-10-16, as its own change |
+| `typescript` 5.9.3 to 7.0.2 | Probed 2026-09-16 and settled: **stay on 5.9.x**. `typescript@7.0.2` ships `bin/tsc` and `lib/tsc.js` only — `require('typescript')` has no `main`, and `transpileModule`, `createSourceFile` and `SyntaxKind` are all `undefined` — so the three compiler-API consumers (`scripts/no-dashes.mjs`, `tests/asking-wired.test.ts`, `tests/overview-roots.test.ts`) cannot run on it at all; and `typescript-eslint` 8.70 pins `typescript >=4.8.4 <6.1.0`, so the lint stack refuses it too. Revisit only when typescript-eslint's peer range includes 7 **and** either a JS compiler API returns or the three consumers are rewritten (`@typescript-eslint/typescript-estree` for the script, `esbuild.transformSync` for the two tests — both already in the tree) | Closed. No date: this is a standing decision until those two conditions change |
 | `unpdf` 0.12.2 to 1.8.1 | major, isolated: compare text/images, worker/assets, encrypted/corrupt PDF handling | Not attempted. Its one importer is `src/agent/pi/pdf.ts:16` (`extractText`), and PDF text feeds a turn (`paperWords`); the comparison fixtures have not been built | 2026-10-16 |
 | `mermaid` 11.17.2 to 12.0.0 | major separately, after renderer/sanitization checks | Not attempted. The 11.17.2 step is done; the major needs the hostile-label and sanitization cases in `tests/mermaid.test.ts` repeated against the 12 renderer, and Vite 8 moved the mermaid chunks this pass | 2026-10-16 |
 | `@types/node` 22.20.2 | align final types to the build/runtime target, not newest types blindly | Note: the plan's inventory row names 26.5.1 as newest. The lockfile-aligned move to 22.20.2 is already done above; anything higher follows the Electron bump rather than leading it | with Electron |
@@ -161,9 +161,15 @@ Stated plainly, so the next pass starts from the truth rather than from this
 table's optimism.
 
 - `glob` was removed in this pass; there is nothing left to do for that row.
-- `vitest` 5 is blocked on a Node decision, not on Vitest: its engines are
-  `^22.12.0 || ^24.0.0 || >=26.0.0` and this machine and `.nvmrc` are on 22.
-- `typescript` 7's three compiler-API consumers have not been probed.
+- `vitest` 5 is **not** blocked on Node: its engines are `^22.12.0 || ^24.0.0 ||
+  >=26.0.0`, this machine runs 22.21.1, and every peer it wants is already here
+  (`vite ^6.4 || ^7 || ^8` — we have 8.3; `@types/node ^22` — we have 22.20.2).
+  `package.json` now declares `engines.node: >=22.13` and `.nvmrc` pins 22.21.1,
+  so the requirement is written down rather than re-derived. The same holds for
+  `jsdom` 29 (`^22.13.0`), `eslint` 10 and `mermaid` 12 (`>=22.12.0`).
+- `typescript` 7 is **closed, not deferred**: 7.0.2 ships no compiler API and
+  typescript-eslint 8.70 pins `<6.1`, so neither the script nor the lint stack can
+  run on it. The row above records the two conditions that would reopen it.
 - `electron` / `electron-builder` / `@types/node`-above-22 are one packaging
   session, and it has not been opened.
 - `eslint` 10 + `eslint-plugin-react-hooks` 7, `jsdom` 29 and `mermaid` 12 were

@@ -5,6 +5,7 @@
   "description": "An agentic coding platform for the desktop, built on pi",
   "license": "MIT",
   "author": "Graphe contributors",
+  "engines": { "node": ">=22.13" },
   "type": "module",
   "main": "dist-electron/boot.mjs",
   "scripts": {

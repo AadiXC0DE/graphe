@@ -6,11 +6,20 @@
  * which is how a process that died stops being reported as still running.
  */
 
+import type { AgentEvent } from '../agent/types';
 import type { OwnerId } from './events';
 import type { ConversationId, RuntimeEpoch, WorkspaceId } from './identity';
 
 /** Where one conversation's runtime is. Held by the session service, written
- *  down only as `DurableFacts`, and never inferred from a tab. */
+ *  down only as `DurableFacts`, and never inferred from a tab.
+ *
+ *  `archived` is the one member no runtime enters. Putting a conversation away
+ *  is a flag on its registry record, not something a process is doing, so it is
+ *  only ever *reported* — by `reportedState`, for a conversation that is quiet
+ *  and put away — and a reopened one comes back `unloaded`, which is where a
+ *  conversation waits to be opened. It is in the union because a row on the
+ *  shelf has one state field and a person's question is "what is this chat
+ *  doing", not "which of two vocabularies answers that". */
 export type SessionState =
   | 'unloaded'
   | 'opening'
@@ -157,6 +166,10 @@ export function runMark(state: SessionState): 'working' | 'interrupted' | null {
  */
 export type WorkEvent = 'asked' | 'unasked' | 'tidying' | 'tidied';
 
+/** Every one of them, so a check that must hold of all four can say so without
+ *  a second copy of the list going stale. */
+export const WORK_EVENTS: readonly WorkEvent[] = ['asked', 'unasked', 'tidying', 'tidied'];
+
 /**
  * Where one of those leaves a conversation, or null when it says nothing about
  * where the conversation is.
@@ -183,6 +196,32 @@ export function movedByWork(
       return from === 'running' || from === 'idle' ? 'compacting' : null;
     case 'tidied':
       return from === 'compacting' ? (working ? 'running' : 'idle') : null;
+  }
+}
+
+/**
+ * Which of our events says where a run is, or null when it says what it did.
+ *
+ * A question on screen arrives as three different events — a permission being
+ * asked for, the questions asked before the first change, and the same being
+ * taken back — and Pi's tidying as two. They are the same vocabulary as
+ * `movedByWork`, so they are mapped in one place rather than a copy of it per
+ * caller: everything else — a token, a step, a settle — is silent here.
+ */
+export function workEventOf(event: AgentEvent): WorkEvent | null {
+  switch (event.type) {
+    case 'needs-confirmation':
+    case 'asked-first':
+      return 'asked';
+    case 'questions-withdrawn':
+    case 'asking-withdrawn':
+      return 'unasked';
+    case 'tidying':
+      return 'tidying';
+    case 'tidied':
+      return 'tidied';
+    default:
+      return null;
   }
 }
 

@@ -18,12 +18,18 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  canTransition,
   inFlight,
   movedByWork,
   reportedState,
+  SESSION_STATES,
   Sessions,
+  workEventOf,
+  WORK_EVENTS,
   type DurableFacts,
+  type SessionState,
 } from '../src/domain/conversations';
+import { translatePiEvent } from '../src/agent/pi/events';
 import { runOwner } from '../src/domain/events';
 import { asConversationId, newConversationId, newRunId } from '../src/domain/identity';
 import {
@@ -235,6 +241,75 @@ describe('the launch after a run was cut off', () => {
 });
 
 describe('a question on screen, and Pi tidying up', () => {
+  /* The relay half, which is what makes the two states reachable at all: the
+     event Pi actually sends for a question is mapped to the move the table
+     allows. Without this the states are in the table and nothing enters them. */
+  it('reaches waiting-input from the events a question really arrives as', () => {
+    const asked = { type: 'needs-confirmation', call: { id: 'c1', name: 'bash', input: {} }, verdict: { kind: 'confirm', question: 'Delete it?' } } as const;
+    expect(workEventOf(asked)).toBe('asked');
+    expect(workEventOf({ type: 'asked-first', id: 'ask-1', questions: [] })).toBe('asked');
+
+    // And the withdrawal is the answer coming back, whichever door Pi used.
+    expect(workEventOf({ type: 'questions-withdrawn', callIds: ['c1'] })).toBe('unasked');
+    expect(workEventOf({ type: 'asking-withdrawn', ids: ['ask-1'] })).toBe('unasked');
+
+    // Everything that says what the run did is silent about where it is.
+    for (const event of [
+      { type: 'message-delta', text: 'the header' },
+      { type: 'tool-start', call: { id: 'c1', name: 'read', input: {} } },
+      { type: 'settled', how: 'finished' },
+      { type: 'busy', on: true },
+    ] as const) {
+      expect(workEventOf(event), event.type).toBeNull();
+    }
+
+    const states = new Sessions();
+    const one = newConversationId();
+    states.move(one, 'opening', AT);
+    states.move(one, 'idle', AT + 1);
+    states.move(one, 'running', AT + 2);
+    // The shell's own step: the event's move, through the same table.
+    const moved = movedByWork(states.stateOf(one), workEventOf(asked)!, true);
+    expect(moved).toBe('waiting-input');
+    expect(states.move(one, moved!, AT + 3)).toBe('waiting-input');
+    expect(states.factsOf(one)?.status).toBe('waiting-input');
+  });
+
+  it('reaches compacting between Pi compaction_start and compaction_end', () => {
+    // The relay's own translation, so what is asserted is the whole road from
+    // Pi's event to the state rather than the middle of it.
+    expect(translatePiEvent({ type: 'compaction_start', reason: 'threshold' })).toEqual({
+      type: 'tidying',
+    });
+    expect(translatePiEvent({ type: 'compaction_end', reason: 'threshold', aborted: false })).toEqual({
+      type: 'tidied',
+      ok: true,
+    });
+
+    const states = new Sessions();
+    const one = newConversationId();
+    states.move(one, 'opening', AT);
+    states.move(one, 'idle', AT + 1);
+    states.move(one, 'running', AT + 2);
+
+    // Pi's tidying begins: `running` to `compacting`, and never anything else.
+    const into = workEventOf(translatePiEvent({ type: 'compaction_start', reason: 'manual' })!);
+    expect(into).toBe('tidying');
+    expect(states.move(one, movedByWork(states.stateOf(one), into!, true)!, AT + 3)).toBe(
+      'compacting',
+    );
+
+    // It ends, and the run underneath is still going, so it goes back to it.
+    const out = workEventOf(
+      translatePiEvent({ type: 'compaction_end', reason: 'manual', aborted: false })!,
+    );
+    expect(out).toBe('tidied');
+    expect(states.move(one, movedByWork(states.stateOf(one), out!, true)!, AT + 4)).toBe('running');
+    expect(states.factsOf(one)?.status).toBe('running');
+    // A run that had already ended leaves a tidy that settles to idle.
+    expect(movedByWork('compacting', 'tidied', false)).toBe('idle');
+  });
+
   it('moves a running conversation to waiting-input, and back when it is answered', () => {
     // A question interrupts a run that is going: anything else and the event is
     // somebody else's, which is what null means.
@@ -326,5 +401,32 @@ describe('a conversation somebody put away', () => {
     // back is the one the registry keeps, not one a dead process left.
     expect(reportedState('archived', true)).toBe('archived');
     expect(inFlight('archived')).toBe(false);
+  });
+
+  it('is reported rather than entered, and no run event can end an attempt', () => {
+    /* A run's own events say where it is, never that it is over: a question, a
+       tidy. So every state they can reach is a live one — `idle` at the end of
+       a run that had already let go, and never a terminal state. Above all not
+       `archived`, which is a flag on the registry record read out at the moment
+       a row is listed, not something a process is doing. */
+    const live: readonly SessionState[] = ['running', 'waiting-input', 'compacting', 'idle'];
+    for (const event of WORK_EVENTS) {
+      for (const from of SESSION_STATES) {
+        for (const working of [true, false]) {
+          const to = movedByWork(from, event, working);
+          if (to === null) continue;
+          expect(live, `${event} from ${from} (working: ${String(working)})`).toContain(to);
+        }
+      }
+    }
+
+    // Which is what the shell does with it: `reportedState` is the only door
+    // into `archived`, and only for a conversation that is not in flight.
+    expect(reportedState('idle', true)).toBe('archived');
+    expect(reportedState('unloaded', true)).toBe('archived');
+    expect(reportedState('running', true)).toBe('running');
+    // And wherever it is, nothing leaves it except being opened again.
+    expect(canTransition('archived', 'running')).toBe(false);
+    expect(canTransition('archived', 'opening')).toBe(true);
   });
 });

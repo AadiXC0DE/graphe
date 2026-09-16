@@ -1,9 +1,10 @@
 # Phase 4 handoff: conversations that are durable, resumable, and independent of tabs
 
 Findings: W04 done (reopening a conversation whose folder has gone — see below),
-W06, S01, S02, S04, S09, S10, S13, S14 done; S11 and S12 open, 4.2 missing three
-states. W07's lifecycle half is dispositioned in the phase 3 handoff (closing is
-a view). Numbers here were taken on this tree on 2026-09-15.
+W06, S01, S02, S04, S09, S10, S13, S14 done; S11 and S12 open, and 4.2's states
+are now all driven or documented (see below). W07's lifecycle half is dispositioned
+in the phase 3 handoff (closing is a view). Numbers here were taken on this tree on
+2026-09-16.
 
 ## Done
 
@@ -129,6 +130,25 @@ provenance; an unfinished tool replays as interrupted; stop, failure and abort a
 distinguishable; compaction and branch summaries appear; tool call ids are
 preserved. `tests/session-replay-fidelity.test.ts`, 25 tests.
 
+**Three session states, driven from the relay (4.2).** `waiting-input` and
+`compacting` are entered from Pi's own events rather than from a guess:
+`workEventOf` (`src/domain/conversations.ts:211`) maps the three shapes a question
+arrives in (`needs-confirmation`, `asked-first`, and the withdrawal behind it) to
+`asked`/`unasked` and Pi's two compaction events (`tidying`, translated by
+`src/agent/pi/events.ts:109-125`) to `tidying`/`tidied`; `movedByWork` (`:185`)
+turns one into the state, and `forwardTo` (`electron/main.ts:2887`) applies it
+through the same table as every other move. The mapping used to be a private
+function inside `main.ts` where no test could reach it; it now sits beside the
+table it answers for. **`archived` is a record flag, not a runtime state**, and the
+code now says so where the state is declared (`src/domain/conversations.ts:13-22`):
+no work event can leave a conversation there, and `reportedState` is the only door
+into it, for a conversation that is put away and not in flight. Evidence:
+`tests/session-states.test.ts`, 19 tests — `waiting-input` reached from
+`needs-confirmation` and from `asked-first`, `compacting` from
+`compaction_start` to `compaction_end` (translated by the relay, not hand-written),
+the silence of every event that says what the run did, and the invariant that the
+four work events reach only live states.
+
 **Session service states, driven and durable (4.2).** `src/domain/conversations.ts`
 carries the driver beside the vocabulary: `Sessions` holds the runtime state and
 the written facts for every conversation, refuses a move `TRANSITIONS` does not
@@ -143,12 +163,12 @@ shelf says "Still working" after the tab has gone. The durable half:
 `electron/services/run-record.ts` writes each run's `DurableFacts` plus its
 project to `<userData>/runs-in-flight.json` as the state changes and takes the
 note away when it ends, so the file holds exactly the runs still in flight;
-`readWhatWasRunning()` (`:1946`) reads it before anything can open, calls
+`readWhatWasRunning()` (`:1958`) reads it before anything can open, calls
 `states.recovered`, and the sentence
 "This conversation was in the middle of a run when Graphe stopped…" is said once,
 over the conversation, the first time somebody opens it (`tookInterruptedNote`,
-`:1938`). Nothing is reissued: a launch marks and reports, it never starts a turn
-again. `tests/session-states.test.ts`, 10 tests.
+`:1951`). Nothing is reissued: a launch marks and reports, it never starts a turn
+again. `tests/session-states.test.ts`, 19 tests.
 
 **Close is a view. Stop is the press that ends a run (4.6).**
 `CHANNEL.closeConversation` (`electron/main.ts:8907`) takes the guard first: a
@@ -203,7 +223,6 @@ all passing: `tests/draft-kept.test.ts` 15,
 
 | Item | Finding | What is missing |
 | --- | --- | --- |
-| Three of the eleven session states | 4.2 | `waiting-input`, `compacting` and `archived` are in `SESSION_STATES` and in the transition table, and nothing drives them: the adapter does not report a waiting turn or a compaction as a state, and archiving a conversation sets a flag on its record rather than a runtime state |
 | Second view attaches to one runtime | 4.2 | **The UI half is done; this row's runtime half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), and one runtime behind two views is structural: `Sessions` is keyed by conversation (`src/domain/conversations.ts:221`) and a pane holds an address rather than a session, so opening the same chat twice asks for the same one. What is missing is a view record in the registry — `electron/services/workspace-registry.ts` still has no `views` at all, so a view id lives only in window state and is not durable across a restart |
 | Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` (`electron/main.ts:3643`) writes both the current address and the durable one, which covers the first-write case, but rebuild, fork and eviction transitions are not all covered |
 | Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |

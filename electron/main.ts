@@ -288,7 +288,7 @@ import {
   listingKey,
   Readings,
 } from './services/readings';
-import { inFlight, movedByWork, reportedState, Sessions, type WorkEvent } from '../src/domain/conversations';
+import { inFlight, movedByWork, reportedState, Sessions, workEventOf } from '../src/domain/conversations';
 import { asConversationId, newConversationId, type ConversationId } from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
 import { handoffMessage } from '../src/work/continuing';
@@ -2883,31 +2883,6 @@ async function ghComment(
 /** Which conversation a relay is speaking for. Filled the moment the session
  *  exists, which is before anything it says can arrive. */
 type Speaking = { address: string | null };
-
-/**
- * The events that say where a run is rather than what it did.
- *
- * A question on screen arrives as three different events — a permission being
- * asked for, the questions asked before the first change, and the same being
- * taken back — and Pi's tidying as two. They are one vocabulary in the domain,
- * so the mapping lives here rather than a copy of it per caller.
- */
-function workEventOf(event: AgentEvent): WorkEvent | null {
-  switch (event.type) {
-    case 'needs-confirmation':
-    case 'asked-first':
-      return 'asked';
-    case 'questions-withdrawn':
-    case 'asking-withdrawn':
-      return 'unasked';
-    case 'tidying':
-      return 'tidying';
-    case 'tidied':
-      return 'tidied';
-    default:
-      return null;
-  }
-}
 
 function forwardTo(path: string, held: Held, from: Speaking): (event: AgentEvent) => void {
   return (event) => {

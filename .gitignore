@@ -40,3 +40,6 @@ site/assets/shots/*
 
 # Local architecture audit and implementation plan.
 /docs/graphe-stabilization-plan-2026-09-13.md
+
+# Vitest 5 writes its artifacts here rather than beside the tests.
+.vitest/

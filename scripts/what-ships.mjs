@@ -210,6 +210,37 @@ export async function carriedAlong() {
   return [...withoutTheDeadWeight(names)].sort();
 }
 
+/**
+ * The packages that must sit outside the archive beside the unpacked ones.
+ *
+ * A module unpacked to disk resolves `node_modules` by walking up from its own
+ * real path, so it can never reach a dependency that is inside the asar. Pi is
+ * unpacked on purpose — its entry is imported dynamically and its prebuilt
+ * binaries cannot load from the archive at all — so everything in its runtime
+ * closure has to be unpacked with it, or the import dies on the first missing
+ * package name rather than on anything that looks like our mistake.
+ *
+ * The whole carried set rather than Pi's dependencies read off its manifest:
+ * the tree is hoisted, so the package that actually needs `partial-json` may
+ * not be the one that declares it. Naming every one is a bigger download than
+ * naming the three that happen to be missing today, and it is the version that
+ * cannot rot when somebody else's manifest changes.
+ */
+export async function unpackedAlong() {
+  const carried = await carriedAlong();
+  // node-pty is in the carried set and unpacks with the rest; it is named here
+  // as well because its prebuilt .node files cannot be loaded from an archive
+  // at all, so a day when it falls out of the closure is a day the terminal
+  // stops working in the bundle.
+  return [...new Set([...carried, 'node-pty'])].sort();
+}
+
+/** electron-builder `asarUnpack` entries, from the same list. */
+export async function unpackRules() {
+  const names = await unpackedAlong();
+  return names.flatMap((name) => [`node_modules/${name}`, `node_modules/${name}/**/*`]);
+}
+
 /** Chromium's own interface, in 55 languages.
  *
  *  40MB of translations behind an app whose every word is written in English —

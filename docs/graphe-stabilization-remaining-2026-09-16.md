@@ -6,6 +6,49 @@ is done, what is still open, which of the recorded blockers are real, and for
 each open item the exact steps, files and checks. The phase handoffs under
 `docs/handoffs/` stay the record of evidence; this file is the plan for the rest.
 
+---
+
+## Where this stands, at the end of the session on 2026-09-16
+
+Written after the work below was taken in one session on `fix/ownership-stabilization`.
+The sections further down are left exactly as they were written, because they are
+still the instructions for the parts that are unfinished. This table is the truth
+about what landed.
+
+Verified on this tree at this point: `npm run typecheck` clean, `npm run lint`
+**0 errors / 171 warnings**, `npm run copy:check` clean, `npm test`
+**371 files passed, 1 skipped, 6659 tests passed, 14 skipped**,
+`npm run test:electron` **14/14**, `npm run eval` **14/14 tasks**,
+`npm run verify:package` green on both bundles, `npm run test:packaged` green.
+
+| # | Item | State |
+| --- | --- | --- |
+| 0 | CI Electron smoke race | **Done.** `byHand` + `next()` on the scripted model; three consecutive green runs. The doc's own snippet below was wrong — arming the gate after the last piece hangs the turn; the landed version arms after every piece *except* the last. |
+| 1 | Dependency majors | **Done, all five groups.** engines + `.nvmrc` (`2298ad3`), vitest 5.0.1 + jsdom 29.1.1 (`6c0ec89`), eslint 10.10.0 + hooks 7.1.1 (`5e6eb82`), unpdf 1.8.1 (`9ef2d8c`), mermaid 12.0.0 (`6046dc4`). Needs `reactHooks.configs.flat['recommended-latest']` in v7 — the non-flat entry is refused by ESLint 10. |
+| 1b | TypeScript 7 | **Closed, not deferred.** |
+| 1c | Electron 44 + electron-builder 26 | **Done.** electron 44.4.1 (Node 24.21.0), builder 26.15.3; no `electron-builder.js` change was needed. It found a real regression: builder 26 hoists Pi's nested deps to the archive top level, and `what-ships.mjs` was excluding them as though the parent carried them, deleting ten reachable packages including the only copy. Fixed by keying the drop list on package names; `verify-package`'s nested-count check is now a real reachability walk (134 packages, both bundles). |
+| 2 | 6.2 child runtime | **2.1–2.4 landed, 2.5–2.8 NOT.** `src/agent/pi/child-session.ts` (`childSession`, `runtimeChoice`, `GRAPHE_CHILD_RUNTIME`), `guardFor()` extracted from `adapter.ts` and called by both paths, events fed through one `fromPi`, exit/unanswered/run-note handled. Open: the packaged worker, memory and the ceiling, the RPC contract test, and turning it on — and the three `createSession(` call sites in `electron/main.ts` still call in-process directly, so the switch does not yet reach a real conversation. Also unfixed: the supervisor passed the agent dir as `PI_AGENT_DIR_ENV`, a name Pi never reads; it now sets `PI_CODING_AGENT_DIR`. |
+| 3 | 6.5 terminal mode | **Not started.** Blocked on 2, per its own rule. |
+| 4.1 | Terminal in the packaged smoke | **Done.** `npm run test:packaged` types at the real pty in the bundle; a negative control with the helper at 644 faults. |
+| 4.2 | Install route that cannot be cancelled | **Done** (earlier wave); the two handoff claims saying otherwise were stale and are repaired. |
+| 4.3 | Custom renderers | **Landed, not fully verified.** Headless drawing of an add-on's `renderCall`/`renderResult` at width 80 into a `<pre>` (`src/agent/pi/tool-drawing.ts`, `src/components/Drawn.tsx`), plus fixtures. Its one test file was never run to green. |
+| 4.4 | Fixture gaps | **4.4a done** (duration on a tool record, `ms` measured host-side and replayed from entry timestamps), **4.4b done** (an add-on's notice now carries its own name, read off the call stack; G8's durability half still open). |
+| 4 | The busy rectangle / loading row | **Landed, not verified.** `arriving(holding)` in `src/App.tsx` with `role="status"` and `aria-label` at all 11 call sites. The loading row in `scripts/visual-matrix.mjs` was not added. |
+| 5 | Person-only visual checks | **Not done.** Needs the owner, ~40 minutes. |
+| 6 | Phase 4 residue | **Done except the window's half of view records.** Draft proof, session states, registry-side view records (v2 index), S11 address mapping, S12 rapid New presses, the run note's lifetime and `workspaceId`. The press-to-record call needs `src/App.tsx`/`preload.ts`/`electron/main.ts`: write `noteView(index, { viewId, conversation, pane })` when a pane opens, read `viewInPane(index, 0 \| 1)` at launch, both already in `electron/services/workspace-registry.ts`. |
+| 7 | Real provider, other hardware | **Not done.** The machine half is explored but not written: a `{ fails: { status: 529, times: 2, message: 'overloaded' } }` step on the scripted model works against the real adapter (two refusals then two real turns, one tool result, one ledger charge per entry), and the window has **no retry surface at all** — `translatePiEvent` drops `auto_retry_start`/`auto_retry_end`, so only `spend.ts`'s private flag sees them. Assert on the ledger split, or add the surface first. |
+
+Two stale handoffs the doc named are **repaired**: `phase-6-extensions.md` no
+longer says an install cannot be cancelled or that 6.2 is unstarted, and
+`STATUS.md` no longer quotes `test:visual` twice with different numbers (it now
+records the last full run: 49 rows, 287 checks, 2 failing).
+
+**The two failures left in the matrix**, both a machine's, not a person's, and
+neither yet fixed: the long project name coming back with its own conversation
+count, and `.topbar` scrolling sideways at 620×520 zoom 200.
+
+---
+
 ## Read this first
 
 **State of the branch, verified today on this machine (Node 22.21.1, arm64):**

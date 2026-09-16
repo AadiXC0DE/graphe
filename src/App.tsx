@@ -299,6 +299,7 @@ async function wordsAboutChanges() {
 const VIEWS = [
   () => import("./components/Settings"),
   () => import("./components/HistoryView"),
+  () => import("./components/Commands"),
   () => import("./components/ReviewQueue"),
   () => import("./components/Skills"),
   () => import("./components/Usage"),
@@ -1906,7 +1907,7 @@ function Conversation() {
         return showThread(next, opened.value.path, address, { turns });
       });
 
-      void refreshVersions(opened.value.path);
+      void refreshVersions(opened.value.path, opened.value.address);
       void refreshOverview(opened.value.path, opened.value.address);
       void refreshBuildPlan(opened.value.path);
       /* Put the window back the way it was left: the chat the shell opened on,
@@ -2990,7 +2991,7 @@ function Conversation() {
         }
         if (notice.event.type === "settled" && notice.project !== null) {
           const where = notice.project;
-          void refreshVersions(where);
+          void refreshVersions(where, notice.conversation ?? null);
           void refreshOverview(where, notice.conversation);
           void refreshFiles(where);
           refreshReviewQueue();
@@ -5026,7 +5027,7 @@ function Conversation() {
           troubleHere(answer.trouble);
           return;
         }
-        void refreshVersions(here.path);
+        void refreshVersions(here.path, here.address);
         void refreshOverview(here.path, here.address);
       });
     },
@@ -5067,7 +5068,7 @@ function Conversation() {
         troubleHere(answer.trouble);
         return null;
       }
-      void refreshVersions(here.path);
+      void refreshVersions(here.path, here.address);
       void refreshOverview(here.path, here.address);
       return answer.value;
     },
@@ -6233,7 +6234,7 @@ function Conversation() {
       ) : null}
 
       {commandsHere && desk !== null ? (
-        <Suspense fallback={arriving('Commands')}>
+        <Suspense fallback={null}>
           <Commands
             open
             onClose={() => setCommandsOpen(false)}

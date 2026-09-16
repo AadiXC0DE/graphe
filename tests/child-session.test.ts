@@ -34,6 +34,7 @@ import {
   argsFor,
   openSession,
   runtimeChoice,
+  unsupportedUiNotice,
 } from '../src/agent/pi/child-session';
 import type { AgentEvent } from '../src/agent/types';
 
@@ -350,6 +351,32 @@ describe('what Pi is told', () => {
       agentDir,
     );
     expect(memory).toContain('--no-session');
+  });
+});
+
+/* ========================================================================== */
+/* What the child cannot draw                                                    */
+/* ========================================================================== */
+
+describe('an extension UI request with no dialog in the child', () => {
+  it('delivers a notice as the add-on wrote it', () => {
+    expect(
+      unsupportedUiNotice({ id: '1', method: 'notify', held: { message: 'The button row is re-drawn.' } }),
+    ).toEqual({ type: 'notice', what: 'The button row is re-drawn.' });
+    expect(
+      unsupportedUiNotice({ id: '1', method: 'notify', held: { message: 'Two pages are missing a heading.', notifyType: 'warning' } }),
+    ).toEqual({ type: 'notice', what: 'warning: Two pages are missing a heading.' });
+    expect(
+      unsupportedUiNotice({ id: '1', method: 'notify', held: { message: 'The build file would not parse.', notifyType: 'error' } }),
+    ).toEqual({ type: 'notice', what: 'error: The build file would not parse.' });
+  });
+
+  it('says nothing for a widget, a status line or a notice with no words', () => {
+    expect(unsupportedUiNotice({ id: '1', method: 'setWidget', held: {} })).toBeNull();
+    expect(unsupportedUiNotice({ id: '1', method: 'setStatus', held: {} })).toBeNull();
+    expect(unsupportedUiNotice({ id: '1', method: 'setTitle', held: {} })).toBeNull();
+    expect(unsupportedUiNotice({ id: '1', method: 'notify', held: { message: '   ' } })).toBeNull();
+    expect(unsupportedUiNotice({ id: '1', method: 'notify', held: {} })).toBeNull();
   });
 });
 

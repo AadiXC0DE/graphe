@@ -3,14 +3,15 @@
  *
  * The failure this guards is specific: an add-on asks a question, gets the
  * default no-op interface, and carries on as though somebody answered. So a
- * cancellation has to come back distinguishable from an answer, and the
- * terminal-only half has to be visible instead of silently successful.
+ * cancellation has to come back distinguishable from an answer, and the calls
+ * without a fallback have to fail instead of silently succeeding.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   dialogsOver,
+  uiContextOver,
   unsupportedTerminal,
   type ExtensionAnswer,
   type ExtensionAsk,
@@ -111,25 +112,38 @@ describe('an editor', () => {
 });
 
 describe('the terminal-only half', () => {
-  it('says so once per method, not once per call', () => {
-    const say = vi.fn();
-    const terminal = unsupportedTerminal(say);
-    terminal.note('setWidget');
-    terminal.note('setWidget');
-    terminal.note('setFooter');
-    expect(say).toHaveBeenCalledTimes(2);
-    expect(say).toHaveBeenCalledWith('terminal', 'setWidget');
+  it('answers every terminal-only call with its fallback, and says nothing', () => {
+    const face = uiContextOver({
+      dialogs: dialogsOver(async () => ({ kind: 'select', value: null })),
+      terminal: unsupportedTerminal(),
+      notify: () => undefined,
+    });
+
+    // Fire-and-forget calls are accepted and drawn nowhere. No notice, no
+    // record: these arrive on every session start, and a line per call is how
+    // a new chat opened with sentences about nothing.
+    expect(face.setStatus('tidy', '3 pages')).toBeUndefined();
+    expect(face.setWidget('tally', ['1', '2'])).toBeUndefined();
+    expect(face.setFooter(() => undefined)).toBeUndefined();
+    expect(face.setHeader(() => undefined)).toBeUndefined();
+    expect(face.onTerminalInput(() => undefined)()).toBeUndefined();
+    expect(face.pasteToEditor('hello')).toBeUndefined();
+    expect(face.setEditorText('hello')).toBeUndefined();
+    expect(face.getEditorText()).toBe('');
+    expect(face.addAutocompleteProvider(() => undefined)).toBeUndefined();
+    expect(face.setEditorComponent(() => undefined)).toBeUndefined();
+    expect(face.getEditorComponent()).toBeUndefined();
+    expect(face.getAllThemes()).toEqual([]);
+    expect(face.getTheme('dark')).toBeUndefined();
+    expect(face.setTheme('dark')).toEqual({ success: false, error: 'this window has no terminal theme' });
+    expect(face.setToolsExpanded(true)).toBeUndefined();
   });
 
   it('fails a promise rather than returning a component nobody can see', async () => {
-    const say = vi.fn();
-    await expect(unsupportedTerminal(say).fail('custom')).rejects.toThrow(/terminal/);
-    expect(say).toHaveBeenCalledWith('terminal', 'custom');
+    await expect(unsupportedTerminal().fail('custom')).rejects.toThrow(/terminal/);
   });
 
   it('refuses to hand back a theme it does not have', () => {
-    const say = vi.fn();
-    expect(() => unsupportedTerminal(say).theme()).toThrow(/terminal theme/);
-    expect(say).toHaveBeenCalledWith('terminal', 'theme');
+    expect(() => unsupportedTerminal().theme()).toThrow(/terminal theme/);
   });
 });

@@ -100,7 +100,6 @@ import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
 import { drawnResult, type Renderable } from './tool-drawing';
 import {
   dialogsOver,
-  saysAddonCannot,
   saysAddonFailed,
   uiContextOver,
   unsupportedTerminal,
@@ -3624,7 +3623,8 @@ const MOST_AFTER_SAYINGS = 3;
    * every confirmation and drops notifications, so an installed add-on that
    * asked a question carried on with an answer nobody gave — while the person
    * never saw the question. The dialog half is real here; the half that is a
-   * terminal says so out loud.
+   * terminal is answered with the documented fallback and said nowhere, and
+   * the two calls without a fallback reject with the reason on them.
    *
    * Who could have made a call, and which of them did. Pi's `notify` is the one
    * UI method it passes through without an origin, so the stack at the moment
@@ -3678,13 +3678,10 @@ const MOST_AFTER_SAYINGS = 3;
     options.onEvent({ type: 'notice', what, ...(because === undefined ? {} : { because }) });
   };
 
-  const sayUnsupported = (kind: string, method: string): void => {
-    sayAboutAddon(saysAddonCannot(whoNow(), method, kind === 'terminal' ? 'terminal' : 'window'));
-  };
   const dialogs = dialogsOver(
     options.ask ?? (async (ask: ExtensionAsk) => cancelledLike(ask)),
   );
-  const terminal = unsupportedTerminal(sayUnsupported);
+  const terminal = unsupportedTerminal();
   try {
     await session.bindExtensions({
       uiContext: uiContextOver({

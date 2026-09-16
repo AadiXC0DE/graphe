@@ -31,7 +31,7 @@ export type Inspector = {
   /** The git state, the branch and the processes of the named project. */
   refreshOverview(path: string, conversation?: string | null): Promise<void>;
   /** The timeline, and each child project's own timeline. */
-  refreshVersions(path: string): Promise<void>;
+  refreshVersions(path: string, conversation?: string | null): Promise<void>;
   /** What the named conversation has kept up. */
   refreshRunning(where?: Where): void;
   /** How full the named conversation is. */
@@ -57,15 +57,17 @@ export function useInspector(options: {
   const asksMade = useRef(new Map<string, number>());
 
   const refreshVersions = useCallback(
-    async (path: string) => {
+    async (path: string, conversation?: string | null) => {
       const deskNow = desksNow.current.byPath[path];
-      const address = deskNow?.address ?? null;
+      const address = conversation === undefined ? (deskNow?.address ?? null) : conversation;
       const key = `versions:${keyOf(path, address ?? '')}`;
       const mine = (asksMade.current.get(key) ?? 0) + 1;
       asksMade.current.set(key, mine);
       const answer = await bridge.versions({ project: path, ...(address === null ? {} : { conversation: address }) });
       // A folder holding several projects has no timeline of its own. Each
       // project answers where it lives, and the panel shows whichever is chosen.
+      // Read late: which projects a folder holds is only known once its
+      // overview has answered.
       const several = desksNow.current.byPath[path]?.overview?.repos ?? [];
       const each = await Promise.all(
         several.map(
@@ -73,21 +75,24 @@ export function useInspector(options: {
             [one.name, await bridge.versions({ project: path, repo: one.name, ...(address === null ? {} : { conversation: address }) })] as const,
         ),
       );
-      if (desksNow.current.current !== path) return;
-      if ((desksNow.current.byPath[path]?.address ?? null) !== address) return;
       if (asksMade.current.get(key) !== mine) return;
       const perRepo: Record<string, readonly SavedVersion[]> = {};
       for (const [name, got] of each) if (got.ok) perRepo[name] = got.value;
       if (!answer.ok && several.length === 0) return;
-      setDesks((current) =>
-        current.current === path
-          ? changeDesk(current, path, (one) => ({
-              ...one,
-              versions: answer.ok ? answer.value : one.versions,
-              ...(several.length === 0 ? {} : { repoVersions: perRepo }),
-            }))
-          : current,
-      );
+      // Against the freshest desks, not the render this ask started in. An
+      // answer that arrives before the desk it was asked for has been committed
+      // — the project just opened — still lands, because updaters run in call
+      // order against the latest state. One for a project or conversation since
+      // moved on is dropped where the state is read.
+      setDesks((current) => {
+        if (current.current !== path) return current;
+        if ((current.byPath[path]?.address ?? null) !== address) return current;
+        return changeDesk(current, path, (one) => ({
+          ...one,
+          versions: answer.ok ? answer.value : one.versions,
+          ...(several.length === 0 ? {} : { repoVersions: perRepo }),
+        }));
+      });
     },
     [desksNow, setDesks],
   );
@@ -111,18 +116,20 @@ export function useInspector(options: {
       const answer = await bridge.overview(where);
       if (!answer.ok) return;
       if (asksMade.current.get(key) !== mine) return;
-      if ((desksNow.current.byPath[path]?.address ?? '') !== (address ?? '')) return;
-      setDesks((current) =>
-        current.current === path
-          ? changeDesk(current, path, (one) => ({ ...one, overview: answer.value }))
-          : current,
-      );
+      // Against the freshest desks, for the same reason the timeline is: an
+      // answer for a project just opened lands rather than losing a race with
+      // its own commit, and one for a conversation since moved on is dropped.
+      setDesks((current) => {
+        if (current.current !== path) return current;
+        if ((current.byPath[path]?.address ?? '') !== (address ?? '')) return current;
+        return changeDesk(current, path, (one) => ({ ...one, overview: answer.value }));
+      });
       // Which projects a folder holds is only known once this has answered, so
       // the first ask for their timelines has to be here rather than earlier —
       // otherwise the panel says "nothing saved yet" about a project that has.
       const held = answer.value.repos ?? [];
       const already = desksNow.current.byPath[path]?.repoVersions ?? {};
-      if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path);
+      if (held.some((one) => already[one.name] === undefined)) void refreshVersions(path, address);
     },
     [desksNow, refreshVersions, setDesks],
   );

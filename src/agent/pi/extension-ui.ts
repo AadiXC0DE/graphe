@@ -6,11 +6,15 @@
  * the worst of both: the add-on carries on as though somebody answered, and the
  * person never saw the question.
  *
- * So this host answers the dialog-capable half of the contract for real, and is
- * honest about the half that is a terminal: a widget, a footer or a custom
- * component cannot be drawn here, and saying so once, out loud, is the only
- * truthful thing to do about it. `mode: 'rpc'` is what that means in Pi's own
- * terms — dialogs yes, composited terminal UI no.
+ * So this host answers the dialog-capable half of the contract for real. The
+ * half that is a terminal — a widget, a status line, a footer — is answered
+ * with the documented fallback and nothing else: add-ons probe those calls on
+ * every session start, and a line in the conversation for each one is how a new
+ * chat opened with three sentences about nothing. `mode: 'rpc'` is what tells
+ * an add-on up front that composited terminal UI is not available. The two
+ * calls that cannot be answered with a fallback reject instead, and the error
+ * they carry names what is missing — the add-on is told, the person is not
+ * paged.
  *
  * One request at a time per session is not enforced here: the asker is the
  * extension runtime, and two add-ons asking at once is Pi's to sequence.
@@ -24,8 +28,33 @@ export type { ExtensionAnswer, ExtensionAsk };
  *  to ask. */
 export type AskTheWindow = (ask: ExtensionAsk, requestId?: string) => Promise<ExtensionAnswer>;
 
-/** How the host tells somebody about something that cannot be drawn. */
-export type SayUnsupported = (what: string, method: string) => void;
+/** The terminal-only half, as refusals the caller can act on. */
+export type UnsupportedTerminal = {
+  fail(method: string): Promise<never>;
+  theme(): never;
+};
+
+/**
+ * What the terminal-only half of the contract does here.
+ *
+ * Silent fallbacks everywhere a fallback is honest, and a rejection where it
+ * is not: a made-up component, footer or theme is a screen somebody thinks
+ * they are looking at, so the call fails with the reason on it. Nothing is
+ * said in the conversation either way — these calls arrive on every session
+ * start, and a chat that opens with what nobody can draw is noise, not news.
+ */
+export function unsupportedTerminal(): UnsupportedTerminal {
+  return {
+    fail: (method: string) => {
+      return Promise.reject(
+        new Error(`${method} needs a terminal, which this window is not`),
+      ) as Promise<never>;
+    },
+    theme: () => {
+      throw new Error('a terminal theme is not available here');
+    },
+  };
+}
 
 /** The dialog half of Pi's UI contract, as much of it as is real here. */
 export type DialogHost = {
@@ -92,44 +121,6 @@ export function dialogsOver(ask: AskTheWindow): DialogHost {
   };
 }
 
-/** The terminal-only half, as `unsupportedTerminal` hands it back. */
-export type UnsupportedTerminal = {
-  note(method: string): void;
-  fail(method: string): Promise<never>;
-  theme(): never;
-};
-
-/**
- * What the terminal-only half of the contract does here.
- *
- * Recorded once per method per session and said out loud once, so an add-on
- * that needs a terminal is a visible compatibility problem rather than a
- * feature that silently does nothing. Anything that returns a promise rejects:
- * a made-up component, footer or theme is a screen somebody thinks they are
- * looking at.
- */
-export function unsupportedTerminal(say: SayUnsupported): UnsupportedTerminal {
-  const said = new Set<string>();
-  const note = (method: string): void => {
-    if (said.has(method)) return;
-    said.add(method);
-    say('terminal', method);
-  };
-  return {
-    note,
-    fail: (method: string) => {
-      note(method);
-      return Promise.reject(
-        new Error(`${method} needs a terminal, which this window is not`),
-      ) as Promise<never>;
-    },
-    theme: () => {
-      note('theme');
-      throw new Error('a terminal theme is not available here');
-    },
-  };
-}
-
 /* -------------------------------------------------------------------------- */
 /* The face an add-on is handed                                                 */
 /* -------------------------------------------------------------------------- */
@@ -139,12 +130,12 @@ export function unsupportedTerminal(say: SayUnsupported): UnsupportedTerminal {
  *
  * Structurally Pi's `ExtensionUIContext` and deliberately not typed from it:
  * this folder never reaches for Pi. The dialogs are real, a notice is where the
- * app says things anyway, and the terminal's half is a refusal. What is left is
- * accepted and drawn nowhere — the working message, the spinner's visibility
- * and the window title change how a terminal looks, and there is no terminal to
- * change. They are not recorded as unsupported because a cosmetic setting an
- * add-on is free to make is not a compatibility problem, and three notices
- * about a footer would be noise rather than honesty.
+ * app says things anyway, and the two calls that cannot be answered with a
+ * fallback are refusals. What is left is accepted and drawn nowhere — a status
+ * line, a widget, a footer and the rest change how a terminal looks, and there
+ * is no terminal to change. None of them is said out loud: add-ons probe those
+ * calls on every session start, and a line per probe is how a new chat opened
+ * with three sentences about nothing.
  *
  * `hasUI` is true for all of this the moment Pi is given it — Pi's own answer
  * is "there is a UI context" (runner.hasUI), not "every method works" — and
@@ -248,22 +239,6 @@ function whoName(who: string | null): string {
   return who === null || who === '' ? 'An add-on' : who;
 }
 
-/**
- * What is said about an add-on that asked for something this window cannot do.
- *
- * The name is the subject of the sentence, the way every other notice about an
- * add-on here reads, so somebody knows which one to turn off.
- */
-export function saysAddonCannot(
-  who: string | null,
-  method: string,
-  how: 'terminal' | 'window',
-): string {
-  return how === 'terminal'
-    ? `${whoName(who)} asked for ${method}, which needs a terminal window. Nothing was drawn for it, and it was told so.`
-    : `${whoName(who)} asked for something this window could not do: ${method}.`;
-}
-
 /** What is said about an add-on that fell over inside one of its own hooks.
  *  Pi hands the host the path it happened in, which is the one thing that names
  *  the add-on without guessing at it. */
@@ -308,53 +283,37 @@ export function uiContextOver(host: UiFaceHost): UiFace {
       const from = who?.() ?? null;
       notify(from === null || from === '' ? said : `${from}, ${said}`);
     },
-    // A status line is a terminal's footer. There is no footer here, so it is
-    // recorded and said once rather than invented into some corner of the
-    // window that would then be showing something nobody put there.
-    setStatus: () => terminal.note('setStatus'),
+    // A status line is a terminal's footer. There is no footer here, so the
+    // call is accepted and drawn nowhere rather than invented into some corner
+    // of the window that would then be showing something nobody put there.
+    setStatus: () => undefined,
     setWorkingMessage: () => undefined,
     setWorkingVisible: () => undefined,
     setWorkingIndicator: () => undefined,
     setHiddenThinkingLabel: () => undefined,
     setTitle: () => undefined,
-    // Terminal-only, and said so rather than silently succeeding.
-    onTerminalInput: () => {
-      terminal.note('onTerminalInput');
-      return () => undefined;
-    },
-    setWidget: () => terminal.note('setWidget'),
-    setFooter: () => terminal.note('setFooter'),
-    setHeader: () => terminal.note('setHeader'),
+    // Terminal-only, and answered with the documented fallback rather than
+    // said out loud: these arrive on every session start, and a line per call
+    // is how a new chat opened with sentences about nothing.
+    onTerminalInput: () => () => undefined,
+    setWidget: () => undefined,
+    setFooter: () => undefined,
+    setHeader: () => undefined,
     custom: () => terminal.fail('custom'),
-    pasteToEditor: () => terminal.note('pasteToEditor'),
-    setEditorText: () => terminal.note('setEditorText'),
-    getEditorText: () => {
-      terminal.note('getEditorText');
-      return '';
-    },
-    addAutocompleteProvider: () => terminal.note('addAutocompleteProvider'),
-    setEditorComponent: () => terminal.note('setEditorComponent'),
-    getEditorComponent: () => {
-      terminal.note('getEditorComponent');
-      return undefined;
-    },
+    pasteToEditor: () => undefined,
+    setEditorText: () => undefined,
+    getEditorText: () => '',
+    addAutocompleteProvider: () => undefined,
+    setEditorComponent: () => undefined,
+    getEditorComponent: () => undefined,
     get theme() {
       return terminal.theme();
     },
-    getAllThemes: () => {
-      terminal.note('getAllThemes');
-      return [];
-    },
-    getTheme: () => {
-      terminal.note('getTheme');
-      return undefined;
-    },
-    setTheme: () => {
-      terminal.note('setTheme');
-      return { success: false, error: 'this window has no terminal theme' };
-    },
+    getAllThemes: () => [],
+    getTheme: () => undefined,
+    setTheme: () => ({ success: false, error: 'this window has no terminal theme' }),
     getToolsExpanded: () => false,
-    setToolsExpanded: () => terminal.note('setToolsExpanded'),
+    setToolsExpanded: () => undefined,
   };
 
   /* Pi copies this object with a spread as it binds it, and a spread reads

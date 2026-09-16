@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { createSession, readTranscript } from '../src/agent/pi/adapter';
-import { saysAddonCannot, saysAddonFailed, uiContextOver, unsupportedTerminal, dialogsOver } from '../src/agent/pi/extension-ui';
+import { saysAddonFailed, uiContextOver, unsupportedTerminal, dialogsOver } from '../src/agent/pi/extension-ui';
 import { NOTICE_ENTRY } from '../src/agent/pi/history';
 import type { AgentEvent } from '../src/agent/types';
 
@@ -93,23 +93,13 @@ async function anExchange(sessionDir: string, projectRoot: string): Promise<void
 /* -------------------------------------------------------------------------- */
 
 describe('the words a notice about an add-on is said in', () => {
-  it('names the add-on, so somebody knows which one to turn off', () => {
-    expect(saysAddonCannot('pi-lens', 'setWidget', 'terminal')).toBe(
-      'pi-lens asked for setWidget, which needs a terminal window. Nothing was drawn for it, and it was told so.',
-    );
-    expect(saysAddonCannot('pi-lens', 'setWidget', 'window')).toBe(
-      'pi-lens asked for something this window could not do: setWidget.',
-    );
+  it('names the failing add-on, so somebody knows which one to turn off', () => {
     expect(saysAddonFailed('pi-lens', 'turn_end', 'the tally blew up')).toBe(
       'pi-lens failed during turn_end: the tally blew up',
     );
-  });
-
-  it('says an add-on without inventing a name for it', () => {
     // Null is what the stack reader answers when no frame belongs to an add-on
     // — a notice fired from a timer has none — and a guess here is a person
     // acting on the wrong add-on.
-    expect(saysAddonCannot(null, 'custom', 'window')).toContain('An add-on asked');
     expect(saysAddonFailed(null, null, null)).toBe('An add-on failed during a step: it did not say why');
   });
 
@@ -117,7 +107,7 @@ describe('the words a notice about an add-on is said in', () => {
     const said: string[] = [];
     const face = uiContextOver({
       dialogs: dialogsOver(async () => ({ kind: 'select', value: null })),
-      terminal: unsupportedTerminal(() => undefined),
+      terminal: unsupportedTerminal(),
       notify: (what) => said.push(what),
       who: () => 'pi-lens',
     });
@@ -137,7 +127,7 @@ describe('the words a notice about an add-on is said in', () => {
     const said: string[] = [];
     const face = uiContextOver({
       dialogs: dialogsOver(async () => ({ kind: 'select', value: null })),
-      terminal: unsupportedTerminal(() => undefined),
+      terminal: unsupportedTerminal(),
       notify: (what) => said.push(what),
       who: () => null,
     });
@@ -183,9 +173,9 @@ describe('a notice nobody was watching for', () => {
 
     const kept = read.value.filter((one) => one.type === 'notice');
     // In the order they were said, each naming the add-on that said it. The
-    // list is not asserted whole: the same fixture's terminal-only calls are
-    // refused here too, and those are their own notices.
-    expect(kept.slice(0, 3)).toEqual([
+    // fixture's status-line calls are silent fallbacks, so the record holds
+    // exactly the three notices with words of their own.
+    expect(kept).toEqual([
       { type: 'notice', what: 'notices, The button row is re-drawn.' },
       { type: 'notice', what: 'notices, warning: Two pages are missing a heading.' },
       { type: 'notice', what: 'notices, error: The build file would not parse.' },
@@ -202,6 +192,50 @@ describe('a notice nobody was watching for', () => {
       .filter((entry) => entry['customType'] === NOTICE_ENTRY);
     expect(stored).toHaveLength(kept.length);
     expect(stored[0]?.['type']).toBe('custom');
+  }, 60_000);
+
+  it('says nothing at all for a startup probe of the terminal', async () => {
+    // What pi-subagents does on every session start: a widget, a status line
+    // and a terminal input hook, none of which this window can draw. Each used
+    // to arrive as its own sentence in a brand-new conversation.
+    const agentDir = await scratch('graphe-quiet-probe-agent-');
+    const projectRoot = await scratch('graphe-quiet-probe-project-');
+    const sessionDir = await scratch('graphe-quiet-probe-sessions-');
+    const into = join(agentDir, 'extensions', 'probes');
+    await mkdir(into, { recursive: true });
+    await writeFile(
+      join(into, 'index.mjs'),
+      'export default function (api) {\n' +
+        "  api.on('session_start', (_event, ctx) => {\n" +
+        "    ctx.ui.setWidget('tally', ['3 done']);\n" +
+        "    ctx.ui.setStatus('tally', '3 done');\n" +
+        '    ctx.ui.onTerminalInput(() => undefined);\n' +
+        '  });\n' +
+        '}\n',
+    );
+    await writeFile(
+      join(into, 'package.json'),
+      JSON.stringify({ name: 'probes', version: '1.0.0', pi: { extensions: ['./index.mjs'] } }),
+    );
+    await anExchange(sessionDir, projectRoot);
+
+    const events: AgentEvent[] = [];
+    const session = await createSession({
+      projectRoot,
+      agentDir,
+      sessionDir,
+      onEvent: (event) => events.push(event),
+    });
+    session.dispose();
+
+    expect(events.filter((one) => one.type === 'notice')).toEqual([]);
+
+    // And nothing was written down to come back on reopen, either.
+    const files = await readdir(sessionDir);
+    const read = await readTranscript(join(sessionDir, files[0] ?? ''));
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value.filter((one) => one.type === 'notice')).toEqual([]);
   }, 60_000);
 
   it('comes back as a line in the conversation, in the order it was said', async () => {

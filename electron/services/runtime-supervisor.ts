@@ -388,8 +388,9 @@ export type StartOptions = {
   cancelAsk?: (requestId: string) => void;
   /** The child's own output, for the log. Never shown as a sentence. */
   onChatter?: (line: string) => void;
-  /** An extension UI request this version does not know how to draw. Reported
-   *  rather than ignored, which is what phase 6.3 requires. */
+  /** An extension UI request with no dialog to put it in: a status line, a
+   *  widget, a notice. The host delivers a notice as written and drops the
+   *  rest — fire-and-forget calls nothing waits on. */
   onUnsupportedUi?: (request: UiRequest) => void;
 };
 
@@ -435,10 +436,11 @@ const shorten = (text: string): string => (text.length <= TITLE_MOST ? text : `$
 /**
  * One of Pi's UI requests, as the shell's own question.
  *
- * Null for a method this version cannot put to a window: a widget, a title, a
- * status line and an editor prefill are all things an extension asks for that
- * have no honest dialog. They are reported, not answered — inventing a value
- * for one would be the host claiming a capability it does not have.
+ * Null for a method with no dialog to put it in: a widget, a title, a status
+ * line, a notice and an editor prefill are all things an extension asks for
+ * that have no honest dialog. The caller routes those — a notice is delivered
+ * as written, the rest are dropped — because inventing a value for one would
+ * be the host claiming a capability it does not have.
  */
 function askFrom(request: UiRequest): ExtensionAsk | null {
   const held = request.held;
@@ -694,10 +696,10 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       }
     }
     if (event['type'] === 'extension_ui_request') {
-      // A dialog is answered; everything else an extension asks for — a notice,
-      // a status line, a widget — has no dialog to put it in and is still
-      // something a host must be able to see. So it is routed and delivered,
-      // not routed and dropped.
+      // A dialog is answered; a notice is delivered as written, and anything
+      // else an extension asks for — a status line, a widget — has no dialog
+      // to put it in and is still something a host must be able to see. So it
+      // is routed and delivered, not routed and dropped.
       void routeUi(event);
     }
     for (const one of eventListeners) one(event);

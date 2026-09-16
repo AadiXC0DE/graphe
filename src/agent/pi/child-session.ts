@@ -56,6 +56,7 @@ import type { SessionKind } from './extension-policy';
 import type { GuardFacts } from '../guard/policy';
 import { childRuntimes, startRuntime } from '../../../electron/services/runtime-supervisor';
 import type { ChildExit, ChildRuntime } from '../../../electron/services/runtime-supervisor';
+import type { UiRequest } from './rpc-protocol';
 import type { ThinkingLevel } from '../../lib/ipc';
 import type { AgentEvent, ImageCard } from '../types';
 import { admit } from '../../work/admission';
@@ -236,6 +237,26 @@ async function trustedExtensions(
 /* -------------------------------------------------------------------------- */
 
 /**
+ * What a UI request the child cannot draw becomes in the window.
+ *
+ * A notice carries the add-on's own words, so it is delivered as written. A
+ * widget, a status line or a title has nothing the person needs to hear and
+ * becomes nothing — the call is fire-and-forget, so no add-on waits on an
+ * answer. Null where there is nothing to say, which is every other method and
+ * a notice with no words in it.
+ */
+export function unsupportedUiNotice(request: UiRequest): { type: 'notice'; what: string } | null {
+  if (request.method !== 'notify') return null;
+  const message = typeof request.held['message'] === 'string' ? request.held['message'] : '';
+  if (message.trim() === '') return null;
+  const type = request.held['notifyType'];
+  return {
+    type: 'notice',
+    what: type === 'error' || type === 'warning' ? `${type}: ${message}` : message,
+  };
+}
+
+/**
  * One conversation, hosted in a child, speaking the same `GrapheSession` as
  * everything else.
  *
@@ -267,14 +288,9 @@ export async function childSession(
       ...(options.cancelAsk === undefined ? {} : { cancelAsk: options.cancelAsk }),
       // The child's own output is for the log and never a sentence on screen.
       onChatter: () => undefined,
-      // A widget, a title or a status line has no dialog and is reported rather
-      // than answered with something invented — the same rule the in-process
-      // path follows.
       onUnsupportedUi: (request) => {
-        options.onEvent({
-          type: 'notice',
-          what: `An add-on asked for ${request.method}, which this window could not do. Nothing was drawn for it, and it was told so.`,
-        });
+        const notice = unsupportedUiNotice(request);
+        if (notice !== null) options.onEvent(notice);
       },
     });
   };

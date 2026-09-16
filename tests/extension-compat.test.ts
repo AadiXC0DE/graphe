@@ -151,8 +151,6 @@ type Harness = {
   messages: { message: Record<string, unknown>; options?: Record<string, unknown> }[];
   /** What the add-on caused the app to say. */
   said: string[];
-  /** Terminal-only calls, as the host reported them. */
-  refused: string[];
   /** Settles when the add-on sends something of its own, however late. */
   delivered: Promise<void>;
   ctx: Record<string, unknown>;
@@ -179,7 +177,6 @@ async function hosted(which: string, window: Window = theWindow()): Promise<Harn
   const messages: { message: Record<string, unknown>; options?: Record<string, unknown> }[] = [];
   const handlers = new Map<string, Handler[]>();
   const said: string[] = [];
-  const refused: string[] = [];
   const delivered = Promise.withResolvers<void>();
 
   const api = {
@@ -208,7 +205,7 @@ async function hosted(which: string, window: Window = theWindow()): Promise<Harn
   const ctx = {
     ui: uiContextOver({
       dialogs: dialogsOver(window.ask),
-      terminal: unsupportedTerminal((what, method) => refused.push(`${what}:${method}`)),
+      terminal: unsupportedTerminal(),
       notify: (what: string) => said.push(what),
       // The same binding production uses: the fixture's own file is the only
       // account of who asked, since Pi's `notify` carries no origin.
@@ -236,7 +233,6 @@ async function hosted(which: string, window: Window = theWindow()): Promise<Harn
     providers,
     messages,
     said,
-    refused,
     delivered: delivered.promise,
     ctx,
     handler,
@@ -523,21 +519,26 @@ describe('notifications and status', () => {
     ).toBe('inner');
   });
 
-  it('does not pretend to have a footer to put a status line in', async () => {
+  it('accepts a status line it has no footer for, and says nothing about it', async () => {
     const addon = await hosted('notices');
     await addon.hand('session_start', { type: 'session_start' });
 
-    // Setting the line and clearing it are the same single refusal: there is no
-    // status surface here for either to act on. Two add-ons sharing a key is
-    // therefore not a namespacing problem yet — nothing is kept to clash.
-    expect(addon.refused).toEqual(['terminal:setStatus']);
+    // Setting the line and clearing it are silent no-ops: there is no status
+    // surface here for either to act on, and a line in the conversation for
+    // each probe is how a new chat opened with sentences about nothing. Two
+    // add-ons sharing a key is therefore not a namespacing problem yet —
+    // nothing is kept to clash.
+    expect(addon.said).toEqual([
+      'notices, The button row is re-drawn.',
+      'notices, warning: Two pages are missing a heading.',
+      'notices, error: The build file would not parse.',
+    ]);
   });
 
   it('accepts the working message and draws it nowhere, without claiming otherwise', async () => {
     const addon = await hosted('notices');
     await addon.hand('session_start', { type: 'session_start' });
     expect(addon.said.some((one) => one.includes('tidying the pages'))).toBe(false);
-    expect(addon.refused).not.toContain('terminal:setWorkingMessage');
   });
 });
 
@@ -628,22 +629,10 @@ describe('a question an add-on wants to take back', () => {
 });
 
 describe('an add-on written for a terminal', () => {
-  it('has every terminal-only call refused out loud, once each', async () => {
+  it('has every terminal-only call accepted silently, and says nothing', async () => {
     const addon = await hosted('custom-tui');
     await addon.hand('session_start', { type: 'session_start' });
 
-    expect(addon.refused).toEqual([
-      'terminal:setWidget',
-      'terminal:setFooter',
-      'terminal:setHeader',
-      'terminal:setEditorComponent',
-      'terminal:onTerminalInput',
-      'terminal:setTheme',
-      'terminal:getAllThemes',
-      'terminal:pasteToEditor',
-      'terminal:setEditorText',
-      'terminal:addAutocompleteProvider',
-    ]);
     expect(addon.said).toEqual([]);
   });
 

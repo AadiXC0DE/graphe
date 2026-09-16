@@ -183,13 +183,10 @@ describe('T34: a trusted add-on that asks somebody something', () => {
     expect(await typing).toBeUndefined();
   });
 
-  it('says plainly which parts of the contract it cannot draw', async () => {
-    const said: string[] = [];
-    const terminal = unsupportedTerminal((what, method) => said.push(`${what}:${method}`));
+  it('answers the parts of the contract it cannot draw with silent fallbacks', async () => {
+    const terminal = unsupportedTerminal();
 
-    terminal.note('setStatus');
-    terminal.note('setStatus');
-    expect(said).toEqual(['terminal:setStatus']);
+    expect(terminal).toEqual({ fail: expect.any(Function), theme: expect.any(Function) });
     expect(() => terminal.theme()).toThrow(/terminal/);
     await expect(terminal.fail('setWidget')).rejects.toThrow(/terminal/);
   });

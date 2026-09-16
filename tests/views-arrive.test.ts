@@ -172,7 +172,11 @@ describe('waiting for a view', () => {
     const held = [...app.matchAll(/fallback=\{[^\n]*?arriving\(([^)]*)\)/g)].map((one) =>
       String(one[1] ?? '').trim(),
     );
-    expect(held.length).toBe(12);
+    // Eleven sheets hold a rectangle; the twelfth surface does not. Commands is
+    // a drawer along the bottom rather than a sheet over the conversation, and
+    // a sheet-coloured rectangle where it would be covered the chat on every
+    // first opening — the flash its fallback={null} removes.
+    expect(held.length).toBe(11);
     expect(held.filter((one) => one === '' || one === "''")).toEqual([]);
   });
 });

@@ -1044,6 +1044,10 @@ export type CreateSessionOptions = {
   /** How long the advisor takes before answering. Left out, whatever is in the
    *  package's settings file stands. */
   advisorThinking?: ThinkingLevel | null;
+  /** Which process hosts this conversation's agent. Left out, the environment
+   *  decides and then `in-process`, which is what every copy of the app has
+   *  always done — see `runtimeChoice` in `./child-session`. */
+  runtime?: 'child' | 'in-process';
 };
 
 /**

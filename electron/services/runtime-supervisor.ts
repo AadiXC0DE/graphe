@@ -63,6 +63,12 @@ import {
  *  `GRAPHE_PROBE_PROGRAM` is for the extension probe. */
 const CHILD_PROGRAM_ENV = 'GRAPHE_RUNTIME_CHILD';
 
+/** The variable Pi's own CLI reads its config folder from, named here so the
+ *  worker is told where credentials and sessions live rather than guessing at
+ *  a `~/.pi/agent` that a disposable profile never uses. Pi calls the same
+ *  string `ENV_AGENT_DIR`. */
+const AGENT_DIR_ENV = 'PI_CODING_AGENT_DIR';
+
 /** Built beside the shell, like the helper and the probe runner. */
 const BUILT_CHILD = fileURLToPath(new URL('../runtime-child.mjs', import.meta.url));
 
@@ -298,10 +304,11 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       ...process.env,
       [RUN_AS_NODE]: '1',
       GRAPHE_RUNTIME_NONCE: nonce,
-      // Where Pi keeps credentials, its model list and its sessions. Passed as
-      // the environment rather than a flag because it is the one setting every
-      // entry point of Pi's reads, including the ones no flag reaches.
-      PI_AGENT_DIR_ENV: options.agentDir,
+      // Where Pi keeps credentials, its model list and its sessions, in the
+      // variable Pi's own CLI reads. Passed as the environment rather than a
+      // flag because it is the one setting every entry point of Pi's honours,
+      // including the ones no flag reaches.
+      [AGENT_DIR_ENV]: options.agentDir,
       [PI_ENTRY_ENV]: options.piEntry ?? piEntry(),
       ...options.env,
     },

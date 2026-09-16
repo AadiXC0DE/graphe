@@ -22,12 +22,14 @@
  *  Source text, not behaviour: the joins inside createSession's closure and in electron/main.ts, which need a live account to reach; the pipes the window itself drives are run for real below.
  */
 
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
-import { Asking, Confirmations, createGuardInterceptor } from '../src/agent/pi/adapter';
+import { Asking, Confirmations, createGuardInterceptor, guardFor } from '../src/agent/pi/adapter';
 import { EventRelay } from '../src/agent/pi/events';
 import { ROLES } from '../src/agent/pi/child';
 import { grapheTools } from '../src/agent/pi/tools';
@@ -104,7 +106,7 @@ describe('the tool exists only where somebody is watching', () => {
     // The tool cannot see whether anybody is there, so the decision is made
     // once, at the seam, and the tool is simply absent for background work —
     // which the two cases above already show of `grapheTools` itself.
-    expect(adapter).toContain('options.unattended === true ? null : askFirst,');
+    expect(adapter).toContain('options.unattended === true ? null : guard.askFirst,');
   });
 
   it('has the board hand background work that flag', () => {
@@ -211,22 +213,34 @@ describe('asking is not itself a change', () => {
 /* ========================================================================== */
 
 describe('the gate closes the moment work begins', () => {
-  it('is closed by a call that actually runs, not by one that was refused', () => {
+  it('is closed by a call that actually runs, not by one that was refused', async () => {
     // Only a changing call closes it, and only once that call has passed
     // everything. A refused call changes nothing, so it must not spend the one
-    // question a turn is allowed — which is what it used to do, leaving the
-    // model told it was too late to ask before anything had happened.
-    expect(adapter).toContain('const workBegan = (call: ToolCall): void => {');
-    expect(adapter).toContain(
-      // Work on a screen somebody is sitting in front of is the exception: it
-      // only happens while they are there, and the question worth asking is one
-      // nothing could have asked before it looked.
-      "changesAnything(call, facts) && !worksAScreen(call)",
+    // question a turn is allowed. Read off the Guard itself, which is where the
+    // gate lives now, rather than off the text that used to hold it.
+    const agentDir = mkdtempSync(join(tmpdir(), 'graphe-gate-agent-'));
+
+    const quiet = await guardFor(
+      { projectRoot: ROOT, agentDir, onEvent: () => {} },
+      { deliver: () => {} },
     );
-    expect(adapter).toContain('workBegan,');
-    // And it is no longer the check-staleness hook's business.
-    const forget = adapter.slice(adapter.indexOf('const forgetChecks = (call: ToolCall)'));
-    expect(forget.slice(0, forget.indexOf('};'))).not.toContain('asksLeft');
+    // A reading call leaves the gate open.
+    quiet.workBegan(call('read', { path: `${ROOT}/src/App.tsx` }));
+    expect(quiet.gate()).toBe('open');
+    // A changing one closes it, and the conversation is over for asking.
+    quiet.workBegan(call('write', { path: `${ROOT}/src/App.tsx`, content: 'x' }));
+    expect(quiet.gate()).toBe('started');
+
+    // Work on a screen somebody is sitting in front of is the exception: it
+    // only happens while they are there, and the question worth asking is one
+    // nothing could have asked before it looked.
+    const screened = await guardFor(
+      { projectRoot: ROOT, agentDir, onEvent: () => {} },
+      { deliver: () => {} },
+    );
+    screened.workBegan(call('browserclick', { selector: '#go' }));
+    expect(screened.gate()).toBe('open');
+    rmSync(agentDir, { recursive: true, force: true });
   });
 
   it('is closed on every road a call takes to actually running', () => {
@@ -259,43 +273,65 @@ describe('the gate closes the moment work begins', () => {
     }
   });
 
-  it('is asked for exactly once, and the flag is set before the wait', () => {
+  it('is asked for exactly once, and the flag is set before the wait', async () => {
     // Set after the await, a second call landing while the first was parked
-    // would have found the gate open and put up a second card.
-    const at = adapter.indexOf('const askFirst = async (raw: unknown): Promise<string> => {');
-    expect(at).toBeGreaterThan(-1);
-    const body = adapter.slice(at, adapter.indexOf('const customTools = grapheTools(', at));
+    // would have found the gate open and put up a second card. Driven through
+    // the Guard rather than read out of the text that used to hold it.
+    const agentDir = mkdtempSync(join(tmpdir(), 'graphe-ask-agent-'));
+    const events: AgentEvent[] = [];
+    const guard = await guardFor(
+      { projectRoot: ROOT, agentDir, onEvent: () => {} },
+      { deliver: (event) => events.push(event) },
+    );
 
-    expect(body).toContain("if (asksLeft === 'started') return cannotAsk.started;");
-    expect(body).toContain("if (asksLeft === 'asked') return cannotAsk.already;");
-    expect(body.indexOf("asksLeft = 'asked';")).toBeGreaterThan(-1);
-    // A batch where nothing survived the tidying is not an ask. It happens
-    // before the flag, so a model that sends junk has not spent its one stop.
-    expect(body.indexOf('if (questions.length === 0) return cannotAsk.nothingWorthAsking;'))
-      .toBeLessThan(body.indexOf("asksLeft = 'asked';"));
-    expect(body.indexOf("asksLeft = 'asked';")).toBeLessThan(body.indexOf('await asking.ask(id)'));
-    // And the card is on screen before anything waits on it.
-    expect(body.indexOf("say({ type: 'asked-first'")).toBeLessThan(body.indexOf('await asking.ask(id)'));
+    // A batch where nothing survived the tidying is not an ask: it must not
+    // spend the one stop, so the gate is still open afterwards.
+    expect(await guard.askFirst([])).toBe(cannotAsk.nothingWorthAsking);
+    expect(guard.gate()).toBe('open');
+
+    // One real set of questions parks on the card, and the gate is spent
+    // before anything waits — a second arrival finds it closed.
+    const first = guard.askFirst([
+      { question: 'Which header?', choices: [{ label: 'Tall' }, { label: 'Compact' }] },
+    ]);
+    expect(guard.gate()).toBe('asked');
+    expect(await guard.askFirst([])).toBe(cannotAsk.already);
+    expect(events.some((one) => one.type === 'asked-first')).toBe(true);
+    guard.asking.abandonAll();
+    expect(await first).toBe(askWords.skipped);
+    rmSync(agentDir, { recursive: true, force: true });
   });
 
   it('reopens for a new request and never for a message landing mid-run', () => {
     // A follow-up is somebody adding to work already going. Stopping that to
     // put a form up is the exact thing this feature must never do.
-    expect(adapter).toContain("asksLeft = 'open';");
-    const at = adapter.indexOf("asksLeft = 'open';");
+    expect(adapter).toContain('guard.reopenGate();');
+    const at = adapter.indexOf('guard.reopenGate();');
     expect(adapter.indexOf('activePrompts += 1;', at) - at).toBeLessThan(400);
     // Nothing else in the file may open it.
-    const opens = adapter.split('\n').filter((line) => /asksLeft = 'open'/.test(line));
+    const opens = adapter.split('\n').filter((line) => /\breopenGate\(\);/.test(line));
     expect(opens).toHaveLength(1);
   });
 
-  it('never opens the gate again just because a turn ended', () => {
-    // `settled` lets go of anything waiting, but it must not hand the next
-    // tool call of the same turn a fresh question.
-    const say = adapter.slice(adapter.indexOf('const say = (raw: AgentEvent): void => {'));
-    const ends = say.indexOf('sayWhatTheRulesHeld();');
-    expect(ends).toBeGreaterThan(-1);
-    expect(say.slice(0, ends)).not.toContain("asksLeft = 'open'");
+  it('never opens the gate again just because a turn ended', async () => {
+    // `releaseEverything` lets go of anything waiting, but it must not hand the
+    // next tool call of the same turn a fresh question.
+    const agentDir = mkdtempSync(join(tmpdir(), 'graphe-gate2-agent-'));
+    const guard = await guardFor(
+      { projectRoot: ROOT, agentDir, onEvent: () => {} },
+      { deliver: () => {} },
+    );
+    guard.workBegan(call('write', { path: `${ROOT}/src/App.tsx`, content: 'x' }));
+    expect(guard.gate()).toBe('started');
+    guard.releaseEverything();
+    expect(guard.gate()).toBe('started');
+    // Only a new request opens it, which is what `reopenGate` is for.
+    guard.reopenGate();
+    expect(guard.gate()).toBe('open');
+    // And there is exactly one place the session opens it.
+    const opens = adapter.split('\n').filter((line) => /reopenGate\(\);/.test(line));
+    expect(opens).toHaveLength(1);
+    rmSync(agentDir, { recursive: true, force: true });
   });
 });
 
@@ -377,28 +413,42 @@ describe('every question has an ending', () => {
     expect(adapter).toContain('return askWords.skipped;');
   });
 
-  it('is let go on settle, on stop, and on close', () => {
+  it('is let go on settle, on stop, and on close, through one path', async () => {
     // Three endings, and a question outliving any one of them is a form that
-    // reads as "still working" for the rest of the sitting.
-    const say = adapter.slice(adapter.indexOf('const say = (raw: AgentEvent): void => {'));
-    expect(say.slice(0, say.indexOf('sayWhatTheRulesHeld();'))).toContain(
-      'const dropped = asking.abandonAll();',
+    // reads as "still working" for the rest of the sitting. All three share
+    // `releaseEverything`, so what is asserted is that it really settles them —
+    // and that each of the three callers goes through it.
+    const agentDir = mkdtempSync(join(tmpdir(), 'graphe-release-agent-'));
+    const guard = await guardFor(
+      { projectRoot: ROOT, agentDir, onEvent: () => {} },
+      { deliver: () => {} },
     );
+    const asked = guard.asking.ask('ask-1');
+    const confirmed = guard.confirmations.ask(call('write', { path: `${ROOT}/a.txt` }));
+    const released = guard.releaseEverything();
+    expect(released.askedIds).toEqual(['ask-1']);
+    expect(released.callIds).toEqual(['call-1']);
+    // Null is "decide for me" and no is "you said no": both real answers, and
+    // neither leaves the agent loop parked.
+    expect(await asked).toBeNull();
+    expect(await confirmed).toBe('no');
+    expect(guard.asking.pending).toEqual([]);
+    expect(guard.confirmations.pending).toEqual([]);
 
-    const stop = adapter.slice(adapter.indexOf('async stop(): Promise<void> {'));
-    expect(stop.slice(0, stop.indexOf('await session.abort()'))).toContain(
-      'const letGo = asking.abandonAll();',
-    );
-
-    const dispose = adapter.slice(adapter.indexOf('dispose(): void {'));
-    expect(dispose.slice(0, dispose.indexOf('session.dispose();'))).toContain('asking.abandonAll();');
+    for (const site of ['async stop(): Promise<void> {', 'dispose(): void {']) {
+      const body = adapter.slice(adapter.indexOf(site));
+      expect(body.slice(0, body.indexOf('\n  },')), `${site} does not let questions go`).toContain(
+        'guard.releaseEverything()',
+      );
+    }
+    rmSync(agentDir, { recursive: true, force: true });
   });
 
   it('says out loud that the card has been taken away', () => {
     // Only the window can close a card, so a question let go in the session
     // and not announced leaves a form on screen whose answer goes nowhere.
-    expect(adapter).toContain("options.onEvent({ type: 'asking-withdrawn', ids: dropped });");
-    expect(adapter).toContain("say({ type: 'asking-withdrawn', ids: letGo });");
+    expect(adapter).toContain("options.onEvent({ type: 'asking-withdrawn', ids: open.askedIds });");
+    expect(adapter).toContain("say({ type: 'asking-withdrawn', ids: open.askedIds });");
   });
 });
 

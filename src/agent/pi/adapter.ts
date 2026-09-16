@@ -669,9 +669,6 @@ export type GuardHooks = {
   /** What an add-on's own renderer draws for a step, in a terminal. Read off
    *  the raw event, so it stays off the translated stream. */
   drawnFor?: (event: unknown) => readonly string[] | undefined;
-  /** A call that passed everything and is about to run. Not the same moment as
-   *  being asked for: a call the Guard refused never happens. */
-  workBegan?: (call: ToolCall) => void;
 };
 
 /** Everything shell-side the Guard is made of, so a caller can hand the whole
@@ -894,9 +891,6 @@ export async function guardFor(options: CreateSessionOptions, hooks: GuardHooks)
       planMode = on;
     },
     gate: (): 'open' | 'started' | 'asked' => gate,
-    spendAsk: (): void => {
-      gate = 'asked';
-    },
     askFirst,
     reopenGate: (): void => {
       gate = 'open';
@@ -2423,9 +2417,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     return raw === null ? null : raw - alreadyBilled;
   };
 
-  /* Assigned by `guardFor` below, which is before anything can say a word:
-     `say` and `howItEnded` read the Guard's own lists, and those exist only
-     once it is built. */
+  /* Assigned once, by `guardFor` below, and read by the closures above it:
+     `say` is the relay the Guard is handed *and* the reader of its lists, so
+     one of the two has to come second. A `const` cannot be declared after the
+     functions that close over it, so this stays a `let`. */
+  // eslint-disable-next-line prefer-const
   let guard!: Guarded;
 
   /** Nothing reaches the window while this is on, except what was spent. Used
@@ -2532,14 +2528,14 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       // can answer it after that, and the window reads a card still waiting as
       // "this is still working": the composer stayed a spinner and Stop had
       // nothing left to stop, for the rest of the sitting.
-      const let = guard.releaseEverything();
-      if (let.callIds.length > 0) {
-        options.onEvent({ type: 'questions-withdrawn', callIds: let.callIds });
+      const open = guard.releaseEverything();
+      if (open.callIds.length > 0) {
+        options.onEvent({ type: 'questions-withdrawn', callIds: open.callIds });
       }
       // The same for a card asked before the work: the turn is over, so
       // nothing it says can reach anything. Left open it would be a form that
       // reads as "still working" for the rest of the sitting.
-      if (let.askedIds.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: let.askedIds });
+      if (open.askedIds.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: open.askedIds });
       sayWhatTheRulesHeld();
       // Only at the end of the job, not at the end of every round. With a loop
       // carrying a list on, "always do this at the end" used to run once per
@@ -2573,7 +2569,6 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       if (ok && call !== undefined) handleAfterCall(call);
     },
     drawnFor,
-    workBegan,
   });
   const { relay, review, asking, confirmations, paused, facts, house, desk } = guard;
   const agentDir = guard.agentDir;
@@ -4059,9 +4054,9 @@ const MOST_AFTER_SAYINGS = 3;
       // A held turn is let go first: stopping a turn that is waiting must end
       // it, not leave it waiting for a resume nobody is going to press.
       paused.hold(false);
-      const let = guard.releaseEverything();
-      if (let.callIds.length > 0) say({ type: 'questions-withdrawn', callIds: let.callIds });
-      if (let.askedIds.length > 0) say({ type: 'asking-withdrawn', ids: let.askedIds });
+      const open = guard.releaseEverything();
+      if (open.callIds.length > 0) say({ type: 'questions-withdrawn', callIds: open.callIds });
+      if (open.askedIds.length > 0) say({ type: 'asking-withdrawn', ids: open.askedIds });
       await session.abort();
       // The run is over whatever pi did with the abort. Saying so is what puts
       // the composer back to Send; waiting for an event that may not come is

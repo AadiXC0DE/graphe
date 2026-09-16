@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-424 packages, generated 2026-09-16 from package-lock.json 25afcbf8e0d0c12b.
+424 packages, generated 2026-09-16 from package-lock.json da82043c52e28e48.
 
 ## Summary
 

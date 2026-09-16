@@ -322,11 +322,12 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       // across — which is what "the app started here" leaves behind.
       const index = JSON.parse(await readWhenWritten(join(profile, 'workspaces.json')));
       expect(index).toEqual({
-        version: 1,
+        version: 2,
         projects: {},
         byRoot: {},
         workspaces: {},
         conversations: {},
+        views: {},
       });
       const marker = JSON.parse(await readWhenWritten(join(profile, 'workspace-migration.json')));
       expect(marker).toMatchObject({ version: 1, sources: 0, workspaces: [], conversations: [] });

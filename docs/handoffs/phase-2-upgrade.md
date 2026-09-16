@@ -1,16 +1,21 @@
 # Phase 2 handoff: the runtime and the dependency stack
 
-STATUS 2026-09-15: Pi is pinned at 0.85.1 and the packaged-runtime import is
+STATUS 2026-09-16: Pi is pinned at 0.85.1 and the packaged-runtime import is
 proven on arm64. Of the plan's rows, **react/react-dom, both React type packages,
 typebox, playwright, concurrently, typescript-eslint, vite with
-`@vitejs/plugin-react`, and the `glob` removal are landed**, each with a command
-behind it in "Taken in the second pass" below. **Not landed:** electron,
-electron-builder, vitest, jsdom, eslint with `eslint-plugin-react-hooks`,
-typescript, unpdf, mermaid, and any `@types/node` above 22 — each with its reason
-and a reassessment date. `npx tsc --noEmit` was clean on this tree at the end of
-the pass, `npm run lint` was clean, and every suite the dependency groups touch
-passed. The only failure left in the whole suite is one case in a sibling's file
-— `tests/runtime-spike.test.ts` ("a child that is killed") — not a dependency row.
+`@vitejs/plugin-react`, `glob` (removed), vitest, jsdom, eslint with
+`eslint-plugin-react-hooks`, unpdf and mermaid are landed**, each with a command
+behind it in "Taken in the second pass" and "Taken in the third pass" below.
+**Not landed:** electron and electron-builder (one packaging session on this
+machine), and any `@types/node` above 22 — each with its reason and a reassessment
+date. **Closed, not deferred:** TypeScript 7, which ships no compiler API and is
+refused by typescript-eslint's peer range. `npx tsc --noEmit` clean, `npm run
+lint` clean (171 warnings, all of them the ESLint 10 and hooks 7 rules listed
+below), `npm run copy:check` clean, and `npm test` green — 366 files, 6614 tests.
+
+The Node reason the earlier passes recorded for vitest and jsdom was wrong: every
+engine range is satisfied by this machine (22.21.1). `package.json` now declares
+`engines.node: >=22.13` and `.nvmrc` pins 22.21.1 so nobody re-derives it.
 
 Findings: Q03 (open), E11 (open). Baseline: `2b5bccb`, app `1.0.3`. Every number
 here was taken on this tree on 2026-09-15.
@@ -154,6 +159,62 @@ baseline and at the next wave boundary. A row with its own reason says so.
 | `mermaid` 11.17.2 to 12.0.0 | major separately, after renderer/sanitization checks | Not attempted. The 11.17.2 step is done; the major needs the hostile-label and sanitization cases in `tests/mermaid.test.ts` repeated against the 12 renderer, and Vite 8 moved the mermaid chunks this pass | 2026-10-16 |
 | `@types/node` 22.20.2 | align final types to the build/runtime target, not newest types blindly | Note: the plan's inventory row names 26.5.1 as newest. The lockfile-aligned move to 22.20.2 is already done above; anything higher follows the Electron bump rather than leading it | with Electron |
 | `@huggingface/transformers` 4.2.0, `@modelcontextprotocol/sdk` 1.30.0, `react-icons` 5.7.0, `sql.js` 1.14.2, `@types/sql.js` 1.4.11, `use-stick-to-bottom` 1.1.6 | retain | The plan's row is retain; no newer target is reported and nothing here depends on a bump | not scheduled |
+
+## Taken in the third pass (2026-09-16), group by group
+
+One group per commit, each with its own install and its own round trip. Every
+command was run on this tree.
+
+**vitest 5.0.1 and jsdom 29.1.1** — one group, one commit (`6c0ec89`).
+`npm install -D vitest@5`, then `npm install -D jsdom@29`. The migration surface
+was as small as the doc predicted: no `vitest.config.*`, `bench` used nowhere as
+a fixture, the two held `.rejects` promises already awaited. Fixes needed: none
+to the tests; `.vitest/` added to `.gitignore` for the artifacts' new home. The
+50 jsdom suites ran together (602 tests) and then the whole suite: **366 files,
+6614 tests, green**. Two failures were real and were mine, not vitest's: `mermaid`
+and `unpdf` had been installed with `-D`, which moves a package out of
+`dependencies`, and `scripts/what-ships.mjs` computes the packaging drop list from
+production dependencies — so `tests/what-ships.test.ts` and the licence manifest
+went red. Both are back in `dependencies` where they were; `tests/what-ships.test.ts`
+and `tests/licences.test.ts` pass again.
+
+**eslint 10.10.0 with eslint-plugin-react-hooks 7.1.1** — one commit (`5e6eb82`).
+`npm install -D eslint@10 eslint-plugin-react-hooks@7 @eslint/js@10`. One config
+change was required: in v7 the flat-config entry is `configs.flat['recommended-latest']`;
+`configs['recommended-latest']` is still the eslintrc shape and ESLint 10 refuses
+it outright. With that, 171 findings across 66 files, all from the rules that are
+new in these two versions — counted here rather than silenced:
+
+| Rule | Findings |
+| --- | --- |
+| `react-hooks/refs` | 49 |
+| `react-hooks/set-state-in-effect` | 44 |
+| `no-useless-assignment` | 19 |
+| `preserve-caught-error` | 17 |
+| `react-hooks/preserve-manual-memoization` | 15 |
+| `react-hooks/immutability` | 15 |
+| `react-hooks/purity` | 11 |
+| `react-hooks/static-components` | 1 |
+
+Each is set to `warn` in `eslint.config.js` with this count beside it, so the gate
+is green and the number is visible; working through them is its own commit, as the
+plan asks ("a day on the warnings is worth it, but it is a separate commit").
+
+**unpdf 1.8.1** — one commit (`9ef2d8c`). `extractText(buffer)` still answers
+`{ totalPages, text: string[] }` and the one importer (`src/agent/pi/pdf.ts:16`)
+does not change. Probed rather than assumed: a real single-page PDF extracts its
+text (`totalPages: 1`, `text` an array, the words read back), a four-byte non-PDF
+and an empty file both throw `InvalidPDFException` — which is what the tool's
+`try` already turns into a sentence. `tests/pdf.test.ts` (12),
+`tests/attached-pdf-wired.test.ts` (6) and `tests/read-a-file.test.ts` (9) pass;
+`@napi-rs/canvas` is **not** installed, since only `extractImages` would need it.
+
+**mermaid 12.0.0** — one commit (`6046dc4`). `src/lib/mermaid.ts` gained
+`layout: 'dagre'` and `look: 'classic'` in its `initialize` call: 12 bundles ELK
+and defaults to it, which lays the same diagram out differently. With that, the
+five cases in `tests/mermaid.test.ts` (including the hostile label) pass, the
+license manifest is regenerated, and the budget check passes with mermaid still
+only in the on-demand set.
 
 ## What this pass did not reach
 

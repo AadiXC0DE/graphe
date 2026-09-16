@@ -55,7 +55,6 @@ import { letChildrenRunAsNode, scratchUnder } from '../src/agent/pi/childenv';
 import {
   connectToProvider,
   connection as readConnection,
-  createSession,
   warmUp,
   defaultAgentDir,
   advisorScopeSaid,
@@ -73,6 +72,7 @@ import {
   type OurAuthInteraction,
 } from '../src/agent/pi/adapter';
 import type { AgentEvent, ImageCard, Money } from '../src/agent/types';
+import { openSession } from '../src/agent/pi/child-session';
 import type { TokenUsageView } from '../src/lib/token-days';
 import { Running } from '../src/agent/running';
 import { fleet, readCeiling } from '../src/cost/fleet';
@@ -98,13 +98,39 @@ import {
   alwaysFile,
   alwaysFrom,
   alwaysText,
+  commandFor,
   isAlwaysFile,
   rowsAsGiven,
   rowsFrom,
 } from '../src/work/always';
 import { containsPath, isCredentialPath } from '../src/agent/guard/paths';
-import type { GuardFacts } from '../src/agent/guard/policy';
+import { evaluate, type GuardFacts } from '../src/agent/guard/policy';
+import { checksBrief, projectChecks, usualChecks } from '../src/agent/pi/checks';
+import { parseReview, trimDiff } from '../src/agent/pi/review';
 import { asComputerUse, type ComputerUse } from '../src/work/computeruse';
+import {
+  withRun,
+  withFlow,
+  withoutFlow,
+  canStart,
+  type Flow as CanvasFlow,
+  type Lane,
+  type Run as CanvasRun,
+  type Standing,
+} from '../src/work/canvas';
+import { FlowFile } from '../src/projects/flows';
+import { readTokensFor } from './services/tokens';
+import { noteRuntimeLog } from './services/runtime-supervisor';
+import {
+  LANE_0,
+  continued,
+  drive,
+  resumed,
+  stopped,
+  type RunnerPort,
+  type Settled,
+  type TurnOptions,
+} from './services/flow-runner';
 import {
   CHANNEL,
   type Away,
@@ -169,12 +195,15 @@ import {
   modelKey,
   type Trouble,
   type Where,
+  type ViewShown,
+  type StyleToken,
   type ReviewClash,
   type ReviewDecided,
   type ReviewEntry,
   type ReviewOpened,
   setDownWords,
   whereIn,
+  asViewShown,
 } from '../src/lib/ipc';
 import { asAddress, saidFrom, type Said } from '../src/preview/tabs';
 import { parseGitStatus, parseNumstat } from '../src/lib/gitstatus';
@@ -289,10 +318,12 @@ import {
   Readings,
 } from './services/readings';
 import { inFlight, movedByWork, reportedState, Sessions, workEventOf } from '../src/domain/conversations';
+import { runOwner } from '../src/domain/events';
 import {
   asConversationId,
   asWorkspaceId,
   newConversationId,
+  newRunId,
   type ConversationId,
 } from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
@@ -318,14 +349,17 @@ import {
   conversationById,
   attachConversation,
   canonical,
+  dropView,
   emptyIndex,
   ensureProject,
+  noteView,
   parseIndex,
   projectAtPath,
   serializeIndex,
   setRepoKey,
   updateConversation,
   verdictOn,
+  viewInPane,
   workspaceAtPath,
   workspaceById,
   workspaceForConversation,
@@ -879,9 +913,19 @@ const wire = batcher((frames) => {
 });
 
 function send(project: string | null, event: AgentEvent, conversation?: string): void {
+  // Watched before the window is consulted: a canvas block's turn has to be
+  // counted whether or not there is a window to draw it in.
+  if (conversation !== undefined) {
+    for (const hear of streamWatchers) hear(conversation, event);
+  }
   if (mainWindow === null || mainWindow.isDestroyed()) return;
   wire.push({ project, conversation: conversation ?? null, event });
 }
+
+/** Everything reading the stream as it happens, for a reason of its own. Only
+ *  the canvas, so far: its blocks are counted from the events of their own
+ *  turn rather than from what the conversation ends up holding. */
+const streamWatchers = new Set<(conversation: string, event: AgentEvent) => void>();
 
 function tell(progress: ShowProgress): void {
   if (mainWindow === null || mainWindow.isDestroyed()) return;
@@ -3489,11 +3533,19 @@ async function conversationsInProject(
       const workspace =
         workspaceForConversation(index, one.path) ?? workspaceForConversation(index, one.id);
       const trouble = workspaceTrouble(workspace);
+      // Where it came from, when the shell is the one that made it: a canvas
+      // lane's chat is grouped under its canvas rather than among ordinary
+      // chats, and nothing else in the window can work that out.
+      const lineage =
+        conversationById(index, one.path)?.lineage ??
+        conversationById(index, one.id)?.lineage ??
+        null;
       return {
         ...one,
         archived: putAway,
         state: reportedState(states.stateOf(named(one.path)), putAway),
         ...(trouble === null ? {} : { workspace: trouble }),
+        ...(lineage === null ? {} : { lineage }),
       };
     }),
   };
@@ -3943,6 +3995,482 @@ async function startInNewWorktree(
   return started;
 }
 
+/* -------------------------------------------------------------------------- */
+/* The canvas: one flow run, driven from here                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Every run this shell is driving, by flow. A stop, a continue and a resume
+ *  are presses about a run that is already going, so each finds the live one
+ *  rather than working it out again from a file the runner owns. */
+const liveRuns = new Map<string, { project: string; flow: CanvasFlow; run: CanvasRun; port: RunnerPort }>();
+
+/**
+ * Listen to one conversation's events as they are sent to the window.
+ *
+ * A canvas block's turn has to be counted in its own terms — what it said, how
+ * many rounds, what it cost — and the only place those exist is the stream the
+ * session already produces. Tapping it here rather than reading the thread back
+ * afterwards means a turn that failed still reports what it managed to say.
+ */
+function watchSession(conversation: string, hear: (event: AgentEvent) => void): () => void {
+  const mine = (at: string, event: AgentEvent): void => {
+    if (at === conversation) hear(event);
+  };
+  streamWatchers.add(mine);
+  return () => {
+    streamWatchers.delete(mine);
+  };
+}
+
+/** What the shell has to say here, because it is the one that decided. */
+const CANVAS_WORDS = {
+  noProject: 'That canvas belongs to a project that is not open.',
+  noConversation: 'That lane had no conversation to send into.',
+  noRoom: 'That lane could not be opened.',
+  noVerdict:
+    'That turn did not come back with a verdict. A review ends with a review block naming ships, needs-work or do-not-land.',
+  noUrl: 'The turn finished but github did not answer with a url.',
+  refusedCheck: (name: string): string =>
+    `“${name}” is not something I will run on my own, so this check did not run.`,
+} as const;
+
+/** How long one of the project's own checks is given. A check that hangs must
+ *  not hold a run nobody is watching for the rest of the afternoon. */
+const CHECK_PATIENCE = 10 * 60_000;
+
+/** Where a conversation is in front of a person, so a flow's review knows what
+ *  the lane has changed since the run began. Filled when a lane opens. */
+const laneHeads = new Map<string, string>();
+
+/** Whether the project is on its own default branch, which is the one fact
+ *  `canStart` cannot work out for itself. A pull request off the default branch
+ *  is not a pull request, and the block says so. */
+async function standingAt(project: string): Promise<Standing> {
+  const git = await readGitStatus(project);
+  if (git === null || git.branch === null) return 'default-branch';
+  // The remote's own HEAD is the one answer git keeps; a project with no remote
+  // falls back to the two names a first branch is given.
+  const head = await gitRun(project, [
+    'symbolic-ref',
+    '--quiet',
+    '--short',
+    'refs/remotes/origin/HEAD',
+  ]);
+  const trunk = head.code === 0 ? (head.out ?? '').trim().replace(/^origin\//, '') : '';
+  if (trunk !== '') return git.branch === trunk ? 'default-branch' : 'branch';
+  return git.branch === 'main' || git.branch === 'master' ? 'default-branch' : 'branch';
+}
+
+/** One block's turn, in the terms the machine counts: what it said, how many
+ *  rounds the model answered, and what those rounds cost. */
+type Turned = { said: string; turns: number; spent: Money | null };
+
+/**
+ * Send one turn into a lane's conversation and settle when it has finished.
+ *
+ * The session's own stream is watched from just before the prompt to just after
+ * it returns, so what counts against this block is this block's turn and not
+ * whatever the conversation said earlier. `prompt` itself resolves at the
+ * settle — retries, continuations and tidying included — so there is no second
+ * clock to keep in step with Pi's own.
+ */
+async function turnInLane(
+  project: string,
+  lane: Lane,
+  text: string,
+  options: TurnOptions,
+): Promise<Turned | { failure: string }> {
+  const home = projectAt({ project });
+  if (home === null) return { failure: CANVAS_WORDS.noProject };
+  if (lane.conversationId === null) return { failure: CANVAS_WORDS.noConversation };
+  const found = conversationAt(home.held, { conversation: lane.conversationId });
+  if (found === null) return { failure: CANVAS_WORDS.noConversation };
+  const session = found.held;
+
+  let said = '';
+  let turns = 0;
+  let spent: Money | null = null;
+  let failure: string | null = null;
+  const hearing = watchSession(lane.conversationId, (event) => {
+    if (event.type === 'message-delta') said += event.text;
+    // One round of the model answering is what a card counts as a turn.
+    if (event.type === 'message-end') turns += 1;
+    if (event.type === 'spend') spent = event.amount;
+    if (event.type === 'error') failure = event.message;
+  });
+
+  const before = session.model;
+  try {
+    if (options.model !== null && !(await session.useModel(options.model))) {
+      return { failure: 'That model could not be brought into this conversation.' };
+    }
+    if (options.thinking !== null) session.setThinking(options.thinking);
+    session.goAsFarAs(options.howFar);
+    await session.prompt(text, await picturesFor(app.getPath('userData'), options.attachments), {
+      lookFirst: options.lookFirst,
+    });
+  } catch (cause) {
+    return { failure: cause instanceof Error ? cause.message : CANVAS_WORDS.noConversation };
+  } finally {
+    hearing();
+    // The model goes back, so the next block — or the person typing in this
+    // conversation — gets the model it was in rather than this block's choice.
+    if (options.model !== null && before !== null) await session.useModel(before).catch(() => false);
+  }
+  if (failure !== null) return { failure };
+  return { said: said.trim(), turns, spent };
+}
+
+/** What a conversation is called on disk. A lane's chat is named by the shell,
+ *  because nobody opened it from the window and so nobody else knows its name. */
+async function nameConversation(address: string, name: string): Promise<void> {
+  await loadWorkspaceIndex();
+  workspaceIndex = updateConversation(workspaceIndex, address, {
+    title: name,
+    updatedAt: Date.now(),
+  });
+  await saveWorkspaceIndex();
+}
+
+/** The pictures a block was given, resolved out of the attachment store by
+ *  content id. One that no longer resolves is left out rather than sent as a
+ *  broken picture. */
+async function picturesFor(userData: string, ids: readonly string[]): Promise<readonly ImageCard[]> {
+  const cards: ImageCard[] = [];
+  for (const id of ids) {
+    const kept = await copyOf(userData, id).catch(() => null);
+    if (kept === null || kept.kind !== 'image') continue;
+    cards.push({ mimeType: kept.mimeType, bytes: kept.bytes });
+  }
+  return cards;
+}
+
+/**
+ * The project's own checks, run.
+ *
+ * The same commands the "things this project always does" feature runs when a
+ * job finishes — that file is the project's own list, and a checks block that
+ * invented a different one would be reporting on a standard nobody wrote down.
+ * A command the Guard would refuse is not run and does not pass: a check that
+ * did not happen is not a check that came out clear.
+ */
+async function runTheChecks(folder: string): Promise<{ passed: boolean; report: string }> {
+  const text = await readFile(alwaysFile(folder), 'utf8').catch(() => null);
+  const wanted = alwaysFrom(text).all.whenItFinishes;
+  const trouble: string[] = [];
+  for (const one of wanted) {
+    const command = commandFor(one, []);
+    const allowed = evaluate({ id: `flow-check-${one.name}`, name: 'bash', input: { command } }, {
+      projectRoot: folder,
+    });
+    if (allowed.kind !== 'allow') {
+      trouble.push(CANVAS_WORDS.refusedCheck(one.name));
+      continue;
+    }
+    const ran = await runHelper('/bin/sh', ['-c', command], {
+      folder,
+      patience: CHECK_PATIENCE,
+    }).catch(() => null);
+    if (ran === null || ran.code !== 0) {
+      const output = (ran?.said ?? '').trim();
+      trouble.push(`“${one.name}”\n${output}`);
+    }
+  }
+  // Four thousand characters, because the report lands on a card and in a
+  // conversation: a failing suite's whole output is a wall nobody reads.
+  return { passed: trouble.length === 0, report: trouble.join('\n\n').slice(0, 4000) };
+}
+
+/**
+ * What one lane's change comes to, as the three words the machine works in.
+ *
+ * The verdict card in this app is drawn from a review block the model writes,
+ * and the parsing for it already exists — so this asks the lane's own agent for
+ * a review in one ordinary turn and reads the answer back. Nothing new judges
+ * the change; the same reviewer a person would get does.
+ */
+async function reviewInLane(
+  project: string,
+  lane: Lane,
+  change: string,
+  options: TurnOptions,
+): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string }> {
+  const folder = (await laneFolderAt(project, lane)) ?? project;
+  const own = await projectChecks(folder);
+  const checks = own.length > 0 ? own : usualChecks();
+  const asked = [
+    'Check the change below before it ships.',
+    checksBrief(checks, own.length > 0),
+    'Finish with a plain summary and then a fenced review block: a JSON object with the verdict ("ships", "needs-work" or "do-not-land"), one summary sentence, and the findings.',
+    change === '' ? 'Nothing has changed in this lane yet.' : trimDiff(change),
+  ].join('\n\n');
+  const turned = await turnInLane(project, lane, asked, { ...options, lookFirst: false });
+  if ('failure' in turned) return { verdict: 'needs-work', line: turned.failure };
+  const parsed = parseReview(turned.said);
+  if (parsed === null) return { verdict: 'needs-work', line: CANVAS_WORDS.noVerdict };
+  return { verdict: parsed.kind, line: parsed.summary };
+}
+
+/**
+ * The port one running flow is driven through.
+ *
+ * Everything in it is what the shell already has. A lane is a conversation —
+ * the flow's own folder for the first, a worktree and then a conversation for
+ * every other — checks are the project's own file, review is one turn and the
+ * verdict parser, and a pull request is one turn and what `gh` answers after it.
+ */
+function runnerPortFor(project: string, flow: CanvasFlow, onChanged: (run: CanvasRun) => void): RunnerPort {
+  function changed(run: CanvasRun): void {
+    onChanged(run);
+  }
+
+  async function folderOf(lane: Lane): Promise<string> {
+    const home = projectAt({ project });
+    if (home === null) return project;
+    return folderFor(home, {
+      project: home.path,
+      ...(lane.conversationId === null ? {} : { conversation: lane.conversationId }),
+    });
+  }
+
+  return {
+    async openLane(lane: Lane): Promise<Lane> {
+      const home = projectAt({ project });
+      if (home === null) throw new Error(CANVAS_WORDS.noProject);
+      const open = { path: home.path, held: home.held };
+      if (lane.id === LANE_0) {
+        // The flow runs where it was started: the conversation the project
+        // keeps, which is the folder somebody pressed Start in.
+        const started = await startConversation(open, { kind: 'most-recent' });
+        if (!started.ok) throw new Error(started.trouble.because);
+        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(home.path)) ?? '');
+        return { ...lane, conversationId: started.value.address };
+      }
+      // The same copy the New worktree press makes, by the same call, so a
+      // canvas branch is an ordinary branch and lands through Review.
+      const named = freshCheckout(open.held, open.path);
+      const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
+        folder: named.folder,
+      });
+      if (!made.ok || made.value === null) {
+        throw new Error(made.ok ? CANVAS_WORDS.noRoom : made.because);
+      }
+      const workspace = await worktreeWorkspaceFor(
+        open.path,
+        made.value.folder,
+        made.value.branch,
+        await headSha(open.path),
+      );
+      const started = await startConversation(open, openingIn(workspace.workspaceId));
+      if (!started.ok) throw new Error(started.trouble.because);
+      await noteConversationWorkspace(started.value.address, workspace.workspaceId);
+      await nameConversation(started.value.address, `${flow.name} · ${made.value.branch}`);
+      await rememberLineage(started.value.address, { from: flow.id, kind: 'flow' });
+      laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(made.value.folder)) ?? '');
+      return { ...lane, conversationId: started.value.address, branch: made.value.branch };
+    },
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the port's shape
+    async send(lane, _block, text, options): Promise<Settled> {
+      const turned = await turnInLane(project, lane, text, options);
+      if ('failure' in turned) return { ok: false, failure: turned.failure };
+      return { ok: true, said: turned.said, turns: turned.turns, spent: turned.spent };
+    },
+
+    async checks(lane) {
+      return runTheChecks(await folderOf(lane));
+    },
+
+    async review(lane) {
+      const folder = await folderOf(lane);
+      const since = laneHeads.get(`${project}\u0000${lane.id}`) ?? '';
+      const working = await new ProjectHistory(folder)
+        .diffFor({ kind: 'working' })
+        .catch(() => '');
+      // Both halves, because a lane commits as it works: since the run began,
+      // rather than since the last commit in it.
+      const reached = since === '' ? '' : ((await gitRun(folder, ['diff', since])).out ?? '');
+      const verdict = await reviewInLane(project, lane, `${reached}\n${working}`.trim(), {
+        model: null,
+        thinking: null,
+        lookFirst: false,
+        attachments: [],
+        howFar: flow.howFar,
+      });
+      return verdict;
+    },
+
+    async pullRequest(lane) {
+      const branch = lane.branch;
+      const asked =
+        branch === null
+          ? 'Open a pull request for the work in this folder with the `gh` command you already have.'
+          : `Open a pull request from the branch ${branch} with the \`gh\` command you already have.`;
+      const turned = await turnInLane(project, lane, asked, {
+        model: null,
+        thinking: null,
+        lookFirst: false,
+        attachments: [],
+        howFar: flow.howFar,
+      });
+      if ('failure' in turned) return { failure: turned.failure };
+      const folder = await folderOf(lane);
+      const found = await ghJSON(folder, ['pr', 'view'], 'url');
+      if (!found.ok) return { failure: found.because };
+      const url = (found.value as Record<string, unknown>)['url'];
+      return typeof url === 'string' && url !== '' ? { url } : { failure: CANVAS_WORDS.noUrl };
+    },
+
+    async stop(lane) {
+      const home = projectAt({ project });
+      if (home === null || lane.conversationId === null) return;
+      const found = conversationAt(home.held, { conversation: lane.conversationId });
+      await found?.held.stop().catch(() => undefined);
+    },
+
+    changed,
+
+    now() {
+      return Date.now();
+    },
+  };
+}
+
+/** The folder one lane works in, which is what `canStart` and the queue's
+ *  branch line both need before a run has opened anything. */
+async function laneFolderAt(project: string, lane: Lane): Promise<string | null> {
+  const home = projectAt({ project });
+  if (home === null) return null;
+  return folderFor(home, {
+    project: home.path,
+    ...(lane.conversationId === null ? {} : { conversation: lane.conversationId }),
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Starting, and keeping, one run                                              */
+/* -------------------------------------------------------------------------- */
+
+const RUNNING_ALREADY: Trouble = {
+  what: 'This canvas is already going.',
+  because: 'Stop it first if you want to start it again. Nothing of the run so far has been lost.',
+  actionLabel: 'Got it',
+};
+
+const NOT_RUNNING: Trouble = {
+  what: 'That canvas is not going any more.',
+  because: 'It finished, or it was stopped, so there is nothing left to press about. Start it again and it will begin from the top.',
+  actionLabel: 'Got it',
+};
+
+/** Write a flow back, replacing it by id and keeping the rest of the file. */
+async function keepFlows(projectId: string, userData: string, flow: CanvasFlow): Promise<void> {
+  const held = await FlowFile.read(projectId, userData);
+  await FlowFile.write(projectId, userData, withFlow(held, flow));
+}
+
+/**
+ * Start driving a run, and tell the window every change it makes.
+ *
+ * The run is registered before the first wave so a Stop pressed while a turn is
+ * out finds it — that is the only moment Stop is worth pressing — and its note
+ * goes on disk so a launch after a crash reports the run it cut off rather than
+ * pretending it finished.
+ */
+async function beginRun(
+  project: string,
+  projectId: string,
+  userData: string,
+  flow: CanvasFlow,
+  run: CanvasRun,
+): Promise<CanvasRun> {
+  const held = await FlowFile.read(projectId, userData);
+  // The runs the runner already owns come from the file, never from the copy
+  // the window sent: a save is a drawing, and the record of what ran is not.
+  const starting = {
+    ...flow,
+    runs: held.find((one) => one.id === flow.id)?.runs ?? flow.runs,
+    updatedAt: Date.now(),
+  };
+  const port = runnerPortFor(project, starting, (moved) => {
+    const live = liveRuns.get(flow.id);
+    if (live !== undefined) live.run = moved;
+    // Written on every step and pushed on every step: a card that says Running
+    // while the file says otherwise is a card somebody stops trusting.
+    void keepFlowsOnDisk(projectId, userData, starting, moved).then(() =>
+      pushFlow(project, withRunFor(starting, moved)),
+    );
+  });
+  liveRuns.set(flow.id, { project, flow: starting, run, port });
+  await keepFlows(projectId, userData, withRunFor(starting, run));
+  pushFlow(project, withRunFor(starting, run));
+  await wroteRunNote(
+    userData,
+    {
+      conversationId: asConversationId(flow.id),
+      workspaceId: null,
+      status: 'running',
+      ownerId: runOwner(run.id),
+      runtimeEpoch: null,
+      writtenAt: Date.now(),
+    },
+    project,
+  );
+  const driven = await drive(starting, run, port);
+  const live = liveRuns.get(flow.id);
+  if (live !== undefined) live.run = driven;
+  /* Pushed once more, from the run the machine came back with. Every tick has
+     already pushed its own step, and the window folds them in order — but the
+     last one is the one that says `done`, and a run must not be left on screen
+     saying it is working when the file says it finished. */
+  pushFlow(project, withRunFor(starting, driven));
+  return driven;
+}
+
+/** The flow with one run on it, written down and pushed. */
+function withRunFor(flow: CanvasFlow, run: CanvasRun): CanvasFlow {
+  return { ...withRun(flow, run), updatedAt: Date.now() };
+}
+
+/** A run's latest state, into the flow's own file. Read fresh each time, because
+ *  the drawings and the runs live in one document and the window may have
+ *  written a drawing in between. */
+async function keepFlowsOnDisk(
+  projectId: string,
+  userData: string,
+  flow: CanvasFlow,
+  run: CanvasRun,
+): Promise<void> {
+  const held = await FlowFile.read(projectId, userData);
+  const known = held.find((one) => one.id === flow.id) ?? flow;
+  await FlowFile.write(projectId, userData, withFlow(held, withRunFor(known, run)));
+}
+
+/** Everything a press has to say once a drive has come back. */
+async function settledRun(
+  live: { project: string; flow: CanvasFlow; run: CanvasRun; port: RunnerPort },
+  run: CanvasRun,
+): Promise<CanvasRun> {
+  live.run = run;
+  if (run.state === 'running' || run.state === 'needs-you') return run;
+  liveRuns.delete(live.flow.id);
+  await finishRun(live.flow.id);
+  return run;
+}
+
+/** A run that has ended: its note comes off disk, so the next launch reports
+ *  nothing about a run that finished. */
+async function finishRun(flowId: string): Promise<void> {
+  await tookRunNoteAway(app.getPath('userData'), flowId).catch(() => undefined);
+}
+
+/** Every run change, to the window. One place, so the push and the file never
+ *  disagree about what happened. */
+function pushFlow(project: string, flow: CanvasFlow): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(CHANNEL.flowChanged, { project, flow });
+}
+
 /** The commit a checkout is being made from, written down so the copy can say
  *  what it started at even after the branch has moved on. */
 async function headSha(folder: string): Promise<string | null> {
@@ -4081,7 +4609,7 @@ function lastThingSaid(history: readonly AgentEvent[]): string | null {
 /** Write down where a conversation came from. A link, never a copy. */
 async function rememberLineage(
   address: string,
-  lineage: { from: string; kind: 'continue' | 'fork' },
+  lineage: { from: string; kind: 'continue' | 'fork' | 'flow' },
 ): Promise<void> {
   await loadWorkspaceIndex();
   // One id, because a conversation has one: the record is keyed by it, and the
@@ -5025,7 +5553,13 @@ async function startConversationUnlocked(
   ];
   let session: GrapheSession;
   try {
-    session = await createSession({
+    session = await openSession({
+      runtime: prefs.runtime,
+      // An evicted conversation is `unloaded`, not `idle`: its runtime is gone,
+      // and a row that said idle would read as one sitting still.
+      onRuntimeUnloaded: () => {
+        if (from.address !== null) states.move(named(from.address), 'unloaded', Date.now());
+      },
       projectRoot: checkout?.folder ?? open.path,
       guard: { computerUse: await computerUseFacts() },
       onEvent: forwardTo(open.path, held, from),
@@ -6141,6 +6675,9 @@ async function sweepScratch(): Promise<void> {
 /** Everything this app writes down about itself. Secrets masked before a line
  *  reaches disk; never a transcript, never a key. */
 const log = openLog(join(app.getPath('userData'), 'logs'));
+// The ceiling and the per-turn numbers the supervisor records have nowhere to
+// go in a shipped app otherwise: `console.info` is thrown away there.
+noteRuntimeLog((what, extra) => log.line('info', what, extra));
 
 /** Every process this app starts, so quitting takes them with it. Helpers,
  *  servers, checks, language servers, browsers and the children an add-on's
@@ -7023,7 +7560,7 @@ async function runOne(desk: AwayDesk, piece: PieceOfWork): Promise<void> {
   let goalTimer: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    session = await createSession({
+    session = await openSession({
       projectRoot: folder,
       guard: { computerUse: await computerUseFacts() },
       browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
@@ -10603,7 +11140,11 @@ function register(): void {
     const from: Speaking = { address: null };
     let session: GrapheSession;
     try {
-      session = await createSession({
+      session = await openSession({
+        runtime: prefs.runtime,
+        onRuntimeUnloaded: () => {
+          if (from.address !== null) states.move(named(from.address), 'unloaded', Date.now());
+        },
         projectRoot: folder,
         guard: { computerUse: await computerUseFacts() },
         browserSites: () => preferencesNow?.all().computerUse.browserSites ?? [],
@@ -11854,6 +12395,205 @@ function register(): void {
     const file = join(app.getPath('userData'), 'graphe.css');
     const css = await readFile(file, 'utf8').catch(() => '');
     return done({ css, file });
+  });
+
+  /* What the panes were showing when the window was last closed.
+     The view record lives in the registry index, which already knows every
+     conversation, so a pane put back at launch is one the shell can open. */
+  handle<readonly ViewShown[]>(CHANNEL.viewsLook, async () => {
+    const index = await loadWorkspaceIndex();
+    const shown: ViewShown[] = [];
+    for (const pane of [0, 1] as const) {
+      const view = viewInPane(index, pane);
+      if (view !== null) shown.push({ ...view });
+    }
+    return done(shown);
+  });
+
+  handle<null>(CHANNEL.viewsNote, async (_event, args) => {
+    const [raw] = args;
+    if (!Array.isArray(raw)) return fail(NO_SUCH_ENTRY);
+    const wanted = raw.map(asViewShown);
+    if (wanted.some((one) => one === null)) return fail(NO_SUCH_ENTRY);
+    await loadWorkspaceIndex();
+    /* The whole set, so a pane somebody closed takes its view with it. A view
+       the registry does not know a conversation for is dropped rather than
+       stored: it is a pane that would fail the moment it was pressed. */
+    let next = workspaceIndex;
+    for (const one of wanted as readonly ViewShown[]) {
+      next = noteView(next, one).index;
+    }
+    const keeping = new Set((wanted as readonly ViewShown[]).map((one) => one.viewId));
+    for (const id of Object.keys(next.views)) {
+      if (!keeping.has(id)) next = dropView(next, id);
+    }
+    if (next === workspaceIndex) return done(null);
+    workspaceIndex = next;
+    await saveWorkspaceIndex();
+    return done(null);
+  });
+
+  /* ---------------------------------------------------------------- canvas */
+
+  /** The canvases of one project, newest first.
+   *
+   * Read on every ask rather than cached: the runner writes this file on every
+   * step of a run, and a window holding a copy of its own would draw a card
+   * that stopped moving. */
+  handle<readonly CanvasFlow[]>(CHANNEL.flowList, async (_event, args) => {
+    const open = projectAt(whereIn(args));
+    if (open === null) return done<readonly CanvasFlow[]>([]);
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    return done(await FlowFile.read(projectId, userData, open.path));
+  });
+
+  /**
+   * Write one canvas back.
+   *
+   * The runs are the runner's, so a save from the window never carries them:
+   * a drawing changes what a flow *would* do, and the record of what it did is
+   * replaced only by the thing that did it. The answer is the flow as kept,
+   * runs included, so the window draws the same one the shell holds.
+   */
+  handle<CanvasFlow>(CHANNEL.flowSave, async (_event, args) => {
+    const [raw] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const found = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+    if (found === null || typeof found['id'] !== 'string' || found['id'] === '') {
+      return fail(NO_SUCH_ENTRY);
+    }
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    const held = await FlowFile.read(projectId, userData, open.path);
+    const known = held.find((one) => one.id === found['id']);
+    const wanted = found as unknown as CanvasFlow;
+    const kept: CanvasFlow =
+      known === undefined ? wanted : { ...wanted, runs: known.runs, createdAt: known.createdAt };
+    await FlowFile.write(projectId, userData, withFlow(held, kept));
+    return done(kept);
+  });
+
+  handle<null>(CHANNEL.flowDelete, async (_event, args) => {
+    const [id] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    const held = await FlowFile.read(projectId, userData, open.path);
+    await FlowFile.write(projectId, userData, withoutFlow(held, id));
+    // A run that is going is stopped first: a canvas somebody threw away must
+    // not still be sending turns into a conversation nobody can see.
+    const live = liveRuns.get(id);
+    if (live !== undefined) await stopped(live.flow, live.run, live.port).catch(() => undefined);
+    liveRuns.delete(id);
+    return done(null);
+  });
+
+  /**
+   * Start a run.
+   *
+   * The whole of what a canvas is: a record with a run id, driven by the shell
+   * and advanced on the settle of the turns it sent. The window is told every
+   * change and is not what moves any of it. */
+  handle<CanvasRun>(CHANNEL.flowStart, async (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    const held = await FlowFile.read(projectId, userData, open.path);
+    const flow = held.find((one) => one.id === id);
+    if (flow === undefined) return fail(NO_SUCH_ENTRY);
+    const may = canStart(flow, await standingAt(open.path));
+    if (!may.ok) {
+      return fail({ what: 'This canvas cannot start yet.', because: may.because, actionLabel: 'Got it' });
+    }
+    if (liveRuns.has(id)) return fail(RUNNING_ALREADY);
+    const run: CanvasRun = {
+      id: newRunId(),
+      state: 'running',
+      startedAt: Date.now(),
+      endedAt: null,
+      lanes: [{ id: LANE_0, workspaceId: '', conversationId: null, branch: null }],
+      blocks: {},
+      spent: null,
+    };
+    return done(await beginRun(open.path, projectId, userData, flow, run));
+  });
+
+  handle<CanvasRun>(CHANNEL.flowStop, async (_event, args) => {
+    const [id] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
+    const live = liveRuns.get(id);
+    if (live === undefined) return fail(NOT_RUNNING);
+    const over = await stopped(live.flow, live.run, live.port);
+    liveRuns.delete(id);
+    finishRun(id);
+    return done(over);
+  });
+
+  handle<CanvasRun>(CHANNEL.flowContinue, async (_event, args) => {
+    const [id, block] = args;
+    const open = projectAt(whereIn(args));
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || typeof block !== 'string') return fail(NO_SUCH_ENTRY);
+    const live = liveRuns.get(id);
+    if (live === undefined) return fail(NOT_RUNNING);
+    // The gate opens in the live run, which `changed` has already written and
+    // pushed, so the wave below starts from where the run really is.
+    const over = continued(live.flow, live.run, live.port, block);
+    live.run = over;
+    if (over.state !== 'running') return done(over);
+    return done(await drive(live.flow, over, live.port).then((run) => settledRun(live, run)));
+  });
+
+  /**
+   * Carry on a run the app did not finish.
+   *
+   * The lanes are kept, so every conversation — and every worktree branch — is
+   * the one the run was already working in. What did not finish runs again from
+   * its beginning, which is the only honest thing to do with a turn nobody is
+   * waiting on any more. */
+  handle<CanvasRun>(CHANNEL.flowResume, async (_event, args) => {
+    const [id] = args;
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    if (typeof id !== 'string' || id === '') return fail(NO_SUCH_ENTRY);
+    const userData = app.getPath('userData');
+    const { projectId } = await localWorkspaceFor(open.path);
+    const held = await FlowFile.read(projectId, userData, open.path);
+    const flow = held.find((one) => one.id === id);
+    if (flow === undefined) return fail(NO_SUCH_ENTRY);
+    const last = flow.runs[0];
+    if (last === undefined) return fail(NOT_RUNNING);
+    if (liveRuns.has(id)) return fail(RUNNING_ALREADY);
+    // Everything that did not finish is cleared so it runs again from its own
+    // beginning: a turn nobody was waiting on any more is not half done.
+    const carried = { ...flow, runs: flow.runs.slice(1) };
+    const port = runnerPortFor(open.path, carried, () => undefined);
+    const going = resumed(last, port);
+    return done(await beginRun(open.path, projectId, userData, carried, going));
+  });
+
+  /** The custom properties this project's stylesheets declare.
+   *
+   * Read from the lane's own folder, so a conversation working in a copy reads
+   * the sheet that copy is styled by rather than the project's. */
+  handle<{ tokens: StyleToken[]; sheets: number } | null>(CHANNEL.tokensRead, async (_event, args) => {
+    const where = whereIn(args);
+    const open = projectAt(where);
+    if (open === null) return fail(NOTHING_OPEN);
+    const read = await readTokensFor(folderFor(open, where)).catch(() => null);
+    return done(read === null ? null : { tokens: [...read.tokens], sheets: read.sheets });
   });
 
   handle<Preferences>(CHANNEL.setThinking, async (_event, args) => {

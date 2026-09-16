@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, type ReactElement, useEffect, useRef, useState } from 'react';
 import Away from './Away';
 import Waiting from './Waiting';
 import CostMeter from './CostMeter';
@@ -17,11 +17,16 @@ import type {
   SavedVersion,
   Money,
   SpendLimit,
+  StyleToken,
   Swatch,
 } from '../lib/ipc';
 import type { NowView, Reference, ResearchEntry } from '../lib/projects';
 import type { SpendView } from '../lib/spend';
 import { elapsedWords } from '../work/goal';
+
+/** The project's own values, read-only. Fetched when the band is actually drawn
+ *  rather than at every launch: most projects declare no custom properties. */
+const Tokens = lazy(() => import('./Tokens'));
 import './Overview.css';
 
 /** Words for the folder that holds several projects. Named for what somebody
@@ -250,6 +255,9 @@ type Props = {
   /** Said whenever the panel changes which project it is showing. */
   onWhose?: (name: string | null) => void;
 
+  /** The project's own custom properties, or null when its sheets declare
+   *  none. Read on the way in by the window, which is the side that can ask. */
+  tokens?: { tokens: readonly StyleToken[]; sheets: number } | null;
   /** Read what changed, as a diff. The band names the count and this is the
    *  press behind it; left off, the count is drawn and cannot be opened. */
   onOpenChanges?: () => void;
@@ -351,6 +359,7 @@ export default function Overview({
   onWhose,
 
   onOpenChanges,
+  tokens = null,
   waitingHere = [],
   onOpenReview,
   onOpenFile,
@@ -779,6 +788,17 @@ export default function Overview({
             ))}
           </ul>
           {swatches.length === 0 ? null : <Swatches swatches={swatches} />}
+        </section>
+      )}
+
+      {/* The project's own design values, read-only. Absent rather than empty
+          when its stylesheets declare none: a band with nothing in it is a band
+          that has taught somebody to stop looking at it. */}
+      {tokens === null ? null : (
+        <section className="overview__block">
+          <Suspense fallback={null}>
+            <Tokens tokens={tokens.tokens} sheets={tokens.sheets} onOpenFile={onOpenFile} />
+          </Suspense>
         </section>
       )}
 

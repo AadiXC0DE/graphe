@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Graphe: an agentic coding platform for the desktop</title>
+    <title>Graphe: send in a team, not a prompt</title>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
@@ -12,66 +12,63 @@
     <link rel="canonical" href="https://usegraphe.com/" />
     <meta
       name="description"
-      content="A coding agent with a real workspace: helpers in parallel, jobs that outlast your attention, a guard that asks in plain words before anything risky, and every turn a version you can go back to. Open source, your keys, any model."
+      content="An open-source coding agent for the desktop: helpers in parallel, a guard that asks before anything risky, and a commit before anything destructive."
     />
-    <meta name="theme-color" content="#131110" />
 
     <meta property="og:title" content="Graphe: send in a team, not a prompt" />
     <meta
       property="og:description"
-      content="A coding agent with a real workspace: helpers in parallel, jobs that outlast your attention, a guard that asks in plain words before anything risky, and every turn a version you can go back to. Open source, your keys, any model."
+      content="An open-source coding agent for the desktop: helpers in parallel, a guard that asks before anything risky, and a commit before anything destructive."
     />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Graphe" />
     <meta property="og:url" content="https://usegraphe.com/" />
     <!-- Absolute, because a relative one is never fetched: every share rendered
-         bare, and a share that renders bare is a link nobody follows. -->
-    <meta property="og:image" content="https://usegraphe.com/assets/web/app-start-dark.webp" />
-    <meta property="og:image:width" content="2880" />
-    <meta property="og:image:height" content="1800" />
-    <meta property="og:image:alt" content="The Graphe window: a conversation beside the project, with what is running and what is waiting on the right." />
+         bare, and a share that renders bare is a link nobody follows. PNG rather
+         than the WebP the page itself loads, because a scraped card is drawn by
+         whoever unfurls it and half of them will not decode a WebP. -->
+    <meta property="og:image" content="https://usegraphe.com/assets/web/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The Graphe window beside the words The agent, not a chat box: a new conversation in a project, with the files on the left and the panel on the right." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Graphe: an agentic coding platform for the desktop" />
+    <meta name="twitter:title" content="Graphe: send in a team, not a prompt" />
     <meta
       name="twitter:description"
-      content="Helpers in parallel, jobs that outlast your attention, a guard that asks in plain words, a browser it drives itself, and every turn a version you can go back to. Open source, your keys, any model."
+      content="An open-source coding agent for the desktop: helpers in parallel, a guard that asks before anything risky, and a commit before anything destructive."
     />
-    <meta name="twitter:image" content="https://usegraphe.com/assets/web/app-start-dark.webp" />
+    <meta name="twitter:image" content="https://usegraphe.com/assets/web/og.png" />
+    <meta name="twitter:image:alt" content="The Graphe window beside the words The agent, not a chat box: a new conversation in a project, with the files on the left and the panel on the right." />
 
     <link rel="preload" href="assets/fonts/Satoshi-Variable.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="styles.css" />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23E0764F'/%3E%3Ccircle cx='22' cy='9' r='3' fill='%23131110'/%3E%3Ccircle cx='22' cy='23' r='3' fill='%23131110'/%3E%3Ccircle cx='10' cy='16' r='3.4' fill='%23131110'/%3E%3Cpath d='M12.8 14.4 19.2 10.6M12.8 17.6l6.4 3.8' stroke='%23131110' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"
-    />
 
     <!-- Vercel Web Analytics, a script Vercel serves at this path on its own
          platform; counting page views needs nothing else, and no dependency.
          The tag is deferred so it never blocks first paint. -->
     <script defer src="/_vercel/insights/script.js"></script>
 
-    <!-- What this is, in the shape search engines read rather than guess. -->
+    <!-- What this is, in the shape search engines read rather than guess.
+         `softwareVersion` is also the page's one copy of the version: the nav
+         chip and the where band are filled from it at load. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Graphe",
         "url": "https://usegraphe.com/",
+        "softwareVersion": "1.0.3",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS",
-        "description": "An open-source agentic coding platform for the desktop. Helpers in parallel, jobs that run for hours without you, a guard that judges every command before it runs, a review that reads a pull request in a copy of the project, a browser it drives itself, and version history you can go back through. Your keys, any model. Built on pi. The download is a macOS build.",
+        "description": "An open-source agentic coding platform for the desktop. Helpers in parallel, jobs that run for hours without you, a guard that judges every command before it runs, a review that reads a pull request in a worktree of the project, a browser it drives itself, and version history you can go back through. Your keys, any model. Built on pi. The download is a macOS build.",
         "license": "https://opensource.org/licenses/MIT",
         "isAccessibleForFree": true,
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "downloadUrl": "https://github.com/AadiXC0DE/graphe/releases",
         "codeRepository": "https://github.com/AadiXC0DE/graphe",
-        "author": { "@type": "Person", "name": "Aadi", "url": "https://github.com/AadiXC0DE" }
+        "screenshot": "https://usegraphe.com/assets/web/og.png",
+        "author": { "@type": "Person", "name": "Aaditya Chowdhury", "url": "https://github.com/AadiXC0DE" }
       }
     </script>
   </head>
@@ -93,7 +90,7 @@
             </g>
           </svg>
           <span class="mark__word">Graphe</span>
-          <span class="mark__version mono">1.0.0</span>
+          <span class="mark__version mono" data-version></span>
         </a>
 
         <nav class="nav__links" aria-label="Sections">
@@ -190,34 +187,47 @@
                 class="screen is-on"
                 data-screen="work"
                 src="assets/web/app-start-dark.webp"
+                srcset="
+                  assets/web/app-start-dark-1440.webp 1440w,
+                  assets/web/app-start-dark.webp      2880w
+                "
+                sizes="(max-width: 400px) calc(100vw - 40px), (max-width: 1280px) 90vw, (max-width: 1608px) calc(100vw - 128px), 1480px"
                 width="2880"
                 height="1800"
-                alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is running in the background and what the sitting has cost."
+                alt="The Graphe window: the project's files down the left, things to start from in the middle, and a rail on the right holding what git has, what is running in the background, and what is waiting on you."
                 fetchpriority="high"
               />
               <img
                 class="screen"
                 data-screen="history"
-                src="assets/web/app-history-dark.webp"
+                data-src="assets/web/app-history-dark.webp"
+                data-srcset="
+                  assets/web/app-history-dark-1440.webp 1440w,
+                  assets/web/app-history-dark.webp      2880w
+                "
+                sizes="(max-width: 400px) calc(100vw - 40px), (max-width: 1280px) 90vw, (max-width: 1608px) calc(100vw - 128px), 1480px"
                 width="2880"
                 height="1800"
-                alt="The history view: every saved moment drawn as lines, with short ids, parents and the names on each."
-                loading="lazy"
+                alt="The history view: every commit drawn as lines, with short ids, parents and the names on each."
               />
               <img
                 class="screen"
                 data-screen="skills"
-                src="assets/web/app-skills-dark.webp"
+                data-src="assets/web/app-skills-dark.webp"
+                data-srcset="
+                  assets/web/app-skills-dark-1440.webp 1440w,
+                  assets/web/app-skills-dark.webp      2880w
+                "
+                sizes="(max-width: 400px) calc(100vw - 40px), (max-width: 1280px) 90vw, (max-width: 1608px) calc(100vw - 128px), 1480px"
                 width="2880"
                 height="1800"
                 alt="The skills view: craft installed off the shelf, each one described, ready to bring into a request."
-                loading="lazy"
               />
             </div>
           </div>
 
           <figcaption class="stage__cap mono">
-            Real screens, taken from the app · <span data-frame-cap>a plan, waiting for a yes</span>
+            Real screens, taken from the app · <span data-frame-cap>the files, the work, and what is running</span>
           </figcaption>
         </figure>
       </section>
@@ -241,17 +251,22 @@
             <h3>Nothing it does is unsafe or unrecoverable</h3>
             <p>
               Every command is judged before it runs, by a function with no disk, no clock and no
-              network: allow, ask you, take a restore point first, or refuse. What does run, runs
-              inside a macOS sandbox profile that writes only into the folder it was handed. Every
-              turn is a saved moment, and going back to one saves your work first, so the restore
-              is itself undoable.
+              network: allow, ask you, save a commit first, or refuse. What does run, runs inside a
+              macOS sandbox profile that writes only into the folder it was handed. Every turn is a
+              commit, and going back to one saves your work first, so the restore is itself
+              undoable.
             </p>
             <img
               class="pillar__shot"
               src="assets/web/app-history-dark.webp"
+              srcset="
+                assets/web/app-history-dark-1440.webp 1440w,
+                assets/web/app-history-dark.webp      2880w
+              "
+              sizes="(max-width: 780px) calc(100vw - 40px), 45vw"
               width="2880"
               height="1800"
-              alt="The history view: eighty-seven saved moments, newest first, each with the line of work it sits on, who saved it and its short id."
+              alt="The history view: eighty-seven commits, newest first, each with the branch it sits on, who committed it and its short id."
               loading="lazy"
             />
           </article>
@@ -262,7 +277,7 @@
             <p>
               pi does real work to keep a prompt cacheable: one stable session, cache points where
               the provider needs them, every read and write recorded. Graphe puts the result on
-              screen: how much of each turn came back from cache, what the sitting cost in your own
+              screen: how much of each turn came back from cache, what the session cost in your own
               currency, an estimate before a big job, and a ceiling that ends it.
             </p>
             <img
@@ -519,7 +534,7 @@
                   </li>
                   <li style="--n: 3">
                     <span class="mono">memory</span>
-                    <span>what this project has told it, across every sitting</span>
+                    <span>what this project has told it, across every session</span>
                   </li>
                 </ul>
               </div>
@@ -585,16 +600,20 @@
 
         <div class="sheet sheet--mobile-more reveal" data-reveal>
           <article class="cell">
-            <h3>Memory between sittings</h3>
+            <h3>A canvas you draw</h3>
+            <p>Draw the steps, join them, press Start. Each block is a turn with the same Guard; branches can run in worktrees and land from Review.</p>
+          </article>
+          <article class="cell">
+            <h3>Memory between sessions</h3>
             <p>Facts kept per project on your machine, ranked by an embedding that runs here, loaded at the next start.</p>
           </article>
           <article class="cell">
             <h3>Helpers in parallel</h3>
-            <p>Reviewer, researcher and helper can only read; the builder is the one that writes, and it writes in a copy it can only reach inside, whose diff comes back to you when it is done. Several at once, under a budget.</p>
+            <p>Reviewer, researcher and helper can only read; the builder is the one that writes, and it writes in a worktree it can only reach inside, whose diff comes back to you when it is done. Several at once, under a budget.</p>
           </article>
           <article class="cell">
             <h3>A review with a verdict</h3>
-            <p>Pick a pull request and it is fetched into a copy of the project of its own and read there, so nothing you have open moves. Ships, needs work, or do not land, findings ranked P0 to P3 with file, line and how sure it is, and one press posts them to the pull request under your own account.</p>
+            <p>Pick a pull request and it is fetched into a worktree of the project of its own and read there, so nothing you have open moves. Ships, needs work, or do not land, findings ranked P0 to P3 with file, line and how sure it is, and one press posts them to the pull request under your own account.</p>
           </article>
           <article class="cell">
             <h3>A real debugger</h3>
@@ -629,8 +648,8 @@
             <p>For the things that are not websites. It takes a picture of the screen, then presses, types and drags on it, a native app, a simulator, a settings pane. Every press is named before it happens.</p>
           </article>
           <article class="cell">
-            <h3>Every line of work, by name</h3>
-            <p>The name in the panel is a button: every line in the project, what each one last did, how far it has run ahead of the one everybody shares, and a fresh one started from where you stand.</p>
+            <h3>Every branch, by name</h3>
+            <p>The name in the panel is a button: every branch in the project, what each one last did, how far it has run ahead of the one everybody shares, and a fresh one started from where you stand.</p>
           </article>
           <article class="cell">
             <h3>Rules your project writes</h3>
@@ -641,8 +660,8 @@
             <p>One file per check in <span class="mono">.agents/checks</span>. A project says what every review must look at.</p>
           </article>
           <article class="cell">
-            <h3>A copy, when you ask for one</h3>
-            <p>A chat works in the project folder. Ask for a new worktree and it gets a real copy of its own to build in. When what it did is right, bring the work in without leaving the window; when it is not, the copy goes with it rather than being left stranded.</p>
+            <h3>A worktree, when you ask for one</h3>
+            <p>A chat works in the project folder. Ask for a worktree and it gets one of its own to build in. When what it did is right, bring the work in without leaving the window; when it is not, the worktree goes with it rather than being left stranded.</p>
           </article>
           <article class="cell">
             <h3>A browser it can drive anywhere</h3>
@@ -658,15 +677,15 @@
           </article>
           <article class="cell">
             <h3>Keep some of it, not all</h3>
-            <p>A change arrives hunk by hunk. Take the three you wanted; what you left is rebuilt as a reverse patch and applied, after a restore point is written, because that is a real edit.</p>
+            <p>A change arrives hunk by hunk. Take the three you wanted; what you left is rebuilt as a reverse patch and applied, after a commit is saved, because that is a real edit.</p>
           </article>
           <article class="cell">
             <h3>A folder of several projects</h3>
-            <p><code>backend/</code> and <code>frontend/</code> beside each other, and it opens the folder rather than making you pick one. Each keeps its own lines of work, its own versions and its own preview. Nothing is written into the folder itself to make it look like one project.</p>
+            <p><code>backend/</code> and <code>frontend/</code> beside each other, and it opens the folder rather than making you pick one. Each keeps its own branches, its own versions and its own preview. Nothing is written into the folder itself to make it look like one project.</p>
           </article>
         </div>
         <button class="sheet__more" type="button" data-sheet-more data-sheet-more-close="Show fewer capabilities" aria-expanded="false">
-          <span data-sheet-more-label>Show 14 more capabilities</span>
+          <span data-sheet-more-label>Show 15 more capabilities</span>
           <span class="sheet__more-mark" aria-hidden="true">+</span>
         </button>
       </section>
@@ -712,7 +731,7 @@
             <h3>Every width, and your own browser</h3>
             <p>
               Phone, tablet and desktop without resizing anything. One press hands the same address
-              to Chrome when you want the devtools you already know.
+              to your own browser when you want the devtools you already know.
             </p>
           </article>
           <article class="cell">
@@ -785,13 +804,13 @@
             <div class="from__side from__side--ours">
               <p class="from__who mono">Graphe adds</p>
               <ul class="from__list">
-                <li>Sub-agents and parallel conversations, and a copy of the project when you ask for one</li>
+                <li>Sub-agents and parallel conversations, and a worktree of the project when you ask for one</li>
                 <li>A plan you reorder, strike and argue with before it runs</li>
                 <li>A browser in the window it can use itself</li>
                 <li>A guard that asks in plain words, and rules the project writes into it</li>
                 <li>Background jobs and servers</li>
                 <li>Code review with a verdict, and a pull request written up</li>
-                <li>Memory between sittings</li>
+                <li>Memory between sessions</li>
                 <li>The money, on screen, in your own currency</li>
               </ul>
             </div>
@@ -831,7 +850,7 @@
                 <p class="mono">02 · the guard</p>
                 <h4>Judged before it runs</h4>
                 <p>
-                  A pure function with no disk, no clock and no network: allow, ask, snapshot
+                  A pure function with no disk, no clock and no network: allow, ask, save a commit
                   first, or refuse. A command it does not recognise is never quietly allowed. It
                   stops and asks you, in a sentence.
                 </p>
@@ -856,8 +875,8 @@
                 <p class="mono">04 · your project</p>
                 <h4>With a way back</h4>
                 <p>
-                  Anything that could overwrite or delete takes a restore point first, including
-                  when you said yes to it.
+                  Anything that could overwrite or delete saves a commit first, including when you
+                  said yes to it.
                 </p>
               </div>
             </div>
@@ -877,9 +896,9 @@
             <span>
               A chat works in the project folder, and only one run writes there at a time, so two
               conversations cannot quietly overwrite each other. Ask for a worktree and that chat
-              gets a real <span class="mono">worktree add</span> of your repository, its own copy
-              with its own branch, which runs beside the rest. Closing it gives the space back;
-              opening it again makes it from the branch.
+              gets a real <span class="mono">worktree add</span> of your repository, on its own
+              branch, which runs beside the rest. Closing it gives the space back; opening it again
+              makes it from the branch.
             </span>
           </li>
           <li>
@@ -911,7 +930,7 @@
             <b>MCP</b>
             <span>
               Servers from one <span class="mono">.pi/mcp.json</span>, a command or an address,
-              started on first use and stopped with the sitting. A panel adds one, checks whether
+              started on first use and stopped with the session. A panel adds one, checks whether
               it answers, and takes it away again.
             </span>
           </li>
@@ -927,8 +946,8 @@
             <b>sub-agents</b>
             <span>
               Four roles. Reviewer, researcher and helper can only read; the builder is the one
-              that writes, and it writes in a copy of its own whose diff is read back when it is
-              done.
+              that writes, and it writes in a worktree of its own whose diff is read back when it
+              is done.
             </span>
           </li>
           <li>
@@ -988,7 +1007,7 @@
 
             <article class="piece piece--running">
               <div class="piece__top">
-                <h3>Rebuild the pricing page for the new copy</h3>
+                <h3>Rebuild the pricing page for the new worktree</h3>
                 <span class="piece__state mono">still going</span>
               </div>
               <p class="piece__says">On step 4 of 9, rewriting the cards against your spacing scale.</p>
@@ -1005,7 +1024,7 @@
               </p>
               <div class="piece__asks">
                 <button class="btn btn--tiny" type="button">Let it in</button>
-                <button class="btn btn--tiny btn--quiet" type="button">Not this time</button>
+                <button class="btn btn--tiny btn--quiet" type="button">Not now</button>
               </div>
             </article>
 
@@ -1020,11 +1039,11 @@
 
           <div class="away__points">
             <div class="point reveal" data-reveal>
-              <h3>A copy, when you ask for one</h3>
+              <h3>A worktree, when you ask for one</h3>
               <p>
-                Your chat works in the project folder. Ask for a worktree and it gets a copy of
-                its own, so a second job runs beside the first without either writing over the
-                other. When it is done, bring its work into the project or throw the copy away.
+                Your chat works in the project folder. Ask for a worktree and it gets one of its
+                own, so a second job runs beside the first without either writing over the other.
+                When it is done, bring its work into the project or throw the worktree away.
               </p>
             </div>
             <div class="point reveal" data-reveal style="--i: 1">
@@ -1038,7 +1057,7 @@
               <h3>Under a ceiling you set</h3>
               <p>
                 Long jobs are where money goes quietly. There is an estimate before it starts, a
-                running total while it works, and a ceiling that ends the sitting rather than the
+                running total while it works, and a ceiling that ends the session rather than the
                 month.
               </p>
             </div>
@@ -1048,9 +1067,14 @@
         <figure class="wide reveal" data-reveal>
           <img
             src="assets/web/band-start.webp"
+            srcset="
+              assets/web/band-start-1440.webp 1440w,
+              assets/web/band-start.webp      3200w
+            "
+            sizes="(max-width: 400px) calc(100vw - 40px), (max-width: 1280px) 90vw, (max-width: 1608px) calc(100vw - 128px), 1480px"
             width="3200"
             height="1900"
-            alt="A new conversation with the project files beside it and the panel on the right: what git has, what the last turn made, and background work with what is waiting on you, what is ready to look at and what is still going."
+            alt="A new conversation in the light theme, with the project files beside it and the panel on the right: what git has, what the last turn made, and background work with what is waiting on you."
             loading="lazy"
           />
           <figcaption class="mono">
@@ -1108,7 +1132,7 @@
       </section>
 
       <!-- ─────────────────────────────────────────── quiet promises ── -->
-      <section class="band band--promises">
+      <section class="band band--promises" id="promises">
         <div class="promises">
           <article class="promise reveal" data-reveal>
             <h2>Nothing leaves without you knowing.</h2>
@@ -1119,14 +1143,14 @@
             </p>
             <p class="promise__fine mono">
               deny by default · a macOS Seatbelt profile · tested against prompt injection · a
-              snapshot before anything destructive
+              commit before anything destructive
             </p>
           </article>
 
           <article class="promise reveal" data-reveal style="--i: 1">
             <h2>You always know what it cost.</h2>
             <p>
-              An estimate before a big job, a running total while it works, and an end-of-sitting
+              An estimate before a big job, a running total while it works, and an end-of-session
               split that shows what your work cost and what our own retries cost. In your currency,
               not in tokens.
             </p>
@@ -1138,7 +1162,7 @@
       </section>
 
       <!-- ────────────────────────────────────────────────── where it is ── -->
-      <section class="band band--where">
+      <section class="band band--where" id="where">
         <div class="where reveal" data-reveal>
           <p class="eyebrow">Open source</p>
           <h2 class="where__title">
@@ -1152,8 +1176,8 @@
             it ships in.
           </p>
           <p class="where__says">
-            This is 1.0.0. There are still rough edges, mine to find and yours to report. The
-            difference is that you do not have to wait for me to agree with you.
+            This is <span data-version></span>. There are still rough edges, mine to find and yours
+            to report. The difference is that you do not have to wait for me to agree with you.
           </p>
           <div class="where__row">
             <a class="btn btn--ghost btn--small" href="https://github.com/AadiXC0DE/graphe" rel="noopener"
@@ -1167,7 +1191,7 @@
       </section>
 
       <!-- ─────────────────────────────────────────────────── the ask ── -->
-      <section class="band band--cta">
+      <section class="band band--cta" id="cta">
         <div class="glow glow--cta" aria-hidden="true"></div>
         <div class="cta reveal" data-reveal>
           <h2 class="cta__title">

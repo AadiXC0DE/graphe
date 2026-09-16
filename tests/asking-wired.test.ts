@@ -114,7 +114,8 @@ describe('the tool exists only where somebody is watching', () => {
     // never be able to park. Without this line it would be given the tool.
     expect(shell).toContain('unattended: true,');
     const at = shell.indexOf('unattended: true,');
-    const started = shell.lastIndexOf('await createSession({', at);
+    // Every session is opened by `openSession`, whichever process hosts it.
+    const started = shell.lastIndexOf('await openSession({', at);
     expect(started).toBeGreaterThan(-1);
     expect(at - started).toBeLessThan(600);
   });

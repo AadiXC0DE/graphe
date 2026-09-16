@@ -505,6 +505,24 @@ describe('notifications and status', () => {
     expect(whoCalled(frame, known)).toBe('notices');
   });
 
+  it('names nobody when two add-ons could both claim the frame', () => {
+    /* One add-on unpacked inside another's folder puts both names on the same
+       frame. Picking either is naming somebody who may not have called, and a
+       wrong name sends a person to turn off the add-on that did nothing. */
+    const known = [
+      { where: '/addons/outer/index.mjs', name: 'outer' },
+      { where: '/addons/outer/inner/index.mjs', name: 'inner' },
+    ];
+    expect(whoCalled('    at g (file:///addons/outer/inner/index.mjs:3:1)', known)).toBeNull();
+
+    // One claim is still one answer.
+    expect(
+      whoCalled('    at g (file:///addons/outer/inner/index.mjs:3:1)', [
+        { where: '/addons/outer/inner/index.mjs', name: 'inner' },
+      ]),
+    ).toBe('inner');
+  });
+
   it('does not pretend to have a footer to put a status line in', async () => {
     const addon = await hosted('notices');
     await addon.hand('session_start', { type: 'session_start' });

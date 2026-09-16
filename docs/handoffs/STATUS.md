@@ -8,6 +8,10 @@ Legend: **done** (in this branch), **open** (not started), **blocked** (needs
 something that does not exist yet), **out of reach** (cannot be done in this
 environment, with the reason).
 
+## The canvas, and the project's own values, finished
+
+**Wave four: the canvas, and the project's own values.** A canvas is a drawing of steps that becomes work when somebody presses Start, and the shell runs it: `src/work/canvas.ts` is pure, `electron/services/flow-runner.ts` is a machine over a `RunnerPort` that `electron/main.ts` fills, and the window only draws. Each block is a turn in a conversation with the same tools and the same Guard, a branch runs in turn or in a worktree of its own, a Gate holds a run until Continue, every block ends as done, failed or stopped, and runs are kept newest first with what each came to. Closing the window changes nothing about a run. The project's own tokens came back read-only — a `Tokens` band and a `read_tokens` tool over the same careful parser. See `phase-11-canvas.md`.
+
 ## The last three waves, finished
 
 **Wave one: a conversation owns what was said in it.** The registry holds a real
@@ -53,7 +57,7 @@ it.
 | 3 | The rest of phase 6: custom renderer fidelity, the fixture gaps, and the narrow case where an install through Pi's wrapper route still cannot be cancelled. The terminal inside a packaged app is done (2026-09-16) | 6 | open |
 | 4 | 6.2's full migration and 6.5's terminal compatibility mode: the child-runtime spike landed and proves the seam (Guard judging in the shell, extension UI crossing, kill semantics, transcript replay) with the four gaps named in `phase-6-runtime-spike.md`; wiring it in is the remaining work | 6 | open, spike done |
 | 5 | The rest of phase 9 and 10: a real model provider, and the plan's remaining measurement scenarios on other hardware | 9, 10 | open |
-| 6 | Phase 4 residue, item 6 of `docs/graphe-stabilization-remaining-2026-09-16.md`: every row is done except the window's half of view records, which is the App.tsx owner's. Landed — the never-sent chat's draft (`tests/draft-new-chat.test.ts`, 3), the session states (`tests/session-states.test.ts`, 21), view records in the registry (`tests/workspace-registry.test.ts`, 35), S11's address mapping (`tests/address-mapping.test.ts`, 3), S12's repeated press (`tests/new-press-twice.test.ts`, 4), the run note's lifetime and its `workspaceId` | 4 | open, window call left |
+| 6 | Phase 4 residue, item 6 of `docs/graphe-stabilization-remaining-2026-09-16.md`: **done.** The never-sent chat's draft (`tests/draft-new-chat.test.ts`, 3), the session states (`tests/session-states.test.ts`, 21), view records in the registry (`tests/workspace-registry.test.ts`, 35) and now through the window too — `viewsLook`/`viewsNote` write the whole pane set and a launch reads it back (`tests/panes.test.ts`, 29), S11's address mapping (`tests/address-mapping.test.ts`, 3), S12's repeated press (`tests/new-press-twice.test.ts`, 4), the run note's lifetime and its `workspaceId` | 4 | done |
 
 
 ## Done

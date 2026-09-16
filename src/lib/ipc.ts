@@ -43,6 +43,7 @@ import type { WorkspaceFacts } from '../work/workspaces';
 import type { Landing as HowItLands } from '../history/worktree';
 import type { Dependencies, InstallPlan, SetupCandidate } from '../projects/setup';
 import type { TokenUsageView } from '../lib/token-days';
+import type { Flow, Run } from '../work/canvas';
 
 export type { Dependencies, InstallPlan, SetupCandidate } from '../projects/setup';
 
@@ -62,6 +63,8 @@ export type {
   WorkState,
 };
 
+export type { Flow, Run } from '../work/canvas';
+
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
 
@@ -80,6 +83,18 @@ export type FilesRead = {
  * longer matches it: the text here is the file as it is now, not the text they
  * were reading. */
 export type TextRead = { path: string; text: string; revision: string; changed: boolean };
+
+/** One value a project declares in its stylesheets, as the tokens band reads
+ *  it. `used` is how many places in the sheets reach for it with `var()`, and
+ *  `file` is the sheet it was written in. */
+export type StyleToken = {
+  name: string;
+  value: string;
+  kind: 'colour' | 'space' | 'size' | 'radius' | 'shadow' | 'other';
+  line: number;
+  used: number;
+  file: string;
+};
 
 /**
  * Something that went wrong, already written for a person.
@@ -109,6 +124,14 @@ export type Trouble = {
  *  arrives as "Error invoking remote method", which is the single least useful
  *  thing we could put in front of a designer. */
 export type Result<T> = { ok: true; value: T } | { ok: false; trouble: Trouble };
+
+/** One pane, and the conversation it was showing. The pane number is the
+ *  order they were opened in, so pane 0 is the left one. */
+export type ViewShown = {
+  viewId: string;
+  conversation: string;
+  pane: 0 | 1;
+};
 
 /**
  * Which project, and which conversation in it, a call is about.
@@ -159,6 +182,20 @@ export function whereIn(args: readonly unknown[]): Where {
     where.conversation = conversation;
   }
   return where;
+}
+
+/** A pane and the conversation it shows, off a bridge argument. Anything that
+ *  is not exactly the three fields a view is made of is not one. */
+export function asViewShown(raw: unknown): ViewShown | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const fields = raw as Record<string, unknown>;
+  const viewId = fields['viewId'];
+  const conversation = fields['conversation'];
+  const pane = fields['pane'];
+  if (typeof viewId !== 'string' || viewId === '') return null;
+  if (typeof conversation !== 'string' || conversation === '') return null;
+  if (pane !== 0 && pane !== 1) return null;
+  return { viewId, conversation, pane };
 }
 
 /** A project folder, as the window refers to it. */
@@ -423,6 +460,10 @@ export type Conversation = {
    *  it and finds out. Absent when there is nothing to say, which is every
    *  conversation whose folder is where it was left. */
   workspace?: WorkspaceTrouble;
+  /** Where this came from, when it was made by continuing or forking another
+   *  conversation, or opened by a canvas lane. The shelf groups a canvas's own
+   *  chats under it rather than among the ordinary ones. */
+  lineage?: { from: string; kind: 'continue' | 'fork' | 'flow' } | null;
 };
 
 /**
@@ -1692,6 +1733,17 @@ export const CHANNEL = {
   setTheme: 'graphe:set-theme',
   setAppearance: 'graphe:set-appearance',
   ownStyles: 'graphe:own-styles',
+  viewsLook: 'graphe:views-look',
+  viewsNote: 'graphe:views-note',
+  flowList: 'graphe:flow-list',
+  flowSave: 'graphe:flow-save',
+  flowDelete: 'graphe:flow-delete',
+  flowStart: 'graphe:flow-start',
+  flowStop: 'graphe:flow-stop',
+  flowContinue: 'graphe:flow-continue',
+  flowResume: 'graphe:flow-resume',
+  flowChanged: 'graphe:flow-changed',
+  tokensRead: 'graphe:tokens-read',
   connectedLook: 'graphe:connected-look',
   connectedCheck: 'graphe:connected-check',
   connectedSave: 'graphe:connected-save',
@@ -2287,6 +2339,53 @@ export type GrapheApi = {
    * what is in it, because the answer to "where do I put this" is a path.
    */
   ownStyles(): Promise<Result<{ css: string; file: string }>>;
+
+  /**
+   * What the panes were showing when the window was last closed.
+   *
+   * One record per pane, in pane order, each naming the conversation that sat
+   * there. Empty for a profile written before views were recorded, which reads
+   * as an ordinary single-pane window rather than as an error.
+   */
+  viewsLook(where?: Where): Promise<Result<readonly ViewShown[]>>;
+  /**
+   * Write down what the panes are showing, the whole set at once.
+   *
+   * The set rather than one record because closing a pane has to be able to
+   * take a view away: a record left behind by a pane somebody closed would
+   * open again at the next launch as a window they did not leave. A pane with
+   * no record in the list has its view dropped.
+   */
+  viewsNote(shown: readonly ViewShown[], where?: Where): Promise<Result<null>>;
+
+  /* ------------------------------------------------------------------ canvas */
+
+  /** Every canvas this project has, newest first. */
+  flowList(where?: Where): Promise<Result<readonly Flow[]>>;
+  /** Write one back. The runs are the shell's and are not overwritten: the
+   *  answer is the flow it kept, runs included. */
+  flowSave(flow: Flow, where?: Where): Promise<Result<Flow>>;
+  flowDelete(id: string, where?: Where): Promise<Result<null>>;
+  /** Start a run. Refuses with `canStart`'s sentence when it cannot. */
+  flowStart(id: string, where?: Where): Promise<Result<Run>>;
+  flowStop(id: string, where?: Where): Promise<Result<Run>>;
+  /** Open a gate, which is the one thing a run stops for. */
+  flowContinue(id: string, block: string, where?: Where): Promise<Result<Run>>;
+  /** Carry on an interrupted run, from its first unfinished block. */
+  flowResume(id: string, where?: Where): Promise<Result<Run>>;
+  /** Every run change, pushed. What the window draws from while a flow runs. */
+  onFlow(listener: (notice: { project: string; flow: Flow }) => void): () => void;
+
+  /* ------------------------------------------------------------------ tokens */
+
+  /**
+   * The custom properties this project's stylesheets declare, grouped, with how
+   * often each is used. Null for a project whose sheets declare none — the band
+   * is then absent rather than empty.
+   */
+  tokensRead(
+    where?: Where,
+  ): Promise<Result<{ tokens: StyleToken[]; sheets: number } | null>>;
 
   /* ---------------------------------------------- while you are not looking */
 

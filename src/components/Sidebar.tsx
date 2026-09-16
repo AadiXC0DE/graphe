@@ -43,6 +43,9 @@ export const ACTS_WORDS = {
    *  card behind it is the one that already exists. */
   worktree: 'New worktree',
   worktreeHint: 'Start a conversation in a copy of this project instead',
+  /** The chats a canvas opened for its lanes, and where they come from. */
+  canvas: 'From a canvas',
+  canvasHint: 'The conversations a canvas opened for its runs',
   /** Said under the row's own menu, where the choice is between carrying on in
    *  the same files and starting in a copy. A sentence rather than a label:
    *  this one is the thing a fork does not do, and it is worth a line. */
@@ -127,6 +130,9 @@ type Props = {
   /** Finished work waiting to be looked at, and how many pieces of it. */
   onReviewQueue?: () => void;
   reviewsWaiting?: number;
+  /** The canvases this project has drawn. Optional: a shelf that cannot yet
+   *  offer it is still whole. */
+  onCanvas?: () => void;
   /** Skills stay close to the work, but open as a library rather than another
       permanent section competing with conversations. */
   onSkills?: () => void;
@@ -216,6 +222,13 @@ function placesOf(p: Props): readonly Place[] {
       icon: <ReviewIcon />,
       count: p.reviewsWaiting,
     },
+    {
+      id: 'canvas',
+      name: 'Canvas',
+      tip: 'Canvas',
+      on: p.onCanvas,
+      icon: <CanvasIcon size={16} />,
+    },
     { id: 'reviews', name: 'Pull requests', tip: 'Pull requests and issues', on: p.onReviews, icon: <PullIcon /> },
     { id: 'skills', name: 'Skills', tip: 'Skills', on: p.onSkills, icon: <SkillsIcon /> },
     { id: 'files', name: 'Project files', tip: 'Project files (⌘⇧F)', on: p.onFiles, icon: <FilesIcon /> },
@@ -285,18 +298,26 @@ export default function Sidebar(props: Props) {
   /** Whether the archived ones are showing. Shut by default: they are out of
    *  the list because somebody put them there. */
   const [showingArchived, setShowingArchived] = useState(false);
+  /** Whether a canvas's own conversations are showing. Shut by default: they are
+   *  the shell's, and somebody reading the shelf wants their own chats. */
+  const [showingCanvas, setShowingCanvas] = useState(false);
   const workingHere = useMemo(() => new Set(working), [working]);
   /* The conversations in two: the ones the days draw, and the ones somebody put
      away. The shell marks them on their own row, so this survives a restart and
      is right for a chat archived from another window. */
-  const [onTheList, kept] = useMemo(() => {
+  const [onTheList, kept, fromCanvases] = useMemo(() => {
     const listed: ShelfConversation[] = [];
     const away: ShelfConversation[] = [];
+    const canvas: ShelfConversation[] = [];
     for (const one of conversations) {
       if (one.archived === true) away.push(one);
+      // A canvas lane's chat was opened by the shell rather than by somebody in
+      // this list, so it belongs under the canvas that made it. Among ordinary
+      // chats it reads as a conversation nobody started.
+      else if (one.lineage?.kind === 'flow') canvas.push(one);
       else listed.push(one);
     }
-    return [listed, away] as const;
+    return [listed, away, canvas] as const;
   }, [conversations]);
   const acts: Acts | null =
     onContinueConversation === undefined ||
@@ -667,6 +688,52 @@ export default function Sidebar(props: Props) {
                 ) : null}
               </>
             )}
+            {/* The chats the shell opened for a canvas: one per lane, named after
+                the canvas and its branch. Shut by default — they are a canvas's
+                own machinery rather than somebody's conversations, and a shelf
+                that listed them among the rest would read as work nobody
+                started. */}
+            {fromCanvases.length === 0 ? null : (
+              <>
+                <button
+                  type="button"
+                  className="shelf__row shelf__row--quiet shelf__archivedsays"
+                  aria-expanded={showingCanvas}
+                  onClick={() => setShowingCanvas((was) => !was)}
+                  title={ACTS_WORDS.canvasHint}
+                >
+                  <span className="shelf__archivedmark" aria-hidden="true">
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                      <path
+                        d="M2.5 4.5L6 8l3.5-3.5"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="shelf__rowname">{ACTS_WORDS.canvas}</span>
+                  <span className="shelf__archivedcount">{String(fromCanvases.length)}</span>
+                </button>
+                {showingCanvas ? (
+                  <ul className="shelf__list">
+                    {fromCanvases.map((one) => (
+                      <li className="shelf__convo" key={one.id}>
+                        <button
+                          type="button"
+                          className={`shelf__row ${one.path === openConversation ? 'shelf__row--here' : ''}`}
+                          onClick={() => onOpenConversation(one.path)}
+                        >
+                          <span className="shelf__rowname">{one.title}</span>
+                          <span className="shelf__rowsub">{ago(one.at)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            )}
           </section>
 
           {pinned.length === 0 && shared.length === 0 ? null : (
@@ -937,6 +1004,17 @@ function NewerBuild() {
    --------------------------------------------------------------------------- */
 
 type IconProps = { size?: number };
+
+/** Two cards and the line between them: the drawing, not a paintbrush. */
+function CanvasIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.75" y="4" width="5.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="8.75" y="8.5" width="5.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M7.25 5.75h3v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function FindIcon({ size = 14 }: IconProps) {
   return (

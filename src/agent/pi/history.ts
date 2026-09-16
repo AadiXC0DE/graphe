@@ -84,6 +84,21 @@ const ABORTED = 'Operation aborted';
 /** Said where a conversation comes back from a branch it left. */
 const BRANCH_CAME_BACK = 'This conversation came back from another branch.';
 
+/**
+ * What an add-on's notice is written down as, in Pi's own record.
+ *
+ * A notice used to live only as long as the window that drew it: one arriving
+ * while nobody was looking, or while a conversation was closed, was simply
+ * gone. Pi has an entry that is kept in the transcript and never reaches the
+ * model — its `custom` entry, which is where extensions are meant to keep state
+ * — so the words go there, whole, and come back as the line they were.
+ *
+ * The name is in the words rather than in a field, exactly as it is live: Pi's
+ * `notify` carries no origin, and the host folds in whichever add-on the call
+ * stack named before the sentence reaches anybody.
+ */
+export const NOTICE_ENTRY = 'graphe-addon-notice';
+
 /** Where the whole of something sits in the record: the entry it was written
  *  in, or whatever names it when the entry has no id of its own. */
 function whereOf(entry: Fields | null, whenNoId: string): string {
@@ -382,6 +397,20 @@ function eventsOf(entry: unknown): AgentEvent[] {
     const from = textAt(source, 'customType');
     if (from === null) return [];
     return saidByAddon(from, source, source['content'], flagAt(source, 'display'));
+  }
+  /* An add-on's notice, written down when it was said. It comes back as the
+     same line the window drew at the time rather than as the add-on's own
+     message: a notice is the app speaking for somebody who is not here, and
+     replaying it as a turn of theirs would put words in their mouth that they
+     never sent to the model. Pi's `custom` entry is deliberately outside what
+     the model reads, which is what makes it the right place for this. */
+  if (kind === 'custom' && textAt(source, 'customType') === NOTICE_ENTRY) {
+    const held = nestedAt(source, 'data');
+    if (held === null) return [];
+    const what = textAt(held, 'what');
+    if (what === null) return [];
+    const because = textAt(held, 'because');
+    return [{ type: 'notice', what, ...(because === null ? {} : { because }) }];
   }
   // The rest — headers, model and thinking level changes, labels — the window
   // never draws.

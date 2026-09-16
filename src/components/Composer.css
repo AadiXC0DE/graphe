@@ -222,6 +222,35 @@
   transform: scale(0.97);
 }
 
+/* The canvas press. Words as well as a mark, because "Canvas" is a word somebody
+   is looking for rather than a symbol they already know. Collapses to the mark
+   where the row is tight, which is what the label is wrapped in. */
+.composer__canvas {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-1) * 0.75);
+  height: 30px;
+  padding: 0 calc(var(--space-2) * 0.75);
+  flex-shrink: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-hover);
+}
+
+.composer__canvas:hover {
+  color: var(--text);
+}
+
+.composer__canvas:active {
+  transform: scale(0.97);
+}
+
+@media (max-width: 720px) {
+  .composer__canvas > span {
+    display: none;
+  }
+}
+
 .composer__attach:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

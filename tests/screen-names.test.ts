@@ -92,11 +92,12 @@ describe("no two names point at one thing", () => {
   });
 
   it("does not carry the retired screens anywhere a person can press", () => {
-    // The canvas was retired in phase 8 and has no entry point left.
-    expect(SIDEBAR).not.toContain("Canvas");
-    expect(SIDEBAR).not.toContain("onCanvas");
-    expect(APP).not.toContain("CanvasView");
     expect(APP).not.toContain("DesignView");
+    // The rail is where a screen is reached from, so a retired one named there
+    // is a press somebody can still make.
+    for (const gone of ["design", "designview", "tokensview"]) {
+      expect(SIDEBAR.toLowerCase()).not.toContain(gone);
+    }
   });
 
   /* Every name the palette shows is distinct: two rows with one name is two

@@ -96,6 +96,10 @@ import {
   type TokenUsageView,
   type WindowState,
   type Where,
+  type ViewShown,
+  type StyleToken,
+  type Flow,
+  type Run,
   type FileVerdict,
   type HowItLands,
   type ReviewClash,
@@ -1277,6 +1281,56 @@ const api: GrapheApi = {
 
   ownStyles(): Promise<Result<{ css: string; file: string }>> {
     return ipcRenderer.invoke(CHANNEL.ownStyles) as Promise<Result<{ css: string; file: string }>>;
+  },
+
+  viewsLook(where?: Where): Promise<Result<readonly ViewShown[]>> {
+    return ipcRenderer.invoke(CHANNEL.viewsLook, named(where)) as Promise<Result<readonly ViewShown[]>>;
+  },
+  viewsNote(shown: readonly ViewShown[], where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.viewsNote, shown, named(where)) as Promise<Result<null>>;
+  },
+
+  /* ------------------------------------------------------------------ canvas */
+
+  flowList(where?: Where): Promise<Result<readonly Flow[]>> {
+    return ipcRenderer.invoke(CHANNEL.flowList, named(where)) as Promise<Result<readonly Flow[]>>;
+  },
+  flowSave(flow: Flow, where?: Where): Promise<Result<Flow>> {
+    return ipcRenderer.invoke(CHANNEL.flowSave, flow, named(where)) as Promise<Result<Flow>>;
+  },
+  flowDelete(id: string, where?: Where): Promise<Result<null>> {
+    return ipcRenderer.invoke(CHANNEL.flowDelete, id, named(where)) as Promise<Result<null>>;
+  },
+  flowStart(id: string, where?: Where): Promise<Result<Run>> {
+    return ipcRenderer.invoke(CHANNEL.flowStart, id, named(where)) as Promise<Result<Run>>;
+  },
+  flowStop(id: string, where?: Where): Promise<Result<Run>> {
+    return ipcRenderer.invoke(CHANNEL.flowStop, id, named(where)) as Promise<Result<Run>>;
+  },
+  flowContinue(id: string, block: string, where?: Where): Promise<Result<Run>> {
+    return ipcRenderer.invoke(CHANNEL.flowContinue, id, block, named(where)) as Promise<Result<Run>>;
+  },
+  flowResume(id: string, where?: Where): Promise<Result<Run>> {
+    return ipcRenderer.invoke(CHANNEL.flowResume, id, named(where)) as Promise<Result<Run>>;
+  },
+  onFlow(listener: (notice: { project: string; flow: Flow }) => void): () => void {
+    const forward = (_source: IpcRendererEvent, notice: { project: string; flow: Flow }): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(CHANNEL.flowChanged, forward);
+    return () => {
+      ipcRenderer.off(CHANNEL.flowChanged, forward);
+    };
+  },
+
+  /* ------------------------------------------------------------------ tokens */
+
+  tokensRead(
+    where?: Where,
+  ): Promise<Result<{ tokens: StyleToken[]; sheets: number } | null>> {
+    return ipcRenderer.invoke(CHANNEL.tokensRead, named(where)) as Promise<
+      Result<{ tokens: StyleToken[]; sheets: number } | null>
+    >;
   },
 
   /* ---------------------------------------------- while you are not looking */

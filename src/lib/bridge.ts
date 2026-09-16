@@ -27,6 +27,18 @@ import { pagesIn, type Page } from '../preview/pages';
 import type { Said } from '../preview/tabs';
 import { keeping } from '../projects/kept';
 import { asComputerUse, defaultComputerUse, type ComputerUse } from '../work/computeruse';
+import {
+  LANE_0,
+  isGate,
+  latestRun,
+  nextUp,
+  readFlows,
+  withFlow,
+  withRun,
+  withoutFlow,
+  type BlockRun,
+} from '../work/canvas';
+import { newRunId } from '../domain/identity';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
 import { daysFromUsage, type TokenUsageView } from '../lib/token-days';
@@ -87,10 +99,14 @@ import {
   type BuildAdvance,
   type SavedVersion,
   type ShowOutcome,
+  type StyleToken,
+  type Flow,
+  type Run,
   type HowFar,
   type Money,
   type ShowProgress,
   type Where,
+  type ViewShown,
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
@@ -265,6 +281,10 @@ const PREVIEW_SETUP: SetupHere = {
   ],
   plan: { manager: 'npm', command: 'npm', args: ['install'] },
 };
+
+/** The panes a browser tab is showing. In memory only: a tab has no profile to
+ *  write a view record into, and this is what the split press reads. */
+const previewViews: ViewShown[] = [];
 
 const PREVIEW_DIFF = [
   'diff --git a/src/agent/guard/policy.ts b/src/agent/guard/policy.ts',
@@ -674,10 +694,40 @@ function previewAway(): Away {
   };
 }
 
+/** What a mock turn says when it is done. One sentence for every block, because
+ *  a card with nothing in it reads as broken rather than as unfinished. */
+const PREVIEW_SAID = 'Done. Nothing actually ran: this is a browser tab.';
+
+/** How long one step of a mock run takes. Long enough to watch a card change
+ *  state, short enough that nobody waits for a flow to finish. */
+const PREVIEW_STEP_MS = 320;
+
+/** A project's canvases, kept where its goal is kept and for the same reason:
+ *  a browser tab has no profile to write a file into. Guarded on the way in
+ *  because a test can import this module with no window at all, and guarded on
+ *  the way out because storage is refused in a private tab. */
+function previewFlowsIn(project: string): readonly Flow[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`graphe:flows:${project}`);
+    return raw === null ? [] : readFlows(JSON.parse(raw) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function previewFlowsOut(project: string, flows: readonly Flow[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(`graphe:flows:${project}`, JSON.stringify(flows));
+  } catch { /* quota or private mode: nothing else is keeping them either */ }
+}
+
 function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
   const connecting = new Set<(step: ConnectStep) => void>();
+  const flowWatch = new Set<(notice: { project: string; flow: Flow }) => void>();
 
   /** What is going on without anybody. Real state, for as long as the tab is
    *  open, so the band can be pressed rather than only looked at. */
@@ -850,6 +900,111 @@ let previewPlanMode = false;
     split = ledger.summary();
     send({ type: 'spend-summary', summary: split });
   };
+
+  /* A canvas somebody can press Start on. The shell's runner is not here and no
+     model is either, so this walks the blocks itself — each one running, then
+     done a beat later — which is enough to draw every state a card has. A gate
+     is honoured rather than skipped, because a Continue with nothing under it
+     would be a dead button. Each flow walks on its own timer, so two canvases
+     started in one tab do not stop each other. */
+  const flowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The block whose turn it is, so the second half of a step knows which card
+   *  it is finishing. A flow mid-step has an entry here. */
+  const flowGoing = new Map<string, string>();
+
+  const projectOf = (where?: Where): string => where?.project ?? '';
+
+  const halt = (id: string): void => {
+    clearTimeout(flowTimers.get(id));
+    flowTimers.delete(id);
+    flowGoing.delete(id);
+  };
+
+  const later = (id: string, where: Where | undefined): void => {
+    flowTimers.set(id, setTimeout(() => walk(id, where), PREVIEW_STEP_MS));
+  };
+
+  /** Store the change and push it. Every step of a mock run goes through here,
+   *  which is what makes the window hear about all of them. */
+  const written = (project: string, flow: Flow): void => {
+    const kept: Flow = { ...flow, updatedAt: Date.now() };
+    previewFlowsOut(project, withFlow(previewFlowsIn(project), kept));
+    for (const listener of flowWatch) listener({ project, flow: kept });
+  };
+
+  /** One step: the block whose turn it is, or the next one, marked. A gate stops
+   *  the walk where a real run stops it, and Continue sets it going again. */
+  const walk = (id: string, where: Where | undefined): void => {
+    flowTimers.delete(id);
+    const project = projectOf(where);
+    const flow = previewFlowsIn(project).find((one) => one.id === id);
+    const run = flow === undefined ? null : latestRun(flow);
+    if (flow === undefined || run === null || run.state !== 'running') return halt(id);
+
+    const held = flowGoing.get(id);
+    if (held !== undefined) {
+      const block = flow.blocks.find((one) => one.id === held);
+      const was = run.blocks[held];
+      if (block === undefined || was === undefined) return halt(id);
+      if (isGate(block)) {
+        // Nothing goes on behind a gate: the run waits for the person, which is
+        // the one thing a gate is for.
+        flowGoing.delete(id);
+        return written(project, withRun(flow, {
+          ...run,
+          state: 'needs-you',
+          blocks: { ...run.blocks, [held]: { ...was, state: 'needs-you' } },
+        }));
+      }
+      flowGoing.delete(id);
+      written(project, withRun(flow, {
+        ...run,
+        blocks: {
+          ...run.blocks,
+          [held]: { ...was, state: 'done', endedAt: Date.now(), said: PREVIEW_SAID },
+        },
+      }));
+      return later(id, where);
+    }
+
+    const block = nextUp(flow);
+    if (block === null) {
+      written(project, withRun(flow, { ...run, state: 'done', endedAt: Date.now() }));
+      return halt(id);
+    }
+    flowGoing.set(id, block.id);
+    written(project, withRun(flow, {
+      ...run,
+      blocks: {
+        ...run.blocks,
+        [block.id]: {
+          state: 'running',
+          lane: run.lanes[0]?.id ?? LANE_0,
+          startedAt: Date.now(),
+          endedAt: null,
+          said: null,
+          turns: 1,
+          spent: null,
+          rounds: 0,
+          result: null,
+          failure: null,
+        },
+      },
+    }));
+    later(id, where);
+  };
+
+  /** The run a fake Start puts on the flow: the flow's own lane, and no folders
+   *  under it, because a browser tab has none. */
+  const minted = (): Run => ({
+    id: newRunId(),
+    state: 'running',
+    startedAt: Date.now(),
+    endedAt: null,
+    lanes: [{ id: LANE_0, workspaceId: 'preview', conversationId: null, branch: null }],
+    blocks: {},
+    spent: null,
+  });
 
   return {
     desktop: false,
@@ -1095,6 +1250,132 @@ let previewPlanMode = false;
 
     ownStyles(): Promise<Result<{ css: string; file: string }>> {
       return Promise.resolve(done({ css: '', file: '' }));
+    },
+
+    /** A browser tab has no project folder, so no sheet of its own is read and
+     *  the band is absent rather than empty. */
+    tokensRead(): Promise<Result<{ tokens: StyleToken[]; sheets: number } | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /* Kept in memory for the life of the tab. A browser tab has no profile to
+       write a view record into, and the split press is what a person is looking
+       at when they want it back. */
+    viewsLook(): Promise<Result<readonly ViewShown[]>> {
+      return Promise.resolve(done([...previewViews]));
+    },
+    viewsNote(shown: readonly ViewShown[]): Promise<Result<null>> {
+      previewViews.length = 0;
+      previewViews.push(...shown);
+      return Promise.resolve(done(null));
+    },
+
+    /* A canvas in a browser tab: whole enough to draw every state a card has,
+       and honest about it — nothing underneath is running. */
+    flowList(where?: Where): Promise<Result<readonly Flow[]>> {
+      const held = [...previewFlowsIn(projectOf(where))].sort((one, other) => other.updatedAt - one.updatedAt);
+      return Promise.resolve(done(held));
+    },
+
+    flowSave(flow: Flow, where?: Where): Promise<Result<Flow>> {
+      const project = projectOf(where);
+      // Nothing here owns a run: what the window hands over is the whole of
+      // what this project has drawn and what it has run.
+      previewFlowsOut(project, withFlow(previewFlowsIn(project), flow));
+      return Promise.resolve(done(flow));
+    },
+
+    flowDelete(id: string, where?: Where): Promise<Result<null>> {
+      const project = projectOf(where);
+      const held = previewFlowsIn(project);
+      if (!held.some((one) => one.id === id)) return Promise.resolve(previewFail<null>());
+      halt(id);
+      previewFlowsOut(project, withoutFlow(held, id));
+      return Promise.resolve(done(null));
+    },
+
+    flowStart(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      if (flow === undefined) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const run = minted();
+      written(project, withRun(flow, run));
+      later(id, where);
+      return Promise.resolve(done(run));
+    },
+
+    flowStop(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      const run = flow === undefined ? null : latestRun(flow);
+      if (flow === undefined || run === null) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const at = Date.now();
+      const blocks: Record<string, BlockRun> = {};
+      for (const [was, one] of Object.entries(run.blocks)) {
+        // What finished stays finished, the way a real Stop leaves it: stopping
+        // is to keep the work, not to lose the report of it.
+        blocks[was] =
+          one.state === 'running' || one.state === 'needs-you'
+            ? { ...one, state: 'stopped', endedAt: at }
+            : one;
+      }
+      const over: Run = { ...run, state: 'stopped', endedAt: at, blocks };
+      written(project, withRun(flow, over));
+      return Promise.resolve(done(over));
+    },
+
+    flowContinue(id: string, block: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      const run = flow === undefined ? null : latestRun(flow);
+      const gate = flow?.blocks.find((one) => one.id === block);
+      const was = run?.blocks[block];
+      if (flow === undefined || run === null || gate === undefined || !isGate(gate) || was === undefined) {
+        return Promise.resolve(previewFail<Run>());
+      }
+      const over: Run = {
+        ...run,
+        state: 'running',
+        endedAt: null,
+        blocks: { ...run.blocks, [block]: { ...was, state: 'done', endedAt: Date.now(), said: PREVIEW_SAID } },
+      };
+      halt(id);
+      written(project, withRun(flow, over));
+      later(id, where);
+      return Promise.resolve(done(over));
+    },
+
+    /* The mock carries an interrupted run on the same way the shell does: the
+       blocks that finished stay finished and everything else runs again. */
+    flowResume(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      if (flow === undefined) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const run = latestRun(flow);
+      if (run === null) {
+        const fresh = minted();
+        written(project, withRun(flow, fresh));
+        later(id, where);
+        return Promise.resolve(done(fresh));
+      }
+      const blocks: Record<string, BlockRun> = {};
+      for (const [was, one] of Object.entries(run.blocks)) {
+        if (one.state === 'done') blocks[was] = one;
+      }
+      const again: Run = { ...run, state: 'running', endedAt: null, blocks };
+      written(project, withRun(flow, again));
+      later(id, where);
+      return Promise.resolve(done(again));
+    },
+
+    onFlow(listener: (notice: { project: string; flow: Flow }) => void): () => void {
+      flowWatch.add(listener);
+      return () => {
+        flowWatch.delete(listener);
+      };
     },
 
     /** A whole project, made up, so the panel can be opened and reviewed in a
@@ -2288,6 +2569,16 @@ function connect(): Bridge {
     setTheme: (theme) => api.setTheme(theme),
     setAppearance: (appearance) => api.setAppearance(appearance),
     ownStyles: () => api.ownStyles(),
+    tokensRead: (where) => api.tokensRead(where),
+    viewsLook: (where) => api.viewsLook(where),
+    viewsNote: (shown, where) => api.viewsNote(shown, where),
+    flowList: (where) => api.flowList(where),
+    flowSave: (flow, where) => api.flowSave(flow, where),
+    flowDelete: (id, where) => api.flowDelete(id, where),
+    flowStart: (id, where) => api.flowStart(id, where),
+    flowStop: (id, where) => api.flowStop(id, where),
+    flowContinue: (id, block, where) => api.flowContinue(id, block, where),
+    flowResume: (id, where) => api.flowResume(id, where),
     projectFiles: (where) => api.projectFiles(where),
     fileText: (path, where, expect) => api.fileText(path, where, expect),
     hatches: () => api.hatches(),
@@ -2443,6 +2734,7 @@ function connect(): Bridge {
     answerAway: (id, callId, decision, where) => api.answerAway(id, callId, decision, where),
     sayToAway: (id, text, where) => api.sayToAway(id, text, where),
     onAway: (listener) => api.onAway(listener),
+    onFlow: (listener) => api.onFlow(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
     onContinuation: (listener) => api.onContinuation(listener),
     onNewerVersion: (listener) => api.onNewerVersion?.(listener) ?? (() => undefined),

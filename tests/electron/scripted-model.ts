@@ -20,10 +20,15 @@ import type { AddressInfo } from 'node:net';
 /** One thing the model does when it is asked for a turn: say something, in
  *  pieces, or call a tool. A reply marked `byHand` waits for `next()` between
  *  its pieces instead of the clock, so a test can hold it mid-arrival for as
- *  long as it needs on any machine. */
+ *  long as it needs on any machine.
+ *
+ *  `fails` is a provider refusing the turn before any of it happens, which is
+ *  the shape Pi's own auto-retry reads: an overloaded response, `times` in a
+ *  row, and then the script carries on. */
 export type Step =
   | { says: readonly string[]; byHand?: boolean }
-  | { calls: { name: string; arguments: Record<string, unknown> } };
+  | { calls: { name: string; arguments: Record<string, unknown> } }
+  | { fails: { status: number; times: number; message?: string } };
 
 export type ScriptedModel = {
   /** Where the provider the app registers points. */
@@ -104,6 +109,20 @@ export async function scriptedModel(): Promise<ScriptedModel> {
         asked.push(body);
       }
 
+      const step = steps.shift() ?? { says: [NOTHING_SCRIPTED] };
+      if ('fails' in step) {
+        /* A provider refusing the turn outright, which is the shape Pi's own
+           retry reads: the whole request is refused, so there is no partial
+           reply to keep and nothing has been spent. `times` puts the same
+           refusal back at the head of the script, so a retry meets it again and
+           the turn after that is the one the test scripted next. */
+        if (step.fails.times > 1) {
+          steps.unshift({ fails: { ...step.fails, times: step.fails.times - 1 } });
+        }
+        response.writeHead(step.fails.status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: step.fails.message ?? 'overloaded' } }));
+        return;
+      }
       response.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -118,7 +137,6 @@ export async function scriptedModel(): Promise<ScriptedModel> {
         response.write(`data: ${JSON.stringify(event)}\n\n`);
       };
 
-      const step = steps.shift() ?? { says: [NOTHING_SCRIPTED] };
       send({ type: 'start' });
       if ('calls' in step) {
         // One delta holding the whole JSON: the wire allows the arguments to

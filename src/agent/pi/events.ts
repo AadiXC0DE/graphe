@@ -59,6 +59,13 @@ function flagAt(source: Fields, key: string): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
+/** A number off an untrusted record, or zero. Zero is the honest answer for a
+ *  wait that was not said: it draws as a line with nothing to count down. */
+function numberAt(source: Fields, key: string): number {
+  const value = source[key];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function nestedAt(source: Fields, key: string): Fields | null {
   return fieldsOf(source[key]);
 }
@@ -139,6 +146,18 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       // nothing left running", which is the only honest moment to add up what a
       // sitting cost.
       return { type: 'settled' };
+
+    /* Pi retrying a provider that refused. The same thing the host's own wait
+     *  says when a service will not answer, so it is said the same way: one
+     *  line with the wait in it, and a line when it is over. Without this the
+     *  window was silent for the whole backoff, and a turn that was waiting
+     *  read as a turn that had stopped. */
+    case 'auto_retry_start':
+      return { type: 'holding', seconds: Math.round(numberAt(source, 'delayMs') / 1000) };
+
+    case 'auto_retry_end':
+      return { type: 'held', ok: flagAt(source, 'success') === true };
+
     default:
       return null;
   }

@@ -72,7 +72,7 @@ A second thought during a run is a choice, asked quietly: queue it behind the tu
 Name a conversation, mark a moment, continue it in a new one with an editable handoff, fork a direction, archive what you are done with.
 
 **22 · Project file tree**
-The folder as a tree you can walk, changed files marked, open anything in the editor where you already work.
+The folder as a tree you can walk, changed files marked, open anything in the editor where you already work. Beside it, when the project declares its own values in a `:root` or `@theme` block, a **Tokens** band reads them back: colour, type, spacing, corners and shadow, grouped, each with its value, how many places use it, and the file and line it came from — and the agent reads the same list with `read_tokens` before it styles anything.
 
 **23 · Skills & workflows**
 `@skill` pulls craft you installed off the shelf; `/command` files are prompts that expand. The agent's capabilities are a shelf you can add to.
@@ -118,6 +118,9 @@ One sentence that says what done means, and it keeps going: full access while th
 
 **37 · Computer use, with its own settings screen**
 How Graphe uses the other applications on your computer, in one place: Any App to switch desktop control off altogether, the built-in browser with the list of sites it may reach, Excel with no add-in to install, Locked use for whether background work may touch your apps while you are elsewhere, and the always-allowed apps that skip the per-turn question. Passwords, keys, and anything the Guard refuses still refuse, listed or not.
+
+**38 · Canvas**
+Draw the steps and press Start. Each block is a turn in a conversation — Ask, Plan, Checks, Review, Pull request, Gate or Goal — so every one gets the same tools and the same Guard a person typing would get. Blocks join into a flow, a branch can run in turn or in its own worktree in parallel, a run stops at a Gate until you press Continue, and what each block came to is kept as a run you can read back: what it said, how many turns, what it cost. Three templates start one off, and closing the tab closes the view rather than the drawing.
 
 ---
 

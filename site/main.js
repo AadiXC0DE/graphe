@@ -3,6 +3,16 @@
 
 const quiet = window.matchMedia('(prefers-reduced-motion: reduce)');
 
+/* ── the version, in one place ───────────────────────────────────────── */
+
+/* The number lives in the JSON-LD, which is the copy a crawler reads anyway;
+   the chip and the sentence are filled from it so a release edits one line. */
+const VERSION = JSON.parse(document.querySelector('script[type="application/ld+json"]')?.textContent ?? '{}').softwareVersion;
+
+if (typeof VERSION === 'string' && VERSION !== '') {
+  for (const slot of document.querySelectorAll('[data-version]')) slot.textContent = VERSION;
+}
+
 /* ── things arrive as you reach them ─────────────────────────────────── */
 
 const arriving = new IntersectionObserver(
@@ -39,7 +49,15 @@ function show(view) {
     tab.setAttribute('aria-selected', String(on));
   }
   for (const screen of screens) {
-    screen.classList.toggle('is-on', screen.dataset.screen === view);
+    const on = screen.dataset.screen === view;
+    screen.classList.toggle('is-on', on);
+    // The three screens sit in one painted box, so the browser fetches every
+    // one of them up front whatever `loading` says. The two nobody is looking
+    // at wait for their tab instead: same picture, a third of the bytes.
+    if (on && screen.dataset.src !== undefined && screen.getAttribute('src') === null) {
+      screen.setAttribute('srcset', screen.dataset.srcset ?? '');
+      screen.setAttribute('src', screen.dataset.src);
+    }
   }
   const said = CAPTIONS[view];
   if (said && frameName && frameCap) {

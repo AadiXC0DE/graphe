@@ -117,7 +117,15 @@ export default async function config() {
     // the archive means that import resolves to an ordinary file on disk, which
     // is one fewer thing to be surprised by, and it is also where the prebuilt
     // .node files live — those cannot be loaded from inside an asar at all.
-    asarUnpack: ['node_modules/@earendil-works/**', 'node_modules/node-pty/**'],
+    //
+    // The child runtime joins them for the same reason and one better: it is an
+    // ESM entry Node has to import, and an ESM entry inside the archive is not
+    // reliably importable. `childProgram()` looks in `app.asar.unpacked` for it.
+    asarUnpack: [
+      'node_modules/@earendil-works/**',
+      'node_modules/node-pty/**',
+      'dist-electron/runtime-child.mjs',
+    ],
 
     // After packing, before the .dmg is built. The trim has to come first: it
     // changes bytes the signature covers.

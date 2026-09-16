@@ -175,10 +175,12 @@ describe('a command an add-on registered, in a real chat', () => {
 
       // The command is the whole message: the handler is what runs. A session
       // with no account connected could not have sent this as a prompt at all,
-      // which is half of what this proves.
+      // which is half of what this proves. The notice carries the add-on that
+      // said it, read off the call stack, because Pi's `notify` has no origin
+      // on it — a notice with no name reads as something this app decided.
       await session.prompt('/tally everything since lunch');
       expect(events.filter((one) => one.type === 'notice')).toEqual([
-        { type: 'notice', what: 'tallying everything since lunch' },
+        { type: 'notice', what: 'pi-tally, tallying everything since lunch' },
       ]);
     } finally {
       session.dispose();

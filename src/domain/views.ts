@@ -18,7 +18,7 @@
  * can mint a view id without pulling a Node import into the bundle.
  */
 
-import { newViewId, type ViewId } from './identity';
+import { newViewId, asViewId, type ViewId } from './identity';
 
 export type { ViewId };
 
@@ -80,6 +80,47 @@ export function inspectorPane(panes: Panes): Pane {
 
 export function isPinned(panes: Panes): boolean {
   return panes.pinned !== null && paneAt(panes, panes.pinned) !== null;
+}
+
+/** What a pane is showing, in the shape the shell records it by. Pane 0 is the
+ *  left one; the record a window writes is always this whole list, because
+ *  closing a pane has to be able to take its view away. */
+export type Shown = { viewId: string; conversation: string; pane: 0 | 1 };
+
+export function shownNow(panes: Panes): readonly Shown[] {
+  const shown: Shown[] = [];
+  for (const [at, pane] of panes.open.entries()) {
+    if (pane.conversation === null || at > 1) continue;
+    shown.push({ viewId: pane.id, conversation: pane.conversation, pane: at === 0 ? 0 : 1 });
+  }
+  return shown;
+}
+
+/** The panes a launch puts back.
+ *
+ * Pane 0 is the conversation this launch opened on, which is the one the shell
+ * just read for us. Pane 1 is the other one the window was showing, when it was
+ * showing two and that chat is still in this project. A record whose
+ * conversation is gone leaves an ordinary single-pane window rather than a pane
+ * that fails the moment it is pressed. */
+export function panesFrom(
+  shown: readonly Shown[],
+  here: readonly string[],
+  opened: string | null,
+): Panes {
+  const known = new Set(here);
+  const other = shown.find(
+    (one) => one.pane === 1 && one.conversation !== opened && known.has(one.conversation),
+  );
+  const only = onePane(opened);
+  if (other === undefined) return only;
+  const first = only.open[0];
+  if (first === undefined) return only;
+  return {
+    open: [first, { id: asViewId(other.viewId), conversation: other.conversation }],
+    focused: first.id,
+    pinned: null,
+  };
 }
 
 /**

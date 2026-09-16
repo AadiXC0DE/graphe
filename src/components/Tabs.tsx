@@ -12,9 +12,15 @@ import './Tabs.css';
  *  anything. */
 export type TabState = 'working' | 'asking' | 'finished' | 'idle';
 
-/** One open conversation. A tab is a conversation, not a project — that is the
- *  unit of work people switch between, and it is the only shape in which "two
- *  agents in one codebase" can be said at all. */
+/** A conversation, or a canvas. Two things, because they are two different
+ *  surfaces: a canvas owns a run the shell drives, and closing it closes a view
+ *  rather than putting a chat down. */
+export type TabKind = 'chat' | 'canvas';
+
+/** One thing open in this window. Usually a conversation, which is the unit of
+ *  work people switch between — the shape in which "two agents in one codebase"
+ *  can be said at all. A canvas rides the same row so switching to it and back
+ *  is one press on something you can see. */
 export type Tab = {
   id: string;
   /** What this conversation is called. */
@@ -23,6 +29,9 @@ export type Tab = {
   project: string;
   /** The project's folder, which is what groups tabs and picks the underline. */
   projectPath: string;
+  /** Absent reads as a conversation, so a caller that only has chats to show
+   *  says nothing about them. */
+  kind?: TabKind;
   state: TabState;
 };
 
@@ -56,6 +65,12 @@ export const SAYS = {
     asking: 'waiting for you',
     finished: 'finished',
     idle: '',
+  },
+  /** What the glyph before the state mark says, for a screen reader. A canvas
+   *  is not a conversation and a mark alone cannot say so. */
+  kinds: {
+    chat: '',
+    canvas: 'canvas',
   },
 } as const;
 
@@ -302,6 +317,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder, onSp
               }}
               title={`${tab.title} (${tab.project})`}
             >
+              {tab.kind === 'canvas' ? <CanvasGlyph /> : null}
               <Mark state={tab.state} />
               <span className="tabs__text">
                 <span className="tabs__title">{tab.title}</span>
@@ -393,6 +409,7 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder, onSp
                     setListing(false);
                   }}
                 >
+                  {tab.kind === 'canvas' ? <CanvasGlyph /> : null}
                   <Mark state={tab.state} />
                   <span className="tabs__text">
                     <span className="tabs__title">{tab.title}</span>
@@ -405,6 +422,21 @@ export default function Tabs({ tabs, at, onOpen, onClose, onNew, onReorder, onSp
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** The glyph that says this tab is a canvas rather than a conversation. Drawn
+ *  beside the state mark rather than inside it, because the two answer
+ *  different questions: what this is, and what it is doing. */
+function CanvasGlyph() {
+  return (
+    <span className="tabs__kind" role="img" aria-label={SAYS.kinds.canvas}>
+      <svg viewBox="0 0 12 12" width="9" height="9" fill="none" aria-hidden="true">
+        <rect x="1.25" y="3.25" width="4.5" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
+        <rect x="6.25" y="6.25" width="4.5" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M5.75 4.75h2.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      </svg>
+    </span>
   );
 }
 

@@ -172,7 +172,7 @@ describe('waiting for a view', () => {
     const held = [...app.matchAll(/fallback=\{[^\n]*?arriving\(([^)]*)\)/g)].map((one) =>
       String(one[1] ?? '').trim(),
     );
-    expect(held.length).toBe(11);
+    expect(held.length).toBe(12);
     expect(held.filter((one) => one === '' || one === "''")).toEqual([]);
   });
 });
@@ -196,7 +196,10 @@ describe('warming the views', () => {
 
   it('warms the screens a press reaches, and only ones that are lazy', () => {
     const block = app.slice(app.indexOf('const VIEWS = ['), app.indexOf('];', app.indexOf('const VIEWS = [')));
-    const warmed = [...block.matchAll(/\.\/components\/(\w+)/g)].map((one) => one[1] as string);
+    // The module's last segment, not its first: a screen that sits in a folder
+    // of its own (`./components/canvas/CanvasView`) is still the view named by
+    // its `lazy(…)`.
+    const warmed = [...block.matchAll(/\.\/components\/(?:[\w-]+\/)*(\w+)/g)].map((one) => one[1] as string);
     expect(warmed.length).toBeGreaterThan(7);
     const views = lazyViews(app);
     expect(warmed.filter((one) => !views.includes(one))).toEqual([]);
@@ -221,6 +224,7 @@ describe('a screen closes only the others', () => {
       usage: 'UsageOpen',
       'add-more': 'AddMore',
       helpers: 'HelpersAt',
+      canvas: 'CanvasAt',
     };
     // One close line per screen named below: a screen the press does not close
     // leaves the surface behind it up.

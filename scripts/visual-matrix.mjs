@@ -735,6 +735,34 @@ const LONG_PROJECT = 'a-project-with-a-name-long-enough-that-it-cannot-fit-in-th
 const LONG_LEAF =
   'AnotherExtremelyLongFileNameThatKeepsGoingAndGoingAndGoingAndGoingAndGoingAndGoing.tsx';
 
+/** A second folder with no stylesheet in it, so the band that reads a project's
+ *  own values can be checked as absent rather than as empty. */
+const PLAIN_PROJECT = 'a-folder-nothing-is-declared-in';
+
+/** The sheet the tokens band reads. `:root` first, then a rule that reaches for
+ *  the values, so the Used column has a number in it rather than a blank. */
+const TOKENS_SHEET = `:root {
+  --ink: #1c1a18;
+  --paper: #fcfaf7;
+  --accent: #2f6f4f;
+  --space-2: 8px;
+  --space-4: 16px;
+  --radius-sm: 6px;
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --text-sm: 13px;
+  --font-ui: -apple-system, system-ui, sans-serif;
+}
+
+.sheet {
+  color: var(--ink);
+  background: var(--paper);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+  font-size: var(--text-sm);
+}
+`;
+
 /** One folder, with enough in it to overflow the panel that lists it. */
 function makeProject(name, { deep = false } = {}) {
   const project = join(mkdtempSync(join(tmpdir(), 'graphe-visual-')), name);
@@ -890,7 +918,8 @@ function target() {
 const found = target();
 const longProject = makeProject(LONG_PROJECT);
 const project = makeProject(PROJECT, { deep: true });
-seedProfile([longProject, project], 'light');
+const plainProject = makeProject(PLAIN_PROJECT);
+seedProfile([longProject, project, plainProject], 'light');
 rmSync(shots, { recursive: true, force: true });
 mkdirSync(shots, { recursive: true });
 
@@ -2015,6 +2044,68 @@ await row('keyboard-disabled', 'a disabled action must not look like an availabl
 /* -------------------------------------------------------------------------- */
 /* 8. Overlays                                                                 */
 /* -------------------------------------------------------------------------- */
+
+/* A sheet is a chunk, and a chunk takes a frame or two. What is drawn in that
+   frame is the one screen nobody can press for, so it is held open on purpose
+   and looked at — and only the --built run serves the renderer over http, which
+   is what makes holding a chunk possible at all. */
+await row('loading-layout', 'the rectangle held where a sheet is still on its way', async () => {
+  await ensureProjectOpen();
+  await escapeFrom('.settings', '.palette', '.askanything');
+  if (found.how !== 'built') {
+    note('only the --built run serves the renderer over http, so a chunk cannot be held back here');
+    return;
+  }
+  const held = '**/assets/*Settings*.js';
+  await window_.route(held, async (route) => {
+    await pause(3000);
+    await route.continue();
+  });
+  await window_.locator('.shelf__more--last').first().click();
+  const drawn = await until(
+    async () => (await window_.locator('.sheet--arriving:not(.sheet--cover)').count()) > 0,
+    5_000,
+  );
+  verdict('the rectangle is drawn while the sheet is on its way', drawn);
+  if (!drawn) {
+    await window_.unroute(held);
+    note('the sheet arrived too quickly to catch its own placeholder');
+    return;
+  }
+  await shot('loading-layout');
+  const said = await window_
+    .locator('.sheet--arriving:not(.sheet--cover)')
+    .first()
+    .evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        role: el.getAttribute('role'),
+        busy: el.getAttribute('aria-busy'),
+        name: el.getAttribute('aria-label'),
+        ground: s.backgroundColor,
+        w: Math.round(el.getBoundingClientRect().width),
+        h: Math.round(el.getBoundingClientRect().height),
+      };
+    });
+  verdict(
+    `the rectangle says what is busy rather than nothing (role ${String(said.role)}, name "${String(said.name)}")`,
+    said.role === 'status' && said.name !== null && said.name !== '',
+  );
+  if (said.role !== 'status' || said.name === null || said.name === '') {
+    bad(`the arriving rectangle is unnamed, so a screen reader announces a blank panel (role ${String(said.role)}, aria-busy ${String(said.busy)}, name ${String(said.name)})`);
+  }
+  note(`the rectangle is ${String(said.w)}×${String(said.h)} on ${said.ground}`);
+  const view = await viewport(window_);
+  const [box] = await boxes(window_, ['.sheet--arriving:not(.sheet--cover)']);
+  verdict('the rectangle is inside the window', inside(box, view));
+
+  await window_.unroute(held);
+  await window_.locator('.settings').waitFor({ timeout: 30_000 });
+  const replaced = await window_.locator('.sheet--arriving:not(.sheet--cover)').count();
+  verdict('the rectangle is gone once the sheet itself arrives', replaced === 0);
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.settings').count()) === 0, 10_000);
+});
 
 await row('overlay-settings', 'the settings sheet, over the conversation', async () => {
   await ensureProjectOpen();
@@ -3212,6 +3303,749 @@ await row('motion-off', "the app's own setting: instant everywhere", async () =>
   await chosen.first().click();
   await window_.keyboard.press('Escape');
   await until(async () => (await window_.locator('.settings').count()) === 0, 10_000);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 12. The canvas, and the project's own values                                 */
+/* -------------------------------------------------------------------------- */
+
+/* A canvas is a flow file the shell owns, and a run is driven by the shell: the
+   window is only ever the drawing. These rows put a flow where the shell reads
+   it and reload the window rather than pressing Start — the packaged app is what
+   runs here by default and a real Start needs a model. What is under test is
+   what the window does with the flow it is handed. */
+
+/** Where the shell keeps a project's canvases, and the id it files them under.
+ *  The id is minted the first time a folder is opened, so nothing can be seeded
+ *  before the app has opened it once.
+ *
+ *  Looked up by the folder's last segment as well as by the path itself: the
+ *  index is keyed by the folder resolved through its symlinks, and on this
+ *  machine `/var` is one, so the path this script made is not always the path
+ *  the registry wrote down. */
+function flowFileFor(projectPath) {
+  const index = JSON.parse(readFileSync(join(profile, 'workspaces.json'), 'utf8'));
+  const byRoot = index.byRoot ?? {};
+  const leaf = projectPath.slice(projectPath.lastIndexOf('/') + 1);
+  const key =
+    Object.keys(byRoot).find((one) => one === projectPath) ??
+    Object.keys(byRoot).find((one) => one.endsWith(`/${leaf}`));
+  const projectId = key === undefined ? undefined : byRoot[key];
+  if (typeof projectId !== 'string' || projectId === '') return null;
+  return join(profile, 'flows', `${projectId}.json`);
+}
+
+/** One canvas, written where the shell will read it. The file is read once per
+ *  project open, so a rewrite only counts after a reload. */
+function seedCanvas(projectPath, flows) {
+  const file = flowFileFor(projectPath);
+  if (file === null) return false;
+  mkdirSync(join(profile, 'flows'), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(flows, null, 2)}\n`);
+  return true;
+}
+
+/** Reload the window and come back in with the project open: a flow list is read
+ *  per project open, so nothing seeded after that is seen without this. */
+async function reloadIntoProject() {
+  await tell(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.reload();
+    return true;
+  });
+  await window_.waitForLoadState('domcontentloaded');
+  const listed = await until(async () => (await window_.locator('.picker .pickerrow__open').count()) > 0, 60_000);
+  if (!listed) return false;
+  await window_.locator('.picker .pickerrow__open', { hasText: PROJECT }).first().click();
+  const open = await until(async () => (await window_.locator('.composer__input').count()) > 0, 60_000);
+  if (!open) return false;
+  await dismissConnect();
+  return true;
+}
+
+/** The canvas, from the row in the sidebar that names it. Pressing that row is
+ *  what it is for, and it is also how somebody who has never seen a canvas finds
+ *  one; the folded strip's mark is the same press. */
+async function openTheCanvas() {
+  await escapeFrom('.settings', '.palette', '.askanything');
+  await dismissConnect();
+  if ((await window_.locator('.canvas').count()) > 0) return true;
+  const listed = window_.locator('.shelf__more', { hasText: /^Canvas$/ }).first();
+  if ((await listed.count()) > 0) {
+    await listed.click();
+  } else {
+    const folded = window_.locator('.shelf__act[aria-label="Canvas"]').first();
+    if ((await folded.count()) === 0) return false;
+    await folded.click();
+  }
+  return until(async () => (await window_.locator('.canvas').count()) > 0, 30_000);
+}
+
+/** What the canvas is showing, read in one go: a count taken beside a press is a
+ *  count of a different screen. */
+const canvasState = (window_) =>
+  window_.evaluate(() => {
+    const text = (sel) => (document.querySelector(sel)?.textContent ?? '').trim();
+    return {
+      titleLabel: document.querySelector('.canvas__title')?.getAttribute('aria-label') ?? null,
+      count: text('.canvas__count'),
+      start: text('.canvas__start'),
+      stop: text('.canvas__stop'),
+      marks: [...document.querySelectorAll('.canvas__face')].map((one) => one.getAttribute('aria-label') ?? ''),
+      cards: document.querySelectorAll('.canvas__card').length,
+      swept: document.querySelectorAll('.canvas__sweep').length,
+      lines: document.querySelectorAll('.canvas__line').length,
+      passed: document.querySelectorAll('.canvas__line--passed').length,
+      flow: document.querySelectorAll('.canvas__flow').length,
+      press: [...document.querySelectorAll('.canvas__press')].map((one) => one.textContent.trim()),
+      nothing: text('.canvas__nothingtitle'),
+      loops: document.querySelectorAll('.canvas__loop').length,
+      goes: text('.canvas__goingsaid'),
+      going: document.querySelectorAll('.canvas__going').length,
+      ended: document.querySelectorAll('.canvas__ended').length,
+      whole: document.querySelectorAll('.canvas__ended--whole').length,
+      endword: text('.canvas__endword'),
+      endcount: text('.canvas__endcount'),
+      endsaid: text('.canvas__endsaid'),
+      endopen: [...document.querySelectorAll('.canvas__endopen')].map((one) => one.textContent.trim()),
+      branches: document.querySelectorAll('.canvas__branch').length,
+      live: text('.canvas__live'),
+      railWidth: Math.round(document.querySelector('.canvas__rail')?.getBoundingClientRect().width ?? 0),
+      picktext: document.querySelector('.canvas__picktext')
+        ? getComputedStyle(document.querySelector('.canvas__picktext')).display
+        : null,
+      loopband: document.querySelector('.canvas__loopband')
+        ? getComputedStyle(document.querySelector('.canvas__loopband')).display
+        : null,
+      picks: document.querySelectorAll('.canvas__pick').length,
+      bandsWidth: Math.round(document.querySelector('.canvas__bands')?.getBoundingClientRect().width ?? 0),
+      tabs: [...document.querySelectorAll('.tabs__open')].map((one) => one.getAttribute('aria-label') ?? ''),
+      glyphs: document.querySelectorAll('.tabs__kind').length,
+      column: (() => {
+        const column = document.querySelector('.app__column');
+        return column === null ? 'gone' : getComputedStyle(column).display;
+      })(),
+    };
+  });
+
+/** One run of a flow, written rather than run: nothing in this run has a model
+ *  to answer it. `entries` is each block's state and what it came to. */
+function runOf(id, state, entries, lanes) {
+  const startedAt = SEED_AT;
+  const blocks = {};
+  for (const [block, one] of Object.entries(entries)) {
+    blocks[block] = {
+      state: one.state,
+      lane: 'lane-0',
+      startedAt,
+      endedAt: one.state === 'running' ? null : startedAt + 60_000,
+      said: one.said ?? null,
+      turns: one.turns ?? 0,
+      spent: one.spent ?? null,
+      rounds: 0,
+      result: null,
+      failure: one.failure ?? null,
+    };
+  }
+  const over = state === 'running' || state === 'needs-you';
+  return {
+    id,
+    state,
+    startedAt,
+    endedAt: over ? null : startedAt + 300_000,
+    lanes: lanes ?? [{ id: 'lane-0', workspaceId: 'w-1', conversationId: null, branch: null }],
+    blocks,
+    spent: SPENT,
+  };
+}
+
+const SEED_AT = 1_750_000_000_000;
+const SPENT = { minor: 412, currency: 'USD' };
+
+/** Three blocks in a line: an ask, the checks, and a gate to stop at. The same
+ *  shape in every row, so what changes between them is the run and nothing
+ *  else. */
+const SEED_BLOCKS = [
+  { id: 'block-1', kind: 'ask', name: 'Ask', says: 'Ship the empty state.', after: [], retries: 0 },
+  {
+    id: 'block-2',
+    kind: 'checks',
+    name: 'Checks',
+    says: 'Run this project’s checks. Fix anything that fails.',
+    after: ['block-1'],
+    retries: 2,
+  },
+  { id: 'block-3', kind: 'gate', name: 'Gate', says: '', after: ['block-2'], retries: 0 },
+];
+
+/** The one canvas a row puts down, under the id the row is about. */
+function oneCanvas(id, runs, updatedAt) {
+  return [
+    {
+      id,
+      name: 'Seed the canvas',
+      blocks: SEED_BLOCKS,
+      howFar: 'doing',
+      lanes: 'in-turn',
+      runs,
+      createdAt: SEED_AT,
+      updatedAt,
+    },
+  ];
+}
+
+/** A lane that opened a conversation, so Watch and Open have something to reach
+ *  for: the press is only drawn when the lane has one. */
+const A_LANE = [{ id: 'lane-0', workspaceId: 'w-1', conversationId: 'c-1', branch: null }];
+
+/** The shell's own sentence, said where the press was made rather than in a
+ *  sheet over the drawing. The press is only made when the pointer can reach it:
+ *  the strip along the top is fixed and sits over the canvas's own bar, and a
+ *  row that clicks through it would time out instead of saying so. */
+async function saidInside(says, expected, role) {
+  const reach = await hits(window_, '.canvas__start');
+  if (reach.hit !== true) {
+    bad(
+      `${says}: the press cannot be reached at all — a click at its centre lands on ${reach.landed ?? JSON.stringify(reach)}`,
+    );
+    note(
+      `${says}: so whether a refused Start says its sentence in the foot rather than in a sheet is not reachable through the window at this size; the refusal was checked by reading canStart`,
+    );
+    return;
+  }
+  await window_.locator('.canvas__start').first().click();
+  const there = await until(async () => (await window_.locator('.canvas__refused').count()) > 0, 6_000);
+  verdict(`${says}: the press says why rather than doing nothing`, there);
+  if (!there) {
+    bad(`${says}: pressing Start left nothing on screen`);
+    return;
+  }
+  const words = (await window_.locator('.canvas__refused').first().innerText()).trim();
+  note(`it says: ${words}`);
+  verdict(`${says}: and it is the sentence canStart gives ("${expected}")`, words === expected);
+  const seen = await window_.locator('.canvas__refused').first().getAttribute('role');
+  verdict(`${says}: the sentence is announced rather than only drawn (role ${String(seen)})`, seen === role);
+  verdict(
+    `${says}: it is not a sheet over the drawing`,
+    (await window_.locator('.sheet, .settings, .connectmodal').count()) === 0,
+  );
+}
+
+/** Every press the canvas's own bar carries, and whether the pointer can reach
+ *  it. The bar is drawn from the top of the column, and the strip along the top
+ *  is fixed over it, so this is the one arrangement where a control that looks
+ *  available is not. */
+const barReach = (window_) =>
+  window_.evaluate(() => {
+    const out = [];
+    for (const sel of [
+      '.canvas__title',
+      '.canvas__quietbtn',
+      '.canvas__lanespick',
+      '.canvas__start',
+      '.canvas__fillbtn',
+    ]) {
+      const el = document.querySelector(sel);
+      if (el === null) {
+        out.push({ sel, missing: true });
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      out.push({
+        sel,
+        y: Math.round(r.y),
+        over: at === el || el.contains(at) === true ? null : String(at?.className ?? '').split(' ')[0] ?? '',
+      });
+    }
+    return out;
+  });
+
+await row('canvas-empty', 'a canvas with nothing drawn on it, and the three ways to start one', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  if (!seedCanvas(project, [])) {
+    bad('the project has no id in the registry, so no canvas could be put where the shell reads one');
+    return;
+  }
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading, so the canvas was never reached');
+    return;
+  }
+  const opened = await openTheCanvas();
+  verdict('the row in the sidebar opens the canvas', opened);
+  if (!opened) {
+    await shot('canvas-empty');
+    return;
+  }
+  await pause(700);
+  await shot('canvas-empty');
+  const said = await canvasState(window_);
+  verdict(
+    `a canvas with nothing on it says so rather than drawing a blank board ("${said.nothing}")`,
+    said.nothing === 'Build a flow',
+  );
+  verdict(`it offers the templates somebody already worked out (${String(said.loops)})`, said.loops === 3);
+  verdict('and the board itself is empty', said.cards === 0 && said.lines === 0);
+  verdict(`the bar says there is nothing placed yet ("${said.count}")`, said.count === 'Nothing placed yet.');
+  verdict('Start is offered, and Stop is not', said.start === 'Start' && said.stop === '');
+  verdict(
+    `the foot says what to do about it ("${said.live}")`,
+    said.live === 'Place the steps, join them up, then start.',
+  );
+  verdict('the card that names the canvas is named for what it is', said.titleLabel === 'What this canvas is called');
+  const view = await viewport(window_);
+  const [canvasBox] = await boxes(window_, ['.canvas']);
+  verdict('the canvas is inside the window', inside(canvasBox, view));
+  const [rail] = await boxes(window_, ['.canvas__rail']);
+  note(
+    `the palette takes ${String(rail.w)}px of a ${String(said.bandsWidth)}px band; the words beside its marks are ${String(said.picktext)} at this width`,
+  );
+  await saidInside('nothing placed', 'Nothing to start. Place a block first.', 'status');
+  await layoutHolds('canvas, nothing drawn: ', { composer: false });
+});
+
+await row('canvas-drawn', 'a flow drawn and never started: the cards, the lines, and Start', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  if (!seedCanvas(project, oneCanvas('flow-seeded-drawn', [], SEED_AT + 3))) {
+    bad('no canvas could be seeded');
+    return;
+  }
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading');
+    return;
+  }
+  if (!(await openTheCanvas())) {
+    bad('the row in the sidebar did not open the canvas');
+    return;
+  }
+  await pause(900);
+  await shot('canvas-drawn');
+  const said = await canvasState(window_);
+  verdict(`every block somebody placed is drawn (${String(said.cards)} cards)`, said.cards === 3);
+  verdict(
+    `each card carries its own name and the state it is in (${said.marks.join(' | ')})`,
+    said.marks.length === 3 &&
+      said.marks.every((one) => /, (Ready|Waiting|Running|Needs you|Done|Failed|Stopped)$/.test(one)),
+  );
+  verdict(`a flow nothing has run is all Ready (${said.marks.join(' | ')})`, said.marks.every((one) => one.endsWith(', Ready')));
+  verdict(`every wait is drawn once, as one curve (${String(said.lines)} lines for two waits)`, said.lines === 2);
+  verdict('nothing has been through, so no line is drawn as passed', said.passed === 0);
+  verdict('and nothing is in flight on the board', said.flow === 0 && said.swept === 0);
+  verdict(`the bar counts the blocks and says none has started ("${said.count}")`, said.count === '3 blocks · not started');
+  verdict('Start is offered and Stop is not', said.start === 'Start' && said.stop === '');
+  verdict(
+    `the foot says what to do with it ("${said.live}")`,
+    said.live === 'Place the steps, join them up, then start.',
+  );
+  const view = await viewport(window_);
+  const [canvasBox] = await boxes(window_, ['.canvas']);
+  verdict('the canvas is inside the window', inside(canvasBox, view));
+  /* The bar is the one part of the canvas the strip along the top is drawn over,
+     because the strip is fixed and starts at the window's own top edge. A control
+     that looks available and is not is worse than one that is not drawn, so every
+     press on the bar is asked whether a pointer can reach it. */
+  const covered = (await barReach(window_)).filter((one) => one.missing !== true && one.over !== null);
+  verdict(
+    covered.length === 0
+      ? 'every press on the canvas’s own bar is reachable'
+      : `every press on the canvas's own bar is reachable (${String(covered.length)} are covered)`,
+    covered.length === 0,
+  );
+  for (const one of covered) {
+    bad(`${one.sel} at y=${String(one.y)} is covered by .${one.over}: a press there lands on the strip along the top`);
+  }
+  if (covered.length > 0) {
+    note(
+      `the strip along the top is fixed and .canvas is drawn from the window's own top edge, so the bar has no room of its own here; the board below it is unaffected`,
+    );
+  }
+  await window_.locator('.canvas__face').first().click();
+  const panel = await until(async () => (await window_.locator('.canvas__panel').count()) > 0, 10_000);
+  verdict('pressing a card opens the panel that says what it does', panel);
+  if (panel) {
+    const body = (await window_.locator('.canvas__panel').first().innerText()).replace(/\s+/g, ' ');
+    note(`the panel reads: ${body.slice(0, 170)}`);
+    verdict('the panel is about the block that was pressed', /Ask/.test(body));
+    /* The words live in a textarea, so they are the field's value rather than
+       anything the panel's own text contains. */
+    const words = await window_.locator('#canvas-block-says').inputValue();
+    verdict(`and it shows the words that would be sent ("${words}")`, words === 'Ship the empty state.');
+    verdict('which are editable in a field tied to a label', (await window_.locator('#canvas-block-says').count()) === 1);
+  }
+  await window_.keyboard.press('Escape');
+  await until(async () => (await window_.locator('.canvas__panel').count()) === 0, 6_000);
+  await layoutHolds('canvas, drawn: ', { composer: false });
+});
+
+await row('canvas-running', 'a run in flight: the sweep, the line carrying the work, and the foot', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  const run = runOf(
+    'run-1',
+    'running',
+    {
+      'block-1': { state: 'done', said: 'The empty state is in.', turns: 2, spent: SPENT },
+      'block-2': { state: 'done', said: 'Checks pass.', turns: 1, spent: SPENT },
+      'block-3': { state: 'running' },
+    },
+    A_LANE,
+  );
+  if (!seedCanvas(project, oneCanvas('flow-seeded-running', [run], SEED_AT + 6))) {
+    bad('no canvas could be seeded');
+    return;
+  }
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading');
+    return;
+  }
+  if (!(await openTheCanvas())) {
+    bad('the row in the sidebar did not open the canvas');
+    return;
+  }
+  await pause(900);
+  await shot('canvas-running');
+  const said = await canvasState(window_);
+  verdict(`the block being worked on is drawn as running (${String(said.swept)} sweep)`, said.swept === 1);
+  verdict(
+    `the line feeding it carries the work, and the two behind it have been through (${String(said.flow)} live, ${String(said.passed)} passed)`,
+    said.flow === 1 && said.passed === 1,
+  );
+  verdict(`a run in flight offers Stop where Start was ("${said.stop}")`, said.stop === 'Stop' && said.start === '');
+  verdict(
+    `the block that is going is offered a way to read it ("${said.press.join(' | ')}")`,
+    said.press.includes('Watch'),
+  );
+  verdict(`the foot says what is happening rather than only turning a ring ("${said.goes}")`, said.goes !== '');
+  verdict(
+    `the two blocks that finished say so on their cards (${said.marks.join(' | ')})`,
+    said.marks.filter((one) => one.endsWith(', Done')).length === 2,
+  );
+  verdict(
+    `the live region says exactly the sentence the foot draws ("${said.live.slice(0, 40)}")`,
+    said.live === said.goes,
+  );
+  verdict('nothing has ended, so no ending is drawn', said.ended === 0 && said.going === 1);
+  verdict(`the bar counts what is done and what is running ("${said.count}")`, said.count === '3 blocks · 2 done, 1 running');
+  verdict(`the canvas wears its own glyph in the strip (${String(said.glyphs)})`, said.glyphs === 1);
+  /* A canvas rides the same row as a conversation under its own name, so the tab
+     is asked for by that name rather than by the word "Canvas". */
+  verdict(
+    `and the tab is named for the canvas ("${said.tabs.join(' | ')}")`,
+    said.tabs.includes('Seed the canvas'),
+  );
+  if (!said.tabs.includes('Seed the canvas')) {
+    bad(`the canvas is in front and no tab carries its name: the strip reads ${said.tabs.join(' | ')}`);
+  }
+  note(`a canvas in front is drawn in place of the conversation: the column is ${said.column}`);
+  await layoutHolds('canvas, running: ', { composer: false });
+});
+
+await row('canvas-ended', 'a run that finished whole: the ending, the counts and the money', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  const run = runOf(
+    'run-2',
+    'done',
+    {
+      'block-1': { state: 'done', said: 'The empty state is in.', turns: 2, spent: SPENT },
+      'block-2': { state: 'done', said: 'Checks pass.', turns: 1, spent: SPENT },
+      'block-3': { state: 'done', said: 'Stopped here.', turns: 0, spent: SPENT },
+    },
+    A_LANE,
+  );
+  if (!seedCanvas(project, oneCanvas('flow-seeded-ended', [run], SEED_AT + 9))) {
+    bad('no canvas could be seeded');
+    return;
+  }
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading');
+    return;
+  }
+  if (!(await openTheCanvas())) {
+    bad('the row in the sidebar did not open the canvas');
+    return;
+  }
+  await pause(900);
+  await shot('canvas-ended');
+  const said = await canvasState(window_);
+  verdict(
+    `a run every block finished is drawn as whole (${String(said.whole)} whole of ${String(said.ended)} endings)`,
+    said.whole === 1 && said.ended === 1,
+  );
+  verdict(`the ending is named ("${said.endword}")`, said.endword === 'Finished');
+  verdict(
+    `the foot counts what ran, what it took and what it cost ("${said.endcount}")`,
+    /^3 blocks · 3 turns · \$4\.12$/.test(said.endcount),
+  );
+  verdict(`and names the last thing the run came to ("${said.endsaid.slice(0, 56)}")`, said.endsaid !== '');
+  verdict(
+    `the conversation is one press away, in the app's own words (${said.endopen.join(' | ')})`,
+    said.endopen.includes('Open the conversation'),
+  );
+  verdict('a lane that made no branch offers no branch to review', said.branches === 0);
+  verdict('nothing is in flight, so the foot has no going line', said.goes === '' && said.going === 0);
+  verdict(`the live region says the same word the ending does ("${said.live}")`, said.live === said.endword);
+  verdict('Start is offered again rather than Stop', said.start === 'Start' && said.stop === '');
+  verdict(
+    `every card is done (${String(said.marks.filter((one) => one.endsWith(', Done')).length)} of ${String(said.cards)})`,
+    said.marks.filter((one) => one.endsWith(', Done')).length === 3,
+  );
+  verdict(`every line has been through (${String(said.passed)} of ${String(said.lines)})`, said.passed === said.lines && said.lines === 2);
+  await layoutHolds('canvas, ended: ', { composer: false });
+});
+
+await row('canvas-drawn-dark', 'the same canvas in the dark palette, where nothing may be left on paper', async () => {
+  await ensureProjectOpen();
+  await sizeWindow(1100, 780);
+  const run = runOf(
+    'run-3',
+    'running',
+    {
+      'block-1': { state: 'done', said: 'The empty state is in.', turns: 2, spent: SPENT },
+      'block-2': { state: 'done', said: 'Checks pass.', turns: 1, spent: SPENT },
+      'block-3': { state: 'running' },
+    },
+    A_LANE,
+  );
+  if (!seedCanvas(project, oneCanvas('flow-seeded-dark', [run], SEED_AT + 12))) {
+    bad('no canvas could be seeded');
+    return;
+  }
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading');
+    return;
+  }
+  await chooseTheme('Dark');
+  await escapeFrom('.settings');
+  await window_.emulateMedia({ colorScheme: 'dark' });
+  await pause(400);
+  if (!(await openTheCanvas())) {
+    bad('the row in the sidebar did not open the canvas');
+    return;
+  }
+  await pause(900);
+  await shot('canvas-drawn-dark');
+  const mark = await window_.evaluate(() => document.documentElement.getAttribute('data-theme'));
+  verdict(`the document is stamped dark (${String(mark)})`, mark === 'dark');
+  const said = await canvasState(window_);
+  verdict(
+    `the board is drawn the same way in the dark palette (${String(said.cards)} cards, ${String(said.swept)} running)`,
+    said.cards === 3 && said.swept === 1,
+  );
+  /* Nothing on the board may be written in a colour that only works on paper:
+     the ink has to be a palette token, which is what a ratio against the ground
+     it really sits on catches. */
+  const looked = [
+    { sel: '.canvas__name', what: "a block's name" },
+    { sel: '.canvas__state', what: 'the state beside it' },
+    { sel: '.canvas__says', what: 'the first line of what it does' },
+    { sel: '.canvas__title', what: 'what the canvas is called' },
+  ];
+  const measured = await colours(window_, looked.map((one) => one.sel));
+  for (const [index, each] of measured.entries()) {
+    const label = looked[index].what;
+    if (each.missing === true) {
+      bad(`dark: ${label} is not on screen, so nothing about it could be measured`);
+      continue;
+    }
+    const needed = each.large === true ? 3 : 4.5;
+    verdict(
+      `dark: ${label} reads at ${String(each.ratio)}:1 (needs ${String(needed)})`,
+      each.ratio !== null && each.ratio >= needed,
+    );
+    if (each.ratio === null || each.ratio < needed) {
+      bad(`dark: ${label} is ${each.ink} on ${each.ground} — a colour that was chosen for paper`);
+    }
+  }
+  // And back, because the renderer keeps a hand-picked theme between loads and
+  // every row after this one would inherit it.
+  await chooseTheme('Light');
+  await escapeFrom('.settings');
+  await window_.emulateMedia({ colorScheme: null });
+  await until(
+    async () => (await window_.evaluate(() => document.documentElement.getAttribute('data-theme'))) === 'light',
+    6_000,
+  );
+  await layoutHolds('canvas, dark: ', { composer: false });
+});
+
+await row('canvas-drawn-900', 'the same canvas at a 900px window, where the palette folds to its marks', async () => {
+  await ensureProjectOpen();
+  if (!seedCanvas(project, oneCanvas('flow-seeded-narrow', [], SEED_AT + 15))) {
+    bad('no canvas could be seeded');
+    return;
+  }
+  await sizeWindow(900, 700);
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading');
+    return;
+  }
+  if (!(await openTheCanvas())) {
+    bad('the row in the sidebar did not open the canvas');
+    return;
+  }
+  await pause(900);
+  await shot('canvas-drawn-900');
+  const said = await canvasState(window_);
+  const view = await viewport(window_);
+  note(`at a ${String(view.w)}×${String(view.h)} page the canvas band is ${String(said.bandsWidth)}px wide`);
+  verdict(
+    `the palette folds to its marks rather than squeezing the board (${String(said.railWidth)}px of rail, the words beside them are ${String(said.picktext)})`,
+    said.railWidth === 56 && said.picktext === 'none',
+  );
+  if (said.railWidth !== 56) {
+    bad(`the palette is still ${String(said.railWidth)}px wide at ${String(said.bandsWidth)}px of board, so the drawing lost room it did not have to`);
+  }
+  verdict(`every kind still has its mark to press (${String(said.picks)})`, said.picks === 10);
+  /* A folded template is four marks nobody can tell apart from a block, so the
+     templates keep their words or they are not drawn at all. */
+  verdict(`the folded template list is not drawn (${String(said.loopband)})`, said.loopband === 'none');
+  verdict(`the board still holds every card it was given (${String(said.cards)})`, said.cards === 3);
+  /* The board is wider than the room at this size, and the surface is what
+     holds it: a card that hangs off is one the board pans to reach, and a card
+     that hangs off the *window* is one nothing can reach. */
+  const [canvasBox] = await boxes(window_, ['.canvas']);
+  const [rail] = await boxes(window_, ['.canvas__rail']);
+  const [surface] = await boxes(window_, ['.canvas__surface']);
+  const [firstCard] = await boxes(window_, ['.canvas__card']);
+  verdict('the canvas is inside the window', inside(canvasBox, view));
+  verdict('and so is the folded palette', inside(rail, view));
+  verdict('and the board that clips and pans the drawing', inside(surface, view));
+  verdict(
+    'with the first card drawn inside the board, so there is something to take hold of',
+    firstCard.missing !== true && firstCard.x >= surface.x - 1 && firstCard.y >= surface.y - 1,
+  );
+  note(`the board is ${String(surface.w)}px wide holding ${String(said.lines)} lines and ${String(said.cards)} cards`);
+  await layoutHolds('canvas at 900: ', { composer: false });
+  await sizeWindow(1100, 780);
+});
+
+await row('tokens', "the project's own values, read off its stylesheets and drawn read-only", async () => {
+  await ensureProjectOpen();
+  mkdirSync(join(project, 'src', 'styles'), { recursive: true });
+  writeFileSync(join(project, 'src', 'styles', 'tokens.css'), TOKENS_SHEET);
+  if (!(await reloadIntoProject())) {
+    bad('the project did not come back after reloading, so the sheet was never read');
+    return;
+  }
+  // Wide enough that the panel still has a column of its own: it gives way at
+  // 1067px with the shelf open.
+  await sizeWindow(1400, 900);
+  const band = await until(async () => (await window_.locator('.tokens').count()) > 0, 30_000);
+  if (!band) {
+    bad('the panel draws no Tokens band for a project whose stylesheet declares values in :root');
+    await shot('tokens');
+    return;
+  }
+  await shot('tokens');
+  const read = await window_.evaluate(() => {
+    const rows = [...document.querySelectorAll('.tokens__row')];
+    return {
+      rows: rows.length,
+      shelves: [...document.querySelectorAll('.tokens__caption')].map((one) =>
+        // The caption carries its own count in a span, so the title is the
+        // caption's first text node rather than all of it.
+        (one.firstChild?.textContent ?? one.textContent ?? '').trim(),
+      ),
+      cells: rows.map((row) => ({
+        name: (row.querySelector('.tokens__name')?.textContent ?? '').trim(),
+        value: (row.querySelector('.tokens__value')?.textContent ?? '').trim(),
+        well: row.querySelector('.tokens__well') !== null,
+        used: (row.querySelector('.tokens__used')?.textContent ?? '').trim(),
+        place: (row.querySelector('.tokens__place')?.textContent ?? '').trim(),
+        label: row.querySelector('.tokens__place')?.getAttribute('aria-label') ?? '',
+        title: row.querySelector('.tokens__place')?.getAttribute('title') ?? '',
+      })),
+      from: (document.querySelector('.tokens__from')?.textContent ?? '').trim(),
+      count: (document.querySelector('.tokens__count')?.textContent ?? '').trim(),
+      find: document.querySelector('.tokens__find')?.getAttribute('aria-label') ?? null,
+      width: Math.round(document.querySelector('.tokens')?.getBoundingClientRect().width ?? 0),
+      height: Math.round(document.querySelector('.tokens')?.getBoundingClientRect().height ?? 0),
+    };
+  });
+  const names = read.cells.map((one) => one.name);
+  verdict(`every value the stylesheet declares is a row (${String(read.rows)} rows, ${String(read.count)})`, read.rows >= 9);
+  verdict(
+    `read off the file rather than invented (${names.join(', ')})`,
+    ['--ink', '--paper', '--accent', '--space-2', '--radius-sm', '--shadow-card', '--text-sm', '--font-ui'].every((one) =>
+      names.includes(one),
+    ),
+  );
+  verdict(
+    `and sorted onto shelves somebody can read down (${read.shelves.join(', ')})`,
+    read.shelves.includes('Colour') && read.shelves.includes('Spacing') && read.shelves.length >= 3,
+  );
+  const colour = read.cells.find((one) => one.name === '--accent');
+  verdict(
+    `a colour gets a swatch as well as its value (--accent ${String(colour?.value ?? 'missing')})`,
+    colour !== undefined && colour.well === true,
+  );
+  if (colour === undefined) bad('no --accent row was drawn, so the swatch could not be checked');
+  const used = read.cells.find((one) => one.name === '--ink');
+  verdict(
+    `a value the project reaches for says how often (--ink used ${String(used?.used ?? '')} times)`,
+    used !== undefined && Number(used.used) > 0,
+  );
+  if (used === undefined || Number(used.used) === 0) {
+    bad('the Used column is blank for a value the sheet reaches for with var(), so nothing counted the uses');
+  }
+  verdict(`the reading says how wide it was ("${read.from}")`, /^From \d+ stylesheets?$/.test(read.from));
+  const place = read.cells.find((one) => one.place !== '');
+  verdict(
+    `every row says where the value is written ("${String(place?.place ?? '')}")`,
+    place !== undefined && /^.+\.css:\d+$/.test(place.place),
+  );
+  verdict(
+    `and that is a press, named for what it does ("${String(place?.label.slice(0, 44) ?? '')}")`,
+    place !== undefined && /^Open .+ in your editor$/.test(place.label) && place.title === 'Open in editor',
+  );
+  verdict(`the band has a search field named for what it finds ("${String(read.find)}")`, read.find === 'Find a value');
+  note(`the band is ${String(read.width)}×${String(read.height)}px inside the panel`);
+  verdict('and nothing in it edits anything', (await window_.locator('.tokens button:not(.tokens__place)').count()) === 0);
+
+  // The field filters, and a term that matches nothing says so rather than
+  // leaving a blank table behind.
+  const find = window_.locator('.tokens__find').first();
+  await find.fill('accent');
+  await pause(400);
+  const narrowed = await window_.locator('.tokens__row').count();
+  verdict(`typing narrows the table (${String(read.rows)} rows → ${String(narrowed)})`, narrowed > 0 && narrowed < read.rows);
+  await find.fill('nothing-is-called-this');
+  const none = await until(async () => (await window_.locator('.tokens__none').count()) > 0, 6_000);
+  verdict('a term that matches nothing says so rather than drawing a blank table', none);
+  if (none) note(`it says: ${(await window_.locator('.tokens__none').first().innerText()).trim()}`);
+  await find.fill('');
+  await pause(300);
+  await shot('tokens-filtered');
+  await layoutHolds('tokens band: ', { composer: false });
+
+  /* And absent rather than empty: a folder whose stylesheets declare nothing has
+     no design system to show, and a heading over a blank table would say only
+     that something is missing. Reached from the sidebar, which is where the
+     folders are listed. */
+  const elsewhere = window_.locator('.shelf__list .shelf__row', { hasText: PLAIN_PROJECT.slice(0, 30) }).first();
+  if ((await elsewhere.count()) === 0) {
+    bad('the folder with nothing declared in it is not in the sidebar, so absence could not be reached');
+    return;
+  }
+  await elsewhere.click();
+  const arrived = await until(
+    async () => (await window_.locator('.topbar__name').innerText()).includes(PLAIN_PROJECT.slice(0, 30)),
+    30_000,
+  );
+  verdict('the sidebar opens a folder with no stylesheet in it', arrived);
+  if (!arrived) return;
+  await until(async () => (await window_.locator('.overview').count()) > 0, 30_000);
+  await pause(900);
+  await shot('tokens-absent');
+  verdict(
+    `and the band is absent there rather than empty (${String(await window_.locator('.tokens').count())} bands)`,
+    (await window_.locator('.tokens').count()) === 0,
+  );
+  await window_.locator('.shelf__list .shelf__row', { hasText: PROJECT }).first().click();
+  await until(async () => (await window_.locator('.topbar__name').innerText()).includes(PROJECT), 30_000);
+  await sizeWindow(1100, 780);
 });
 
 /* -------------------------------------------------------------------------- */

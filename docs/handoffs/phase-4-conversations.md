@@ -169,10 +169,22 @@ move-not-double, idempotence, the refusal, the closed pane, the deleted chat, a 
 profile read with no views, and a view dropped when it points at a chat that is
 gone or at a pane that is not 0 or 1).
 
-The window's half is **not wired yet, and needs no registry work**: `bridge` calls
-`noteView` with `{ viewId, conversation, pane }` when a pane opens and reads
-`viewInPane(index, 0 | 1)` at launch. The registry owns the durability; the window
-owns when a pane opens and which pane it is.
+The window's half is **wired**: two channels, `viewsLook(where)` and
+`viewsNote(shown, where)` (`src/lib/ipc.ts`, `electron/preload.ts`,
+`electron/main.ts`'s handlers beside `ownStyles`), and the window calls them in
+`src/App.tsx`. The whole set is written on every change, 400 ms held back, because
+closing a pane has to be able to take its view away: a leftover record would open
+again at the next launch as a window nobody left, so `viewsNote` reconciles the
+set and drops a view no pane claims. `viewsLook` answers pane 0 and pane 1, which
+is the question a launch asks. At launch the window keeps the conversation the
+shell already opened and adds the other pane only when it is still a conversation
+this project has (`panesFrom` in `src/domain/views.ts`), so a record pointing at a
+deleted chat leaves an ordinary single-pane window rather than a pane that fails
+on the press. The mock bridge keeps the same set in memory, so a browser tab and
+the gallery draw the split without a profile. Evidence: `tests/panes.test.ts`, 29
+(6 new: the record for one pane and for two, nothing for an empty pane, the
+round trip, an other-pane chat the project no longer has, and the window's two
+calls).
 
 **Rapid New presses: a retry past the window lands on the chat it asked for
 (S12).** The window names each press and the shell keeps that answer for a minute
@@ -305,9 +317,9 @@ all passing: `tests/draft-kept.test.ts` 15,
 
 | Item | Finding | What is missing |
 | --- | --- | --- |
-| Second view attaches to one runtime | 4.2 | **The registry half is done; the window's half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), one runtime behind two views is structural (`Sessions` is keyed by conversation, `src/domain/conversations.ts:261`, and a pane holds an address rather than a session, so opening the same chat twice asks for the same one), and the view record is now durable: `WorkspaceIndex.views` with `noteView`/`viewInPane`/`dropView`/`dropViewsOf` and schema version 2 (see Done). What is missing is the window calling `noteView` when a pane opens and reading `viewInPane` at launch — no registry work is left for it |
+| Second view attaches to one runtime | 4.2 | **Done.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 29, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), one runtime behind two views is structural (`Sessions` is keyed by conversation, `src/domain/conversations.ts:261`, and a pane holds an address rather than a session, so opening the same chat twice asks for the same one), and the view record is both durable and wired: `WorkspaceIndex.views` with `noteView`/`viewInPane`/`dropView`/`dropViewsOf` and schema version 2, the `viewsLook`/`viewsNote` channels, and the window writing the whole set when a pane opens and reading it back at launch (see Done) |
 
-Exit criteria: still not met, and closer. Resume after close/restart works through
+Exit criteria: met for the pane half. Resume after close/restart works through
 the existing session path; "history includes main-folder and isolated chats in one
 list" is implemented and has no Electron-level test. Unsaved drafts survive
 switching and A's send completion does not clear B (`T26`,

@@ -27,10 +27,12 @@ import {
   isPinned,
   onePane,
   paneAt,
+  panesFrom,
   panesShowing,
   pin,
   pinnedWords,
   showIn,
+  shownNow,
 } from "../src/domain/views";
 
 const here = fileURLToPath(new URL("..", import.meta.url));
@@ -233,5 +235,48 @@ describe("what the window does with it", () => {
     expect(BAND).toContain('role="tablist"');
     expect(BAND).toContain('ArrowRight');
     expect(BAND).toContain('ArrowLeft');
+  });
+});
+
+describe("what a pane was showing, so a launch can put it back", () => {
+  it("writes the panes that hold a conversation, numbered from the left", () => {
+    expect(shownNow(onePane("chat-a"))).toEqual([
+      { viewId: expect.any(String), conversation: "chat-a", pane: 0 },
+    ]);
+    const pair = two();
+    expect(shownNow(pair)).toEqual([
+      { viewId: expect.any(String), conversation: "chat-a", pane: 0 },
+      { viewId: expect.any(String), conversation: "chat-b", pane: 1 },
+    ]);
+  });
+
+  it("writes nothing for a pane with no conversation in it", () => {
+    const empty = onePane();
+    expect(shownNow(empty)).toEqual([]);
+  });
+
+  it("comes back as the chat the shell opened on, plus the other pane", () => {
+    const shown = shownNow(two());
+    const back = panesFrom(shown, ["chat-a", "chat-b"], "chat-a");
+    expect(back.open.map((one) => one.conversation)).toEqual(["chat-a", "chat-b"]);
+    expect(back.focused).toBe(back.open[0]?.id);
+  });
+
+  /* A record left behind by a chat that is gone is a pane that fails the moment
+   *  somebody presses it, so it is left out rather than opened. */
+  it("leaves out an other-pane chat this project no longer has", () => {
+    const back = panesFrom(shownNow(two()), ["chat-a"], "chat-a");
+    expect(back.open.map((one) => one.conversation)).toEqual(["chat-a"]);
+  });
+
+  it("reads as an ordinary single-pane window when there is one record", () => {
+    const back = panesFrom(shownNow(onePane("chat-a")), ["chat-a"], "chat-a");
+    expect(back.open).toHaveLength(1);
+  });
+
+  it("is written by the window, and read on the way in", () => {
+    expect(APP).toContain("bridge.viewsNote(shown");
+    expect(APP).toContain("bridge.viewsLook({ project: opened.value.path })");
+    expect(APP).toContain("panesFrom(answer.value,");
   });
 });

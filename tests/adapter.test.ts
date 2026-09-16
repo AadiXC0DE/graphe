@@ -729,7 +729,15 @@ describe('the stream the app sees', () => {
     relay.fromPi({ type: 'agent_settled' });
 
     expect(events.some((event) => event.type === 'error')).toBe(false);
-    expect(events.map((event) => event.type)).toEqual(['message-delta', 'message-end', 'settled']);
+    // The wait is announced now, which is the point of the line: a turn that is
+    // backing off used to draw as a turn that had stopped. The retry ends when
+    // Pi says it did, and this stream is one that recovers.
+    expect(events.map((event) => event.type)).toEqual([
+      'holding',
+      'message-delta',
+      'message-end',
+      'settled',
+    ]);
   });
 
   it('reports an API error only when the agent really settles without recovering', () => {

@@ -86,8 +86,9 @@ export type ConversationRecord = {
   updatedAt: number;
   archived: boolean;
   /** Where this came from, when it was made by continuing or forking another
-   *  conversation. A link, never a copy of its history. */
-  lineage: { from: string; kind: 'continue' | 'fork' } | null;
+   *  conversation, or opened by a canvas lane. A link, never a copy of its
+   *  history. */
+  lineage: { from: string; kind: 'continue' | 'fork' | 'flow' } | null;
   /** The transcript branch somebody was last looking at. */
   branchLeaf: string | null;
   /** What this conversation chose for itself, over the global defaults. */
@@ -612,7 +613,7 @@ export type NewConversation = {
   conversationId: string;
   workspaceId: string;
   title?: string;
-  lineage?: { from: string; kind: 'continue' | 'fork' } | null;
+  lineage?: { from: string; kind: 'continue' | 'fork' | 'flow' } | null;
   now: number;
 };
 
@@ -870,7 +871,14 @@ function readConversation(
   const modelId = text(model['modelId']);
   const lineage = asRecord(one['lineage']);
   const from = text(lineage['from']);
-  const kind = lineage['kind'] === 'fork' ? 'fork' : lineage['kind'] === 'continue' ? 'continue' : null;
+  const kind =
+    lineage['kind'] === 'fork'
+      ? 'fork'
+      : lineage['kind'] === 'continue'
+        ? 'continue'
+        : lineage['kind'] === 'flow'
+          ? 'flow'
+          : null;
   return {
     conversationId,
     projectId: text(one['projectId']) ?? workspaces[workspaceId]?.projectId ?? '',

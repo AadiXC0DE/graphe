@@ -380,7 +380,9 @@ describe('every conversation gets the advisor, including a canvas one', () => {
   it('is passed at every place a session is opened', () => {
     // A canvas opens its conversation through the same handler a tab does, so
     // "does the canvas use the advisor" is the same question as "does chat".
-    const opens = main.match(/createSession\(\{/g)?.length ?? 0;
+    // Every session goes through `openSession`, which picks the process and
+    // builds the same options either way.
+    const opens = main.match(/openSession\(\{/g)?.length ?? 0;
     const carried = main.match(/advisor: (?:prefs\.advisor|\(await preferences\(\)\)\.all\(\)\.advisor)/g)?.length ?? 0;
     expect(opens).toBeGreaterThan(0);
     expect(carried).toBe(opens);
@@ -388,7 +390,7 @@ describe('every conversation gets the advisor, including a canvas one', () => {
 
   it('and so is how long it thinks', () => {
     const paced = main.match(/advisorThinking: (?:prefs\.advisorThinking|\(await preferences\(\)\)\.all\(\)\.advisorThinking)/g)?.length ?? 0;
-    expect(paced).toBe(main.match(/createSession\(\{/g)?.length ?? 0);
+    expect(paced).toBe(main.match(/openSession\(\{/g)?.length ?? 0);
   });
 });
 

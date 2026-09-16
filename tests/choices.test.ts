@@ -165,6 +165,7 @@ describe('D1 — the real name of what just happened', () => {
           editor: null,
           terminal: null,
           appearance: defaultAppearance,
+          runtime: 'in-process',
           showMe: true,
           model: null,
           thinking: {},

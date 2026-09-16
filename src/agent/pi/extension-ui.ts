@@ -207,7 +207,9 @@ export type KnownAddon = { where: string; name: string };
  * Null rather than a guess: a notice fired from a timer, or from a promise chain
  * that has already left the add-on, has no frame in any of these files, and
  * naming whichever add-on happens to be loaded would be a lie a person could act
- * on.
+ * on. The same goes for a frame two add-ons could each claim — one add-on
+ * unpacked inside another's folder, say — because a wrong name here sends
+ * somebody to turn off the add-on that did nothing.
  */
 export function whoCalled(
   stack: string | undefined,
@@ -226,13 +228,51 @@ export function whoCalled(
     // The entry file, or any module in the same folder: an add-on's own files
     // still are the add-on. The separator matters — a folder called `notice` is
     // not the add-on called `notices`.
-    const inside = known.find((one) => {
+    const inside = known.filter((one) => {
       const folder = one.where.slice(0, one.where.lastIndexOf('/') + 1);
       return folder !== '' && where.startsWith(folder);
     });
-    if (inside !== undefined) return inside.name;
+    /* Two answers is no answer. A folder holding a second add-on's folder puts
+       both of their names on the same frame, and picking either — by order, by
+       the longer path — is naming somebody who may not have called. */
+    if (inside.length > 1) return null;
+    if (inside.length === 1) return inside[0]!.name;
   }
   return null;
+}
+
+/** What to call the add-on behind a notice, or the words for one nobody could
+ *  name. A notice that begins "an add-on" is worse than one that begins with a
+ *  name, and both are better than a name nobody could have worked out. */
+function whoName(who: string | null): string {
+  return who === null || who === '' ? 'An add-on' : who;
+}
+
+/**
+ * What is said about an add-on that asked for something this window cannot do.
+ *
+ * The name is the subject of the sentence, the way every other notice about an
+ * add-on here reads, so somebody knows which one to turn off.
+ */
+export function saysAddonCannot(
+  who: string | null,
+  method: string,
+  how: 'terminal' | 'window',
+): string {
+  return how === 'terminal'
+    ? `${whoName(who)} asked for ${method}, which needs a terminal window. Nothing was drawn for it, and it was told so.`
+    : `${whoName(who)} asked for something this window could not do: ${method}.`;
+}
+
+/** What is said about an add-on that fell over inside one of its own hooks.
+ *  Pi hands the host the path it happened in, which is the one thing that names
+ *  the add-on without guessing at it. */
+export function saysAddonFailed(
+  who: string | null,
+  event: string | null,
+  because: string | null,
+): string {
+  return `${whoName(who)} failed during ${event ?? 'a step'}: ${because ?? 'it did not say why'}`;
 }
 
 /** What the face is built over: the two halves above, and where a notice goes. */
@@ -240,7 +280,9 @@ export type UiFaceHost = {
   dialogs: DialogHost;
   terminal: UnsupportedTerminal;
   /** Where a notice goes. The severity travels in the words: a warning nobody
-   *  can tell from a note is not a warning. */
+   *  can tell from a note is not a warning. The add-on's name travels with
+   *  them, folded in by the face, because the host's reader of a notice is a
+   *  person and not a field. */
   notify: (what: string) => void;
   /**
    * What to call the add-on making this call, or null when nothing recognisable

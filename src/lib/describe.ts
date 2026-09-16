@@ -236,6 +236,8 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Taking the checklist off the screen' };
     case 'read_map':
       return { label: 'Reading the shape of the project' };
+    case 'read_tokens':
+      return { label: 'Reading the project’s own values' };
     case 'read_diff':
       return { label: 'Reading the changes so far' };
     case 'read_document':

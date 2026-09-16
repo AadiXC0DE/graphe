@@ -23,10 +23,10 @@ they sit in `CHANNEL`, marked `push`.
 
 ## The shape of the surface
 
-- **202 channels**: **184** the window asks for, **18** the shell pushes.
-- By scope, over the 184 asked for: **52 app-wide**, **54 project**, **38 conversation**, **40 workspace**.
-- **125** mutate, **77** only read.
-- **208 call sites** under `src/**` across 168 channels: **138** name a target, **70** have none to name. The other 34 channels are called from nowhere.
+- **211 channels**: **192** the window asks for, **19** the shell pushes.
+- By scope, over the 192 asked for: **53 app-wide**, **61 project**, **38 conversation**, **40 workspace**.
+- **133** mutate, **78** only read.
+- **215 call sites** under `src/**` across 176 channels: **138** name a target, **70** have none to name. The other 34 channels are called from nowhere.
 
 Counted by reading `CHANNEL` for the names and scanning every `.ts`/`.tsx` under `src/` for
 `bridge.<name>(`; the method is in "The count".
@@ -325,6 +325,16 @@ working in different copies share one watched folder.
 | 201 | `graphe:caught-up` | project | trailing `Where` (`{project}`) | `projectAt(whereIn(args))` at 9844, `file.for(open.path)` at 9847, then `file.keep(open.path, { ...held, design: held.latest })` at 9849 | yes | project | — none in `src/**` |
 | 202 | `graphe:stop-following` | project | trailing `Where` (`{project}`) | `projectAt(whereIn(args))` at 9853, then `await (await followed()).forget(open.path);` at 9855 | yes | project | — none in `src/**` |
 
+| 203 | `graphe:flow-list` | project | trailing `Where` (`{project}`) | `projectAt(whereIn(args))` at 12415, then `FlowFile.read(projectId, userData, open.path)` — keyed by the registry's projectId, not by the path | no | project | + `src/App.tsx:1992` |
+| 204 | `graphe:flow-save` | project | positional flow + trailing `Where` | `projectAt(where)` at 12431, then `FlowFile.read`/`FlowFile.write` — the stored `runs` are re-attached before the write, so a save from the window never overwrites them | yes | project | + `src/App.tsx:2053` |
+| 205 | `graphe:flow-delete` | project | positional id + trailing `Where` | `projectAt(whereIn(args))` at 12456, then `FlowFile.write(projectId, userData, withoutFlow(held, id))` | yes | project | — none in `src/**` |
+| 206 | `graphe:flow-start` | project | positional id + trailing `Where` | `projectAt(where)` at 12474, then `canStart(flow, await standingAt(open.path))`, `newRunId()` and `beginRun(...)` — the run is registered before the first wave | yes | run | + `src/App.tsx:2122` |
+| 207 | `graphe:flow-stop` | project | positional id + trailing `Where` | `projectAt(whereIn(args))` at 12502, then `liveRuns.get(id)` and `stopped(live.flow, live.run, live.port)` — the live run is found by flow id, not re-derived | yes | run | + `src/App.tsx:2134` |
+| 208 | `graphe:flow-continue` | project | positional id + block + trailing `Where` | `projectAt(whereIn(args))` at 12515, then `continued(live.flow, live.run, live.port, block)` and `drive(...)` — a gate is the one thing a run stops for | yes | run | + `src/App.tsx:2145` |
+| 209 | `graphe:flow-resume` | project | positional id + trailing `Where` | `projectAt(where)` at 12537, then `resumed(last, port)` and `beginRun(...)` — the lanes are kept, so every worktree is the one the run was already in | yes | run | + `src/App.tsx:2156` |
+| 210 | `graphe:flow-changed` | push | nothing: a push — the payload is `{ project, flow }` | NO handler in main.ts; main sends it in `function pushFlow(project, flow)` at 4452 — `mainWindow.webContents.send(CHANNEL.flowChanged, { project, flow })` — on every run change | no | run | — none in `src/**` |
+| 211 | `graphe:tokens-read` | workspace | trailing `Where` (`{project, conversation?}`) | `projectAt(where)` at 12567, then `readTokensFor(folderFor(open, where))` — the lane's own folder, so a worktree reads the sheet it is styled by | no | workspace | · `src/App.tsx:718` |
+
 ## The count
 
 **Zero unqualified mutation callers remain.** The 24 this inventory found — 18 that could be
@@ -337,7 +347,7 @@ Counted by scanning every `.ts` and `.tsx` under `src/` (332 files) for `bridge.
 are called under another name — `answerExtension`, `continueConversation`, `forkConversation`,
 `archiveConversation`, `openPrReview`, `preparePrWorktree` — so they are scanned under the name
 `electron/preload.ts` gives them:
-208 call sites, and not one of them omits the target argument where the channel takes
+215 call sites, and not one of them omits the target argument where the channel takes
 one. No caller in the window is left unnamed.
 
 Not counted, because there is no target to name: the **27 mutations** listed above — **24 app-wide**

@@ -67,6 +67,7 @@ import { notHere, runHelper } from '../../share/run';
 import { readdir, realpath } from 'node:fs/promises';
 import {
   NOTES_CARRIED,
+  NOTICE_ENTRY,
   WORTH_KEEPING,
   cutAfter,
   eventsFromEntries,
@@ -99,6 +100,8 @@ import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
 import { drawnResult, type Renderable } from './tool-drawing';
 import {
   dialogsOver,
+  saysAddonCannot,
+  saysAddonFailed,
   uiContextOver,
   unsupportedTerminal,
   whoCalled,
@@ -1048,6 +1051,11 @@ export type CreateSessionOptions = {
    *  decides and then `in-process`, which is what every copy of the app has
    *  always done — see `runtimeChoice` in `./child-session`. */
   runtime?: 'child' | 'in-process';
+  /** This conversation's process was given back because nothing was being
+   *  asked of it. The runtime is gone until the next prompt starts another
+   *  one, which the shell says on the shelf. Only ever called on the child
+   *  path, where a conversation really does have a process to give back. */
+  onRuntimeUnloaded?: () => void;
 };
 
 /**
@@ -3068,6 +3076,20 @@ const MOST_AFTER_SAYINGS = 3;
   // ever call. The Guard still sees every one of these calls, and a name it has
   // no row for still stops to ask.
   const loadedExtensions = loader.getExtensions().extensions as readonly LoadedExtension[];
+  /**
+   * Everything about an add-on said before the session exists to record it.
+   *
+   * A hook overrunning, a policy that could not be honoured and two add-ons
+   * wanting one tool name are all decided here, while the session that would
+   * write them down is still being built. They are the notices most likely to
+   * arrive with nobody watching — that is what opening a conversation is — so
+   * they are held and written once there is a record to write them into.
+   */
+  const saidAboutAddons: { what: string; because?: string }[] = [];
+  const sayAboutAddonBefore = (what: string, because?: string): void => {
+    saidAboutAddons.push(because === undefined ? { what } : { what, because });
+    options.onEvent({ type: 'notice', what, ...(because === undefined ? {} : { because }) });
+  };
   /*
    * Two rules that hold for anything installed, now or later.
    *
@@ -3087,12 +3109,11 @@ const MOST_AFTER_SAYINGS = 3;
     withHookBudget(loader.getExtensions(), (over) => {
       // Not "and was left to it": a handler past its budget may still be
       // running, and saying otherwise makes a live handler look finished.
-      options.onEvent({
-        type: 'notice',
-        what: over.stopped
+      sayAboutAddonBefore(
+        over.stopped
           ? `${over.extension} took too long on ${over.event} and has stopped.`
           : `${over.extension} took too long on ${over.event}, and may still be running.`,
-      });
+      );
     });
   };
   budgetHooks();
@@ -3105,7 +3126,7 @@ const MOST_AFTER_SAYINGS = 3;
        out loud rather than quietly giving them the whole add-on: the switch
        they set is not the switch they got. */
     if (options.addonsChosen === 'tools-only' && verdict === 'on') {
-      options.onEvent({ type: 'notice', what: saysToolsOnlyRefused(card) });
+      sayAboutAddonBefore(saysToolsOnlyRefused(card));
     }
     if (!dropsLifecycleHooks(verdict)) continue;
     const handlers = (one as { handlers?: Map<string, unknown[]> }).handlers;
@@ -3525,7 +3546,7 @@ const MOST_AFTER_SAYINGS = 3;
     wantedBy,
   );
   for (const one of apart.conflicts) {
-    options.onEvent({ type: 'notice', what: saysToolConflict(one) });
+    sayAboutAddonBefore(saysToolConflict(one));
   }
   // The name comes off the registry of the add-on that actually lost it — its
   // claim's position, because two add-ons can read the same on screen. Getting
@@ -3594,21 +3615,67 @@ const MOST_AFTER_SAYINGS = 3;
    * every confirmation and drops notifications, so an installed add-on that
    * asked a question carried on with an answer nobody gave — while the person
    * never saw the question. The dialog half is real here; the half that is a
-   * terminal says so out loud. */
+   * terminal says so out loud.
+   *
+   * Who could have made a call, and which of them did. Pi's `notify` is the one
+   * UI method it passes through without an origin, so the stack at the moment
+   * of the call is the only account of who asked — see `whoCalled`.
+   *
+   * The paths are resolved first, because a stack never names a symlink: Node
+   * reports the real file it loaded, and on this platform `/tmp` and `/var` are
+   * both links. Compared unresolved, an add-on under one of them is an add-on
+   * nothing can name. */
+  const addonsKnown = await Promise.all(
+    discovered.map(async (one) => ({
+      where: await realpath(one.where).catch(() => one.where),
+      name: whoAt(one.where),
+    })),
+  );
+  const whoNow = (): string | null => whoCalled(new Error().stack, addonsKnown);
+
+  /**
+   * Say something about an add-on, and write it down.
+   *
+   * A notice used to live only as long as the window that drew it: one arriving
+   * while a conversation was closed, or while another chat was in front, was
+   * gone with nothing anywhere to read it. Pi's record keeps it, in the entry
+   * an extension may write that the model never reads, so opening the
+   * conversation again brings the line back exactly as it was said.
+   *
+   * The write is best effort and the sentence is not: a notice that could not be
+   * written down is still a notice somebody should hear, and losing the record
+   * of one is not a reason to lose the words.
+   */
+  const recordNotice = (what: string, because?: string): void => {
+    try {
+      manager.appendCustomEntry(NOTICE_ENTRY, {
+        what,
+        ...(because === undefined ? {} : { because }),
+      });
+    } catch {
+      // Nothing left to do about it, and the caller's sentence is the real job.
+    }
+  };
+  /* Everything decided while the session was still being built, written in the
+     order it was said, before a single live notice can arrive. The words were
+     already handed to the window on the way past; this is only the record of
+     them, so nothing is said twice. */
+  for (const one of saidAboutAddons) {
+    recordNotice(one.what, one.because);
+  }
+
+  const sayAboutAddon = (what: string, because?: string): void => {
+    recordNotice(what, because);
+    options.onEvent({ type: 'notice', what, ...(because === undefined ? {} : { because }) });
+  };
+
   const sayUnsupported = (kind: string, method: string): void => {
-    options.onEvent({
-      type: 'notice',
-      what:
-        kind === 'terminal'
-          ? `An add-on asked for ${method}, which needs a terminal window. Nothing was drawn for it, and it was told so.`
-          : `An add-on asked for something this window could not do: ${method}.`,
-    });
+    sayAboutAddon(saysAddonCannot(whoNow(), method, kind === 'terminal' ? 'terminal' : 'window'));
   };
   const dialogs = dialogsOver(
     options.ask ?? (async (ask: ExtensionAsk) => cancelledLike(ask)),
   );
   const terminal = unsupportedTerminal(sayUnsupported);
-  const addonsKnown = discovered.map((one) => ({ where: one.where, name: whoAt(one.where) }));
   try {
     await session.bindExtensions({
       uiContext: uiContextOver({
@@ -3617,26 +3684,28 @@ const MOST_AFTER_SAYINGS = 3;
         notify: (what) => {
           // Never dropped, and never dressed up: a warning is drawn as a
           // warning, and the add-on's own words are what is said.
-          options.onEvent({ type: 'notice', what });
+          sayAboutAddon(what);
         },
-        who: () => whoCalled(new Error().stack, addonsKnown),
+        who: whoNow,
       }),
       mode: 'rpc',
       // An add-on that falls over is reported rather than swallowed: the
       // person sees which one, and the run carries on without it.
       onError: (failure: { extensionPath?: string; event?: string; error?: string }) => {
-        options.onEvent({
-          type: 'notice',
-          what: `An add-on failed during ${failure.event ?? 'a step'}: ${failure.error ?? 'it did not say why'}`,
-        });
+        sayAboutAddon(
+          saysAddonFailed(
+            failure.extensionPath === undefined ? null : whoAt(failure.extensionPath),
+            failure.event ?? null,
+            failure.error ?? null,
+          ),
+        );
       },
     });
   } catch (cause) {
     // No UI is worse than no add-on; the conversation works either way.
-    options.onEvent({
-      type: 'notice',
-      what: `Add-ons could not be given a way to ask questions here: ${cause instanceof Error ? cause.message : String(cause)}`,
-    });
+    sayAboutAddon(
+      `Add-ons could not be given a way to ask questions here: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
 
   running = session;

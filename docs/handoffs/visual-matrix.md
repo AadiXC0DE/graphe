@@ -57,10 +57,12 @@ the same way, so nothing below is an artefact of the packaged bundle being older
 than the tree. Both `results/` folders are ignored by git; the screenshots are
 scratch and will be written again by the next run.
 
-The fixture: two projects. `shop-front-redesign` (a normal folder, 146 files
+The fixture: three projects. `shop-front-redesign` (a normal folder, 146 files
 including a path longer than the panel that lists it) is where everything runs;
 `a-project-with-a-name-long-enough-that-it-cannot-fit-in-the-shelf` is the
-long-name case, kept separate so that row has one variable in it. The file panel
+long-name case, kept separate so that row has one variable in it; and
+`a-folder-nothing-is-declared-in` declares no stylesheet at all, so the tokens row
+can check the band is absent rather than empty. The file panel
 is on (`showFiles`), the theme, zoom and window size are set the way a person
 sets them, and the app is driven only through its own controls and DOM.
 
@@ -109,6 +111,156 @@ is a gate nobody can skip by accident.
 | file-tree horizontal scroll | the tree scrolled to the bottom with long paths, no sideways scroll, no row past the panel | Passes |
 | terminal resize | the drawer opened, then the window resized | Passes — the screen follows (376×125 → 76×120) and stays inside |
 | layout persistence | size, theme, file panel after quit and relaunch; a window remembered off-screen | Passes |
+| canvas, nothing drawn | the sidebar's own row opens it; the empty board says "Build a flow", offers the three templates, and Start refuses with `Nothing to start. Place a block first.` in the foot rather than a sheet | Added in 2E — see below |
+| canvas, drawn | a seeded three-block flow: three cards, each `aria-label` ending in its own state word, one curve per wait, all Ready, `3 blocks · not started`, Start offered and Stop not, and the card's panel opening on the words that would be sent | Added in 2E |
+| canvas, running | a seeded run in flight: exactly one `.canvas__sweep`, one line `--passed` and one carrying the work, Stop where Start was, `Watch` on the going card, the foot's sentence equal to the `role="status"` region's, `3 blocks · 2 done, 1 running`, and the canvas's glyph and name in the tab strip | Added in 2E |
+| canvas, ended | a seeded run every block finished: `.canvas__ended--whole`, `Finished`, `3 blocks · 3 turns · $4.12`, the last thing said with the block that said it, `Open the conversation`, no branch and no going line, and every line drawn as passed | Added in 2E |
+| canvas, dark | the same running canvas in the dark palette, with the card's name, state and first line measured against the surface they sit on | Added in 2E |
+| canvas, 900px | the same drawn canvas at a 900px window: the palette folded to 56px of marks with the words hidden, the templates not drawn at all, and the board and its cards still inside the window | Added in 2E |
+| tokens | a seeded `src/styles/tokens.css`: every declared value a row, on named shelves, a swatch for a colour, a Used count for a value reached for with `var()`, `file:line` as a press named for what it does, the search field narrowing and saying when nothing matches, and the band absent rather than empty in a folder that declares nothing | Added in 2E |
+
+### What the canvas and tokens rows found
+
+Seven rows were added in phase 2E: `canvas-empty`, `canvas-drawn`,
+`canvas-running`, `canvas-ended`, `canvas-drawn-dark`, `canvas-drawn-900` and
+`tokens`. They are the plan's "canvas empty, drawn, running, ended, in both themes
+and at 900 px" plus "a visual matrix row for it" for the band. Run with `--built`
+on this machine, each on its own:
+
+```
+node scripts/visual-matrix.mjs --built --only=canvas   # 6 rows, 78 checks, 10 failed
+node scripts/visual-matrix.mjs --built --only=tokens   # 1 row, 16 checks, 0 failed
+```
+
+The sub-runs that produced the numbers quoted below are
+`results/2026-09-16T12-43-42-788Z/` (`tokens`, 16 checks, 0 failed),
+`results/2026-09-16T12-44-34-329Z/` (`canvas-drawn-dark`, 8 checks, 0 failed) and
+`results/2026-09-16T12-44-13-691Z/` onwards for the rest. **Ten failures, from two
+causes, both outside this package**: the canvas's own bar is drawn under the strip
+along the top, and the bar cannot fit the canvas it is given. Neither is a defect
+this package may fix — `src/components/canvas/Canvas.css` belongs to 2C — so both
+are reported below with the measurement and the file:line, and the rows report them
+as failing checks rather than crashing on them.
+
+**C1. Every control in the canvas's own bar is unreachable by pointer.** The strip
+along the top is `position: fixed; top: 0; z-index: 3` and 38px tall
+(`src/App.css:97,113`), and `.canvas` is drawn from the window's own top edge, so
+the strip paints over the bar's top 38px. `document.elementFromPoint` at the centre
+of each press lands on the strip instead:
+
+| Press in the bar | What a click actually hits |
+| --- | --- |
+| `.canvas__title` (the canvas's name) | `span.tabs__title` |
+| `.canvas__quietbtn` (Undo, Redo) | `span.tabs__title` |
+| `.canvas__lanespick` (`In turn` / `In worktrees`) | `span.tabs__title` |
+| `.canvas__start` | `button.topbar__name` |
+| `.canvas__fillbtn` (`Fill window`) | `button.topbar__name` |
+
+`canvas-drawn` reports all five at once (`canvas-drawn.png`), and `canvas-empty`
+reports the same for Start (`canvas-empty.png`). A person pressing anywhere in the
+bar's upper half gets the tab strip or the project menu. The cause is the offset
+`.app__column` carries and `.canvas` does not: the column is padded by
+`calc(var(--topbar-height) + var(--space-3))` to clear the fixed strip
+(`src/App.css:143`), and a canvas is a *sibling* of that column rather than inside
+it, so it never picks the offset up. The one press the plan's 2.6 leans on
+hardest — Start — is the one that cannot be made. This was found by a Playwright
+click timing out at 30s, which is why the row now asks whether the press is
+reachable before pressing it, and says so when it is not.
+`src/components/canvas/Canvas.css` (`.canvas`, `.canvas__bar`).
+
+**C2. The canvas's bar cannot fit the canvas it is given, so the window scrolls
+sideways.** The bar's children are all `flex: none` and cannot shrink, so the bar's
+min-content is wider than the canvas at any window the plan names. Measured on the
+canvas's own `scrollWidth` against its `clientWidth`:
+
+| Window | Canvas | Bar | `main.app` |
+| --- | --- | --- | --- |
+| 1100×780, nothing run | 652px | 652px | 1100px of 1100px — fits |
+| 1100×780, a run in flight | 652px | 706px | 1154px of 1100px |
+| 900×700, nothing run | 452px | 648px | 1096px of 900px |
+| 900×700, a run in flight | 452px | 706px | 1154px of 900px |
+
+The children, at 1100px with a run in flight: `.canvas__title` 18px, two
+`.canvas__quietbtn` at 45 and 43, `.canvas__far` **360px** (the lanes control, the
+model chip and how-far), `.canvas__runs` 42px (only when the flow has a run), and
+`.canvas__run` **145px** (Start/Stop and Fill window). `.canvas__far` and
+`.canvas__run` alone are 505px of a bar that has 452px at a 900px window, before
+the title, Undo, Redo and Runs. Two of the three failures are here:
+`canvas-running` ("1154px of content in 1100px"), `canvas-ended` ("1146px of
+1100px") and `canvas-drawn-900` ("1096px of content in 900px"). The board below the
+bar is not the cause: it is inside `.canvas__surface`, which is `overflow: hidden`,
+and it clips and pans as designed. Nothing is wrong with `.canvas` having
+`overflow: visible` in itself — what is wrong is that its own bar is allowed to be
+wider than it is. `src/components/canvas/Canvas.css` (`.canvas__bar`,
+`.canvas__far`, `.canvas__run`).
+
+**What the other five rows established.** With those two set aside, the canvas
+draws what the model says it should. `canvas-drawn`: three cards from a seeded
+flow, each announced as "Ask, Ready" / "Checks, Ready" / "Gate, Ready", one curve
+per wait (2 lines for 2 waits), nothing in flight, `3 blocks · not started`, and
+pressing a card opens the panel whose `#canvas-block-says` holds the words that
+would be sent. `canvas-running`: exactly one `.canvas__sweep`, one line
+`--passed` and one carrying the work, `Stop` where `Start` was, `Watch` on the
+going card, the foot's sentence identical to the `role="status"` region's, and
+`3 blocks · 2 done, 1 running`. `canvas-ended`: `.canvas__ended--whole`,
+`Finished`, `3 blocks · 3 turns · $4.12`, the last thing said with the block that
+said it ("Gate" / "Stopped here."), `Open the conversation`, no branch, no going
+line, every card done and every line passed. `canvas-drawn-dark`: the same canvas
+in the dark palette with the card's name at 16.79:1, its state word at 5.8:1 and
+the first line of what it does at 7.6:1 — every one a palette token, nothing left
+on paper. `canvas-drawn-900`: the palette folds to 56px of marks with the words
+hidden, the templates are not drawn at all, and the board clips and pans the
+drawing inside its 396px.
+
+**The tokens band is green.** `tokens` passes 16 of 16. Nine values read off a
+seeded `src/styles/tokens.css`, sorted onto the shelves Colour, Type, Spacing,
+Corners and Shadow; `--accent` gets a swatch as well as its value; `--ink` carries
+a Used count of 1 from the same sheet's `.sheet` rule; the reading says "From 1
+stylesheet"; every row's `file:line` is a press announced "Open
+src/styles/tokens.css in your editor"; the search field narrows 9 rows to 1 and
+says "Nothing here matches that." for a term that matches nothing; and the band is
+literally absent — 0 elements — in a folder that declares nothing
+(`tokens-absent.png`), which is the plan's "absent, not empty".
+
+**How a canvas is put in front of the window.** A canvas is a flow file the shell
+owns (`<profile>/flows/<projectId>.json`, one array of `Flow`) and a run is driven
+by the shell, so the rows write that file and reload the renderer rather than
+pressing Start: a real Start needs a model, and the packaged app is what this
+harness runs by default. The order is forced — the file is keyed by the
+`projectId` in `<profile>/workspaces.json`, minted the first time a folder is
+opened — so each row is: open the project, read `byRoot` for the id, write the
+flow, reload, click the project row again, then press the sidebar's own Canvas
+row. The reload-and-reopen is what makes the seeded file visible, because
+`flowList` runs once per project open (`src/App.tsx:2110-2120`). The id lookup
+matches the folder's last path segment as well as the whole path, because
+`byRoot` is keyed by the folder resolved through its symlinks and `/var` is one on
+this machine.
+
+**The one place the route differs from drawing by hand.** The rows go in through
+the sidebar row rather than `?gallery`, which is unreachable in a packaged run,
+and rather than the composer's own `Canvas` press, which is
+`CanvasIntegration`'s file. The sidebar row is the press the plan's 2.6 names
+first ("`Canvas` between `Review` and `Pull requests`"), and the folded strip's
+`.shelf__act[aria-label="Canvas"]` is the same press at a window narrow enough to
+fold the shelf. The tokens row reaches its second folder from the sidebar rather
+than the project switcher, because the switcher is capped at five recent folders
+and the row would be the sixth.
+
+**`.app--canvas` is applied, and the column is gone behind the canvas.** With a
+canvas in front, `main.app` carries `app--canvas` and `.app__column` computes to
+`display: none` (`src/App.css:128`, applied at `src/App.tsx:5598`) — `canvas-running`
+records it as a note. That is what makes `{ composer: false }` the right
+`layoutHolds` call on all six canvas rows: the composer is deliberately not on
+screen there, so asking whether it is hittable would be a check of a surface the
+app has taken away. (An earlier note from 2D said `app--canvas` was never applied;
+the tree applies it, and the measurement agrees.)
+
+**The dark row's ratio is asserted, not the numbers.** `canvas-drawn-dark`
+measures the card's name, its state word and the first line of what it does
+against the surface they sit on, and flags anything under the ratio it needs, so a
+colour chosen for paper would fail the row rather than pass a hand-checked table.
+It puts the theme back to Light on the way out, because the renderer keeps a
+hand-picked theme between loads and every row after it would inherit dark.
 
 ### The findings the accessibility rows brought in
 
@@ -431,8 +583,39 @@ the list without a word about why it could not be opened. `missing-project.png`.
 **Left as a decision**, unchanged: it is a decision about what a missing folder
 means, not a visual defect, and the row still passes.
 
+**10. Every control in the canvas's own bar is drawn under the strip along the
+top.** The strip is `position: fixed; top: 0; z-index: 3` and 38px tall
+(`src/App.css:97,113`), and the canvas starts at the window's own top edge, so the
+strip paints over the bar: a click at the centre of `.canvas__title`,
+`.canvas__quietbtn` (Undo, Redo), `.canvas__lanespick`, `.canvas__start` and
+`.canvas__fillbtn` lands on the tab strip or the project menu instead (measured
+with `document.elementFromPoint`; all five in `canvas-drawn.png`). A person who
+presses Start in the bar gets the project menu. The column is padded to clear the
+strip and a canvas, being its sibling rather than its child, is not
+(`src/App.css:143`). Found in the 2E rows; **not fixed here** —
+`src/components/canvas/Canvas.css` belongs to 2C, and the row reports it rather
+than reaching through it.
+
+**11. The canvas's bar is wider than the canvas, so the window scrolls
+sideways.** Every child of `.canvas__bar` is `flex: none`, so the bar's min-content
+wins: at 1100×780 with a run in flight the bar is 706px inside a 652px canvas
+(`.canvas__far` 360px + `.canvas__run` 145px + Runs 42px before the title and the
+two quiet presses), and `main.app` scrolls to 1154px. At 900×700 it is 706px of
+bar inside a 452px canvas. Three rows report it — `canvas-running` (1154 in 1100),
+`canvas-ended` (1146 in 1100) and `canvas-drawn-900` (1096 in 900). The board
+below is not the cause: it lives in `.canvas__surface`, which is `overflow: hidden`
+and clips and pans as designed. **Not fixed here**, for the same reason as
+finding 10.
+
 ### The decisions the fixes bring with them
 
+- **Two canvas findings are reported rather than fixed** (10 and 11): the bar is
+  drawn under the strip along the top, and it is wider than the canvas it sits in.
+  Both are in `src/components/canvas/Canvas.css`, which belongs to 2C, so this
+  package's rows report them as failing checks with the measurement and the
+  file:line and leave the file alone. The rows ask whether each press on the bar is
+  reachable before pressing it, so a covered control is a sentence rather than a
+  30-second timeout.
 - **A panel the window cannot hold is not drawn.** Below about a 650px window the
   file panel and the inspector have no room beside a readable conversation, so
   they take none and are not rendered (`src/App.css:718-766`). The row that turns
@@ -566,6 +749,12 @@ is still a person's:
 - `--conversations=6` keeps the rows short while working on something else; the
   plan's number is the default.
 - `--only=a11y` or `--only=media` runs just the rows added for this pass, which is
-  how they were developed.
+  how they were developed. `--only=canvas` runs the six canvas rows and
+  `--only=tokens` the band, which is how they are meant to be worked on.
+- The canvas and tokens rows need the shell to have opened the project once before
+  they can seed anything, because a project's id is minted on its first open. Run
+  them after any row that opens a project, or on their own after the picker has
+  been pressed once — `--only=canvas` is enough, since the first of the six opens
+  the project itself.
 - The harness measures only what the renderer draws. A native view, a native
   dialog and the OS tooltip are outside every screenshot it takes.

@@ -92,9 +92,13 @@ export type Preferences = {
    *  radius, density, fonts, motion. Five colour presets were the whole of it
    *  before, and a preset is somebody else's taste. */
   appearance: Appearance;
+  /** Which process hosts a conversation's agent. `in-process` is what every
+   *  copy of the app has always done; `child` gives each conversation a process
+   *  of its own, so an add-on that spins cannot freeze the window. */
+  runtime: 'child' | 'in-process';
   /** How much time each model should take before it answers. The map is keyed
-   * by its provider and model id because different models support different
-   * choices. */
+   *  by its provider and model id because different models support different
+   *  choices. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
   /**
    * Versions somebody chose to keep at the top of the rail, by project folder.
@@ -213,6 +217,7 @@ export const defaultPreferences: Preferences = {
   editor: null,
   terminal: null,
   appearance: defaultAppearance,
+  runtime: 'in-process',
   thinking: {},
   kept: {},
   trusted: {},
@@ -274,6 +279,7 @@ function asPreferences(value: unknown): Preferences {
     editor: typeof record['editor'] === 'string' ? record['editor'] : null,
     terminal: typeof record['terminal'] === 'string' ? record['terminal'] : null,
     appearance,
+    runtime: record['runtime'] === 'child' ? 'child' : 'in-process',
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
@@ -384,6 +390,7 @@ export class PreferenceFile {
       next.advisorGates.loopGate === this.#preferences.advisorGates.loopGate &&
       next.addons === this.#preferences.addons &&
       sameAppearance(next.appearance, this.#preferences.appearance) &&
+      next.runtime === this.#preferences.runtime &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&

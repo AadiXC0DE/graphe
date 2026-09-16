@@ -48,7 +48,20 @@ import {
 import type { Telling } from "./work/notify";
 import type { SettingsLink } from "./components/Settings";
 import Sidebar from "./components/Sidebar";
-import Tabs, { type Tab } from "./components/Tabs";
+import Tabs, { type Tab, type TabState } from "./components/Tabs";
+import type { BlockAttachment } from "./components/canvas/BlockPanel";
+import {
+  canStart,
+  change,
+  latestRun,
+  newFlow,
+  place,
+  withFlow,
+  withoutFlow,
+  type Flow,
+  type Run,
+  type Standing,
+} from "./work/canvas";
 import Steps from "./components/Steps";
 import { ThreadRows } from "./components/ThreadRows";
 import ThinkingWith from "./components/ThinkingWith";
@@ -92,6 +105,7 @@ import { bridge } from "./lib/bridge";
 import { isAdvisor } from "./lib/describe";
 import { quote, smallerFirst } from "./lib/estimating";
 import { durationInWords } from "./lib/when";
+import { heldWrites } from "./lib/heldwrites";
 import {
   showWords,
   swapWords,
@@ -105,6 +119,7 @@ import {
   type PlainPreference,
   type Preferences,
   type PromptAttachment,
+  type StyleToken,
   type RecentProject,
   type RepoItem,
   type RepoLook,
@@ -186,9 +201,11 @@ import {
   isPinned,
   onePane,
   paneAt,
+  panesFrom,
   pin,
   pinnedWords,
   showIn,
+  shownNow,
   type Panes,
   type ViewId,
 } from "./domain/views";
@@ -227,6 +244,7 @@ const AddonAsk = lazy(() => import("./components/ExtensionRequest"));
 const Gallery = lazy(() => import("./gallery/Gallery"));
 const ConnectModal = lazy(() => import("./components/ConnectModal"));
 const HelpersView = lazy(() => import("./components/HelpersView"));
+const CanvasView = lazy(() => import("./components/canvas/CanvasView"));
 const Usage = lazy(() => import("./components/Usage"));
 /* Panels that open over the conversation rather than in it, and one that only
    appears over a build. None is drawn until a press or a running build asks. */
@@ -244,6 +262,31 @@ const FindInThread = lazy(() => import("./components/FindInThread"));
 const HelperRail = lazy(() => import("./components/HelperRail"));
 const InLine = lazy(() => import("./components/InLine"));
 const Running = lazy(() => import("./components/Running"));
+
+/** A canvas whose first block is what somebody had already typed. The draft is
+ *  a request, so it goes in as an ask; the attachments ride with it as content
+ *  ids in the store, which is all a flow file ever holds. */
+function placeFirstAsk(
+  flow: Flow,
+  first: { says: string; attachments: readonly string[] },
+): Flow {
+  const made = place(flow, 'ask');
+  const block = made.blocks[made.blocks.length - 1];
+  if (block === undefined) return flow;
+  return change(made, block.id, {
+    says: first.says,
+    attachments: first.attachments,
+    name: first.says.trim().split(/\s+/).slice(0, 3).join(' ') || block.name,
+  });
+}
+
+/** The same list with one run replaced by what the shell just answered. The run
+ *  is the shell's, so the window never invents one — this only puts the answer
+ *  where the canvas in front will draw it. */
+function withRunFlow(held: readonly Flow[], id: string, run: Run): readonly Flow[] {
+  const found = held.find((one) => one.id === id);
+  return found === undefined ? held : withFlow(held, { ...found, runs: [run, ...found.runs.filter((one) => one.id !== run.id)] });
+}
 
 /** What "explain this" and "fix this" say about a change. A static import would
  *  put the whole diff panel in the bundle every launch pays for, and it is only
@@ -269,6 +312,7 @@ const VIEWS = [
   () => import("./components/Connected"),
   () => import("./components/Palette"),
   () => import("./components/Conflict"),
+  () => import("./components/canvas/CanvasView"),
 ];
 
 /** What is fetched first when the app goes idle, in the order a sitting is
@@ -960,6 +1004,11 @@ function Conversation() {
   /** The row of tabs as it is drawn, published so the keys can act on the row
    *  somebody is looking at. See src/hooks/useTabRow.ts. */
   const tabRow = useTabRow();
+  /* The row's own two presses, as refs: they are declared after the callbacks
+     that use them, and a canvas tab is not a conversation either of those can
+     answer for on its own. */
+  const goToTabRef = useRef<(id: string) => void>(() => undefined);
+  const closeTabRef = useRef<(id: string) => void>(() => undefined);
 
   /** Where a launch lands, and how the shelf comes back. Both are habits of
    *  the hands in front of this machine rather than anything the shell acts
@@ -1311,6 +1360,11 @@ function Conversation() {
   } = actions;
 
   const draft = desk === null ? looseDraft : chat.draft;
+  /* The box's own words, for the press that turns them into a canvas. A ref
+     rather than state: the palette and the composer hatch read it at the moment
+     of the press, and neither should redraw on every keystroke. */
+  const draftBoxNow = useRef(draft);
+  draftBoxNow.current = draft;
 
   /** A native page must yield to renderer popovers; it cannot be stacked under
      them with CSS alone. */
@@ -1322,6 +1376,21 @@ function Conversation() {
   /** Which helper the sheet is open on, or null when it is shut. `at` of null
    *  means "open on the newest one". */
   const [helpersAt, setHelpersAt] = useState<{ at: string | null } | null>(null);
+
+  /* The canvases this project has, and which one is in front. A canvas is a tab
+     like a conversation is: only one thing is in front at a time, and the row
+     above says which. */
+  const [flows, setFlows] = useState<readonly Flow[]>([]);
+  const flowsNow = useRef<readonly Flow[]>([]);
+  flowsNow.current = flows;
+  const [canvasAt, setCanvasAt] = useState<string | null>(null);
+  const canvasNow = useRef<string | null>(null);
+  canvasNow.current = canvasAt;
+  /** Whether the canvas is filling the window rather than sitting in the
+   *  column a conversation would. */
+  const [canvasFull, setCanvasFull] = useState(false);
+  /** What a refused Start had to say, in the foot rather than in a sheet. */
+  const [canvasTrouble, setCanvasTrouble] = useState<string | null>(null);
 
   /**
    * Following the reply, until somebody would rather read something else.
@@ -1649,6 +1718,7 @@ function Conversation() {
     setGraphOpen(false);
     setReviewsOpen(false);
     setHelpersAt(null);
+    setCanvasAt(null);
   }, []);
 
   /** The screens that take the whole work over the conversation, so that
@@ -1667,7 +1737,8 @@ function Conversation() {
         | 'settings'
         | 'usage'
         | 'add-more'
-        | 'helpers',
+        | 'helpers'
+        | 'canvas',
     ) => {
       /* Marked as the closing half of the press, so it happens a frame after
          the new screen is up rather than in the same breath. */
@@ -1684,6 +1755,10 @@ function Conversation() {
         if (screen !== 'usage') setUsageOpen(false);
         if (screen !== 'add-more') setAddMore(false);
         if (screen !== 'helpers') setHelpersAt(null);
+        /* The canvas keeps its place for the screen that opens over it, and for
+           its own press: helpers sits beside the work rather than replacing it,
+           and the canvas is what the press is asking for. */
+        if (screen !== 'canvas' && screen !== 'helpers') setCanvasAt(null);
       }, true);
     },
     [startScreen],
@@ -1828,6 +1903,22 @@ function Conversation() {
       void refreshVersions(opened.value.path);
       void refreshOverview(opened.value.path, opened.value.address);
       void refreshBuildPlan(opened.value.path);
+      /* Put the window back the way it was left: the chat the shell opened on,
+         and the one the other pane was showing when there was one. Asked after
+         the desk is open, because the answer is only useful against the
+         conversations this project actually has. */
+      void bridge.viewsLook({ project: opened.value.path }).then((answer) => {
+        if (request !== navigation.current || !answer.ok) return;
+        const held = currentDesk(desksNow.current);
+        if (held === null || held.path !== opened.value.path) return;
+        setPanes((current) => {
+          const next = panesFrom(answer.value, Object.keys(held.conversations), held.address);
+          return next.open.length === current.open.length &&
+            next.open.every((one, at) => one.conversation === current.open[at]?.conversation)
+            ? current
+            : next;
+        });
+      });
       refreshRoom({
         project: opened.value.path,
         ...(opened.value.address == null ? {} : { conversation: opened.value.address }),
@@ -1928,6 +2019,295 @@ function Conversation() {
       return true;
     },
     [refreshRoom, refreshRunning, troubleHere],
+  );
+
+  /* ---------------------------------------------------------------- canvas */
+
+  /* The project's own custom properties, read once per project rather than per
+     conversation: they are the folder's, not this chat's. Null means the
+     stylesheets declare none, and then the band is absent. */
+  const [tokensHere, setTokensHere] = useState<{
+    tokens: readonly StyleToken[];
+    sheets: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const project = openProject;
+    if (project === null) {
+      setTokensHere(null);
+      return;
+    }
+    void bridge.tokensRead({ project }).then((answer) => {
+      if (desksNow.current.current !== project) return;
+      setTokensHere(answer.ok ? answer.value : null);
+    });
+  }, [openProject]);
+
+  /** The canvas in front, or null when a conversation is. */
+  const canvasHere = canvasAt === null ? null : flowsNow.current.find((one) => one.id === canvasAt) ?? null;
+
+  /** Everything the canvas may attach, as the stored rows the picker draws.
+   *  Read once when a canvas opens: a flow file holds ids, and the store is
+   *  the only side that can turn one back into a row. */
+  const [canvasAttachments, setCanvasAttachments] = useState<readonly BlockAttachment[]>([]);
+
+  /* What the run in front is doing this second, for the card that says so.
+     Read off the blocks of the newest run rather than asked for again. */
+  const canvasLearning =
+    canvasHere === null
+      ? null
+      : (() => {
+          const run = latestRun(canvasHere);
+          if (run === null || run.state !== 'running') return null;
+          const going = Object.entries(run.blocks).find(([, one]) => one.state === 'running');
+          if (going === undefined) return null;
+          const block = canvasHere.blocks.find((one) => one.id === going[0]);
+          return { step: block?.name ?? null, asking: false };
+        })();
+
+  /* The Review queue, from the canvas: a worktree lane's branch lands there as
+     any worktree's does, and this is the press that goes to look at it. */
+  const openTheReviewQueue = useCallback(() => {
+    goToScreen('review');
+    startScreen(() => setReviewQueueOpen(true));
+    refreshReviewQueue();
+  }, [goToScreen, refreshReviewQueue, startScreen]);
+
+  /* What the canvas in front can attach: the rows for the ids the run's blocks
+     already hold, read when the canvas changes rather than per keystroke. */
+  useEffect(() => {
+    const ids = [
+      ...new Set((canvasHere?.blocks ?? []).flatMap((one) => [...one.attachments])),
+    ];
+    if (ids.length === 0) {
+      setCanvasAttachments([]);
+      return;
+    }
+    let live = true;
+    void Promise.all(
+      ids.map(async (id) => {
+        const kept = await bridge.attachmentCopy(id);
+        if (!kept.ok || kept.value === null) return null;
+        const one = kept.value;
+        return {
+          id: one.id,
+          name: one.name,
+          kind: one.kind,
+          mimeType: one.mimeType,
+          thumb: null,
+        } as BlockAttachment;
+      }),
+    ).then((rows) => {
+      if (live) setCanvasAttachments(rows.filter((one) => one !== null));
+    });
+    return () => {
+      live = false;
+    };
+  }, [canvasHere?.id, canvasHere?.blocks]);
+
+  /* The canvases this project has, read on the way in. Drawing one changes
+     nothing until Start: a canvas is a drawing, and the run is the shell's. */
+  useEffect(() => {
+    const project = openProject;
+    setCanvasTrouble(null);
+    if (project === null) {
+      setFlows([]);
+      setCanvasAt(null);
+      return;
+    }
+    void bridge.flowList({ project }).then((answer) => {
+      if (desksNow.current.current !== project) return;
+      setFlows(answer.ok ? answer.value : []);
+    });
+  }, [openProject]);
+
+  /* Every run change the shell makes, folded in where it belongs. The shell
+     owns the run — it is what sends the turns — so the window draws what it is
+     told rather than advancing anything itself. */
+  useEffect(
+    () =>
+      bridge.onFlow((notice) => {
+        if (notice.project !== desksNow.current.current) return;
+        setFlows((held) => withFlow(held, notice.flow));
+      }),
+    [],
+  );
+
+  /* On screen at once, on disk a moment later. A canvas is edited a keystroke at
+     a time and a file per keystroke is a file written for nothing. */
+  const savingFlows = useRef(heldWrites());
+  /** The write in flight, so Start can wait for it. A canvas draws a keystroke
+   *  at a time and its file is written a moment later; the run reads that file,
+   *  so a press in the same breath as the last word has to let it land. */
+  const lastSave = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => () => savingFlows.current.now(), []);
+
+  const changeFlow = useCallback((next: Flow) => {
+    setFlows((held) => withFlow(held, next));
+    const path = desksNow.current.current;
+    if (path === null) return;
+    const send = (): void => {
+      lastSave.current = bridge.flowSave(next, { project: path }).then((answer) => {
+        // What the shell kept, runs included, is what the canvas draws: the
+        // drawing is the window's, and the record of what ran is not.
+        if (answer.ok) setFlows((held) => withFlow(held, answer.value));
+      });
+    };
+    savingFlows.current.soon(next.id, send);
+  }, []);
+
+  /** What the box was holding, written into the store and answered with the
+   *  content ids a canvas block can carry. The same road a send takes, so the
+   *  same picture arriving two ways is one stored copy. */
+  const keepBoxAttachments = useCallback(
+    async (box: readonly Attachment[]): Promise<readonly string[]> => {
+      const files: PromptAttachment[] = [];
+      for (const one of box) {
+        // A Figma link and a file this computer cannot read are not bytes, and
+        // a canvas block can only be given bytes.
+        if (one.kind === 'figma' || one.file === undefined) continue;
+        const bytes = await pictureBytes(one.file);
+        if (bytes === null) continue;
+        files.push({
+          kind: one.kind === 'document' ? 'document' : 'image',
+          name: one.name,
+          mimeType: pictureType(one.name, one.file.type),
+          bytes,
+        });
+      }
+      if (files.length === 0) return [];
+      const kept = await bridge.keepAttachments(files);
+      return kept.ok ? kept.value.kept.map((one) => one.id) : [];
+    },
+    [],
+  );
+
+  /** A canvas of its own, open, with the first block already placed when
+   *  somebody came from a draft. */
+  const newCanvas = useCallback(
+    (first: { says: string; attachments: readonly string[] } | null) => {
+      const made = first === null ? newFlow() : placeFirstAsk(newFlow(), first);
+      changeFlow(made);
+      setCanvasTrouble(null);
+      goToScreen('canvas');
+      startScreen(() => setCanvasAt(made.id));
+    },
+    [changeFlow, goToScreen, startScreen],
+  );
+
+  /** The one somebody last drew on, or a new one. What the shelf's row does. */
+  const openCanvas = useCallback(() => {
+    const held = [...flowsNow.current].sort((a, b) => b.updatedAt - a.updatedAt);
+    const last = held[0];
+    if (last === undefined) {
+      newCanvas(null);
+      return;
+    }
+    setCanvasTrouble(null);
+    goToScreen('canvas');
+    startScreen(() => setCanvasAt(last.id));
+  }, [newCanvas, goToScreen, startScreen]);
+
+  const forgetCanvas = useCallback((id: string) => {
+    setFlows((held) => withoutFlow(held, id));
+    setCanvasAt((was) => (was === id ? null : was));
+    const path = desksNow.current.current;
+    if (path !== null) void bridge.flowDelete(id, { project: path });
+  }, []);
+
+  /** Where the project stands, for the one refusal that depends on it: a pull
+   *  request off the default branch is not a pull request. Read off the desk,
+   *  which is the shell's own snapshot of what the folder is on. */
+  const branchHere = (desk?.overview?.git ?? null)?.branch ?? null;
+  const standingHere: Standing =
+    branchHere === null || branchHere === 'main' || branchHere === 'master'
+      ? 'default-branch'
+      : 'branch';
+
+  /** Start the canvas in front. A refusal is the shell's sentence, said in the
+   *  foot where the press was made — never a sheet over the drawing. */
+  const startCanvas = useCallback(() => {
+    const id = canvasNow.current;
+    const path = desksNow.current.current;
+    if (id === null || path === null) return;
+    const flow = flowsNow.current.find((one) => one.id === id);
+    if (flow === undefined) return;
+    const may = canStart(flow, standingHere);
+    if (!may.ok) {
+      setCanvasTrouble(may.because);
+      return;
+    }
+    setCanvasTrouble(null);
+    /* What was typed is written before the run reads it. The save is held back
+       while somebody draws, and Start pressed in the same breath as the last
+       word would otherwise reach a file that does not have it yet — and be
+       refused for a sentence that is on screen. */
+    savingFlows.current.now();
+    void lastSave.current.then(() => bridge.flowStart(id, { project: path })).then((answer) => {
+      if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
+      else setCanvasTrouble(answer.trouble.because);
+    });
+  }, [standingHere]);
+
+  const stopCanvas = useCallback(() => {
+    const id = canvasNow.current;
+    const path = desksNow.current.current;
+    if (id === null || path === null) return;
+    void bridge.flowStop(id, { project: path }).then((answer) => {
+      if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
+      else setCanvasTrouble(answer.trouble.because);
+    });
+  }, []);
+
+  const continueCanvas = useCallback((block: string) => {
+    const id = canvasNow.current;
+    const path = desksNow.current.current;
+    if (id === null || path === null) return;
+    void bridge.flowContinue(id, block, { project: path }).then((answer) => {
+      if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
+      else setCanvasTrouble(answer.trouble.because);
+    });
+  }, []);
+
+  const resumeCanvas = useCallback(() => {
+    const id = canvasNow.current;
+    const path = desksNow.current.current;
+    if (id === null || path === null) return;
+    setCanvasTrouble(null);
+    void bridge.flowResume(id, { project: path }).then((answer) => {
+      if (answer.ok) setFlows((held) => withRunFlow(held, id, answer.value));
+      else setCanvasTrouble(answer.trouble.because);
+    });
+  }, []);
+
+  /**
+   * A lane's conversation, in the other pane.
+   *
+   * Watch is not a switch to somewhere else: the canvas stays in front, and the
+   * lane it is watching arrives beside it. The conversation is opened first —
+   * the shell may never have resumed this one in this window — and only then
+   * put in the pane, so a pane is never pointed at a chat the desk has not got.
+   */
+  const watchLane = useCallback(
+    (conversation: string) => {
+      const project = desksNow.current.current;
+      if (project === null) return;
+      void bridge.openConversation(conversation, null, null, { project }).then((answer) => {
+        if (!answer.ok) {
+          troubleHere(answer.trouble);
+          return;
+        }
+        if (desksNow.current.current !== project) return;
+        showOpened(answer.value);
+        setPanes((current) => {
+          const other = current.open.find((one) => one.id !== focusedPane(current).id);
+          return other === undefined
+            ? addPane(current, conversation)
+            : showIn(current, other.id, conversation);
+        });
+      });
+    },
+    [showOpened, troubleHere],
   );
 
   /**
@@ -3077,6 +3457,9 @@ function Conversation() {
         case 'files':
           setFilesOpen(true);
           return;
+        case 'canvas':
+          openCanvas();
+          return;
         case 'commands':
           setCommandsOpen((was) => !was);
           return;
@@ -3128,6 +3511,7 @@ function Conversation() {
     helpersAt,
     addonAsk,
     worktreeOpen,
+    openCanvas,
   ]);
 
   /* ----------------------------------------------------------------- saying */
@@ -3985,6 +4369,8 @@ function Conversation() {
   );
 
   tabRow.handles(goToTab, closeTab);
+  goToTabRef.current = (id) => void goToTab(id);
+  closeTabRef.current = (id) => void closeTab(id);
 
   /* ---------------------------------------------------------------- panes */
 
@@ -4000,6 +4386,24 @@ function Conversation() {
   useEffect(() => {
     setPanes((current) => showIn(current, current.focused, desk?.address ?? null));
   }, [desk?.address]);
+
+  /**
+   * Write down what the panes are showing, so the next launch puts it back.
+   *
+   * Held back a moment because a split press and the focus that follows it are
+   * two changes in the same breath, and two writes are one file rewritten. The
+   * whole set goes each time: a pane somebody closed has to take its view with
+   * it, or it opens again at the next launch as a window they did not leave.
+   */
+  useEffect(() => {
+    if (openProject === null) return;
+    const shown = shownNow(panes);
+    if (shown.length === 0) return;
+    const timer = setTimeout(() => {
+      void bridge.viewsNote(shown, { project: openProject });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [openProject, panes]);
 
   /**
    * Put the hand in a pane.
@@ -4599,6 +5003,12 @@ function Conversation() {
       { id: 'copy', name: COPY_WORDS.whole, where: 'Conversation',
         run: () => { void copyText(asMarkdown(inFront(currentDesk(desksNow.current)).turns)); },
         ready: here, whyNot: needsProject },
+      { id: 'canvas', name: 'Open the canvas', where: 'Project',
+        run: () => openCanvas(), ready: here, whyNot: needsProject },
+      { id: 'canvas-new', name: 'New canvas from this draft', where: 'Conversation',
+        run: () => newCanvas({ says: draftBoxNow.current, attachments: [] }),
+        ready: here && draftBoxNow.current.trim() !== '',
+        whyNot: 'Type what you want first.' },
       { id: 'reviews', name: 'Pull requests', where: 'Project',
         run: () => { goToScreen('reviews'); refreshRepo(); }, ready: here, whyNot: needsProject },
       { id: 'review-queue', name: 'Review', where: 'Project',
@@ -4627,7 +5037,7 @@ function Conversation() {
   }, [
     startScreen,
     openProject, actingRepoNow, busy, swapConversation, goToScreen, togglePane, refreshRepo,
-    refreshReviewQueue,
+    openCanvas, newCanvas, refreshReviewQueue,
     refreshSkills, refreshWorkflows, refreshConnected, openAddMore, openConnect, browse,
     tidyNow, halt, troubleHere,
   ]);
@@ -5020,7 +5430,27 @@ function Conversation() {
       };
     });
 
-  const tabs: readonly Tab[] = threadTabs;
+  /* A canvas rides the same row as a conversation, because it is the same kind
+     of thing to the hand: something open, which can be switched to. Its state
+     is the run's, read from the newest one — a canvas with no run has never
+     done anything and wears no mark. */
+  const canvasTabs: readonly Tab[] = desk === null ? [] : flowsNow.current.flatMap((flow) => {
+      const run = latestRun(flow);
+      const state: TabState =
+        run === null ? 'idle' : run.state === 'running' ? 'working' : run.state === 'needs-you' ? 'asking' : 'idle';
+      return [
+        {
+          id: `canvas:${flow.id}`,
+          title: flow.name,
+          project: desk.name,
+          projectPath: desk.path,
+          kind: 'canvas' as const,
+          state,
+        },
+      ];
+    });
+
+  const tabs: readonly Tab[] = [...threadTabs, ...canvasTabs];
 
   /* Which conversation the main column is drawing, and whether its own turn is
      in flight. With one pane this is simply the conversation on screen; with
@@ -5081,12 +5511,44 @@ function Conversation() {
     setDesks((current) => moveThread(current, openProject, ownerOf(id).address, to));
   };
 
+  /* The row's presses, which have to tell a canvas from a conversation: a
+     canvas is opened as a screen and closed as a view, and neither is something
+     `ownerOf` can answer for. */
+  const openTab = useCallback(
+    (id: string) => {
+      if (id.startsWith('canvas:')) {
+        const which = id.slice('canvas:'.length);
+        setCanvasTrouble(null);
+        goToScreen('canvas');
+        startScreen(() => setCanvasAt(which));
+        return;
+      }
+      void goToTabRef.current(id);
+    },
+    [goToScreen, startScreen],
+  );
+
+  const closeTabRow = useCallback((id: string) => {
+    if (id.startsWith('canvas:')) {
+      const which = id.slice('canvas:'.length);
+      // Closing a tab closes the view. The drawing stays, and the run — if one
+      // is going — carries on in the shell where nobody's window can lose it.
+      setCanvasAt((was) => (was === which ? null : was));
+      return;
+    }
+    void closeTabRef.current(id);
+  }, []);
+
   const tabAt =
     openProject === null || desk === null
-      ? null
-      : keyOf(openProject, desk.address ?? '');
+      ? canvasAt === null
+        ? null
+        : `canvas:${canvasAt}`
+      : canvasAt !== null
+        ? `canvas:${canvasAt}`
+        : keyOf(openProject, desk.address ?? '');
   tabRow.drawn(
-    threadTabs.map((one) => one.id),
+    tabs.map((one) => one.id),
     tabAt,
     tabs.find((one) => one.state === 'asking')?.id,
   );
@@ -5143,7 +5605,7 @@ function Conversation() {
 
   return (
     <main
-      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed ? "app--overviewed" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
+      className={`app scroll--auto ${empty ? "app--empty" : ""} ${overviewed && canvasHere === null ? "app--overviewed" : ""} ${canvasHere !== null ? "app--canvas" : ""} ${shelved ? "app--shelved" : ""} ${shelved && !shelfOpen ? "app--shelfclosed" : ""} ${filesExpanded ? "app--files" : ""} ${pane === "split" ? "app--split" : ""} ${pane === "whole" ? "app--whole" : ""} ${readingWhole && reading !== null ? "app--reading" : ""} ${commandsHere ? "app--commands" : ""}`}
       ref={scrollRef}
     >
       {bridge.desktop || desk !== null ? (
@@ -5155,8 +5617,8 @@ function Conversation() {
             <Tabs
               tabs={tabs}
               at={tabAt}
-              onOpen={(id) => void goToTab(id)}
-              onClose={(id) => void closeTab(id)}
+              onOpen={openTab}
+              onClose={closeTabRow}
               onNew={() => {
                 void swapConversation(null);
               }}
@@ -5312,6 +5774,7 @@ function Conversation() {
             goToScreen("graph");
             startScreen(() => setGraphOpen(true));
           }}
+          onCanvas={() => openCanvas()}
           onReviewQueue={() => {
             goToScreen("review");
             startScreen(() => setReviewQueueOpen(true));
@@ -6077,6 +6540,13 @@ function Conversation() {
               draft={draft}
               onDraftChange={keepDraftAt(boxOwner)}
               attachments={attachments}
+              onCanvas={(says, box) => {
+                // The composer's own rows, kept exactly as its send keeps them:
+                // by content id, so a flow file holds ids and never bytes.
+                void keepBoxAttachments(box).then((ids) =>
+                  newCanvas({ says, attachments: ids }),
+                );
+              }}
               connection={connection}
               room={room}
               tidying={tidying}
@@ -6170,9 +6640,10 @@ function Conversation() {
         </aside>
       ) : null}
 
-      {overviewed && desk !== null ? (
+      {overviewed && canvasHere === null && desk !== null ? (
         <Overview
           key={keyOf(desk.path, desk.address ?? '')}
+          tokens={tokensHere}
           /* Only this conversation's finished work. The queue is the project's,
              but the panel is the chat's, and a project list drawn under a chat
              heading reads as this chat's state. Project-wide work has its own
@@ -6309,6 +6780,47 @@ function Conversation() {
       {/* The canvas in front, drawn where a conversation would be. It is a tab,
           so the row of tabs stays above it and switching back is one press on
           something you can see. */}
+      {canvasHere !== null && desk !== null ? (
+        <Suspense fallback={arriving('Canvas')}>
+          <CanvasView
+            key={canvasHere.id}
+            flow={canvasHere}
+            onFlow={changeFlow}
+            onSave={changeFlow}
+            onStart={startCanvas}
+            onStop={stopCanvas}
+            onContinue={continueCanvas}
+            onResume={resumeCanvas}
+            connection={connection}
+            thinking={preferences.thinking}
+            onThinking={changeThinking}
+            onModel={(choice) => selectModel(choice)}
+            onConnect={openConnect}
+            standing={standingHere}
+            attachments={canvasAttachments}
+            full={canvasFull}
+            onFull={setCanvasFull}
+            onWatch={watchLane}
+            onReview={openTheReviewQueue}
+            learning={canvasLearning}
+            canvases={flowsNow.current
+              .filter((one) => one.id !== canvasHere.id)
+              .map((one) => ({ id: one.id, name: one.name }))}
+            onOpenCanvas={(id) => setCanvasAt(id)}
+            onRenameCanvas={(id, name) => {
+              const found = flowsNow.current.find((one) => one.id === id);
+              if (found !== undefined) changeFlow({ ...found, name });
+            }}
+            onDeleteCanvas={forgetCanvas}
+          />
+          {canvasTrouble === null ? null : (
+            <p className="canvas__refused" role="status">
+              {canvasTrouble}
+            </p>
+          )}
+        </Suspense>
+      ) : null}
+
       {reviewsOpen && desk !== null ? (
         <Suspense fallback={reviewsOpen ? arriving('Pull requests') : null}>
           <ReviewsView

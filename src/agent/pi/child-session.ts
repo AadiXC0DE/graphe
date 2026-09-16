@@ -54,7 +54,7 @@ import type { AddonCommand } from './commands';
 import type { ExtensionReport } from './extension-states';
 import type { SessionKind } from './extension-policy';
 import type { GuardFacts } from '../guard/policy';
-import { startRuntime } from '../../../electron/services/runtime-supervisor';
+import { childRuntimes, startRuntime } from '../../../electron/services/runtime-supervisor';
 import type { ChildExit, ChildRuntime } from '../../../electron/services/runtime-supervisor';
 import type { ThinkingLevel } from '../../lib/ipc';
 import type { AgentEvent, ImageCard } from '../types';
@@ -224,41 +224,41 @@ async function trustedExtensions(
  * as the whole of what the child is allowed to ask. Everything the Guard says
  * goes into the same stream the in-process path uses.
  */
+/** How a conversation's child is started, so the same arguments bring one back
+ *  after an idle one was given back. */
+type ChildMaking = () => Promise<ChildRuntime>;
+
 export async function childSession(
   options: CreateSessionOptions,
   guard: Guarded,
 ): Promise<GrapheSession> {
   const agentDir = guard.agentDir;
-  const runtime = await startRuntime({
-    cwd: options.projectRoot,
-    agentDir,
-    args: await argsFor({ ...options, agentDir }, agentDir),
-    judge: guard.judge,
-    ...(options.ask === undefined ? {} : { ask: options.ask }),
-    // The child's own output is for the log and never a sentence on screen.
-    onChatter: () => undefined,
-    // A widget, a title or a status line has no dialog and is reported rather
-    // than answered with something invented — the same rule the in-process
-    // path follows.
-    onUnsupportedUi: (request) => {
-      options.onEvent({
-        type: 'notice',
-        what: `An add-on asked for ${request.method}, which this window could not do. Nothing was drawn for it, and it was told so.`,
-      });
-    },
-  });
+  const args = await argsFor({ ...options, agentDir }, agentDir);
+  const startChild = async (): Promise<ChildRuntime> => {
+    // Room for one more child is made before it is started, so a machine at its
+    // ceiling takes somebody's quiet conversation rather than refusing this one.
+    await childRuntimes.makeRoom();
+    return startRuntime({
+      cwd: options.projectRoot,
+      agentDir,
+      args,
+      judge: guard.judge,
+      ...(options.ask === undefined ? {} : { ask: options.ask }),
+      // The child's own output is for the log and never a sentence on screen.
+      onChatter: () => undefined,
+      // A widget, a title or a status line has no dialog and is reported rather
+      // than answered with something invented — the same rule the in-process
+      // path follows.
+      onUnsupportedUi: (request) => {
+        options.onEvent({
+          type: 'notice',
+          what: `An add-on asked for ${request.method}, which this window could not do. Nothing was drawn for it, and it was told so.`,
+        });
+      },
+    });
+  };
 
-  const hosted = new Hosted(options, guard, runtime);
-  /* Pi's own stream, fed into the same relay the in-process path uses — one
-     `fromPi`, not two, which is what makes the two paths' event streams the
-     same shape for the window. The `snake_case` names are already translated
-     inside Pi: its RPC mode emits the session's own events through
-     `toJsonEvent`, which is the shape `fromPi` was written against. */
-  runtime.onEvent((event) => {
-    hosted.heard(event);
-    guard.relay.fromPi(event);
-  });
-  runtime.onExit((how) => hosted.exited(how));
+  const hosted = new Hosted(options, guard, await startChild(), startChild);
   /* The conversation so far, read off the transcript the child has just opened.
      The window asks for this the moment a project opens and turns it back into
      the thread somebody left, so it has to be in hand before this resolves —
@@ -276,30 +276,132 @@ export async function childSession(
  * whether a turn is running — and every getter that reads it has to answer
  * *now* while the wire answers later. Each is asked for when the child says
  * something that could have changed it, and remembered in between.
+ *
+ * It is also what the eviction registry holds: `busy`, `activeAt` and `unload`
+ * are the whole of what taking one conversation's process away needs, and the
+ * class keeps the means to start another, so the next prompt from the same
+ * session file brings one back.
  */
-class Hosted implements GrapheSession {
+export class Hosted implements GrapheSession {
   private closed = false;
-  /** Prompts accepted and not yet come to rest. Load-bearing: `working` is
-   *  read by the shell before it evicts an idle conversation, and a settle that
-   *  never arrives must not hold the composer a spinner. */
+  /** Prompts accepted and not yet come to rest. Load-bearing: `busy` is what
+   *  the eviction registry reads, and a settle that never arrives must not hold
+   *  the composer a spinner. */
   private inFlight = 0;
   private rest: (() => void)[] = [];
   /** The child has gone. Every later call is refused rather than written into
-   *  a pipe nobody holds. */
+   *  a pipe nobody holds. Cleared when a new child is started. */
   private gone: ChildExit | null = null;
   /** Pi's own account of this session, refreshed when it could have moved. */
   private said: Record<string, unknown> = {};
   private activation: string | null = null;
+  /** Where this conversation sits in the eviction registry. */
+  private token: number;
+  /** This side is taking the child back for being idle, so the exit that
+   *  follows is not a death and not a stop. */
+  private givingBack = false;
+  /** The child was given back rather than dying. The next prompt from the same
+   *  session file starts another one; a death never does. */
+  private givenBack = false;
+  /** How to stop hearing the child that was current when this was set. Named
+   *  apart from `listening`, which is the GrapheSession member. */
+  private readonly links: (() => void)[] = [];
+  /** When somebody last asked this conversation for something. Null until they
+   *  have, which is the oldest thing there is. */
+  private askedAt: number | null = null;
 
   constructor(
     private readonly options: CreateSessionOptions,
     private readonly guard: Guarded,
-    private readonly runtime: ChildRuntime,
+    private runtime: ChildRuntime,
+    private readonly startChild: ChildMaking,
   ) {
-    void this.reread();
+    this.token = childRuntimes.register(this);
+    this.attend();
+    this.firstRead = this.reread();
   }
 
+  /** The first read of Pi's own account, which `readBack` waits on. */
+  private readonly firstRead: Promise<void>;
+
   /* -- what the child says ------------------------------------------------ */
+
+  /** Listen to whichever child is the current one. Called again when an idle
+   *  child has been given back and the next prompt brings another, so the dead
+   *  one's handles go first — a listener left behind would deliver every later
+   *  event twice. */
+  private attend(): void {
+    for (const drop of this.links.splice(0)) drop();
+    /* Pi's own stream, fed into the same relay the in-process path uses — one
+       `fromPi`, not two, which is what makes the two paths' event streams the
+       same shape for the window. The `snake_case` names are already translated
+       inside Pi: its RPC mode emits the session's own events through
+       `toJsonEvent`, which is the shape `fromPi` was written against. */
+    this.links.push(
+      this.runtime.onEvent((event) => {
+        this.heard(event);
+        this.guard.relay.fromPi(event);
+      }),
+      this.runtime.onExit((how) => this.exited(how)),
+    );
+  }
+
+  /* -- being given back, and coming back ---------------------------------- */
+
+  /** Whether anything is going on that must not be cut short. A turn in flight,
+   *  a run held between steps, and a question on screen are all of it. A closed
+   *  conversation is never evictable: it is already going. */
+  busy(): boolean {
+    return (
+      this.closed ||
+      this.inFlight > 0 ||
+      this.guard.paused.on ||
+      this.guard.confirmations.pending.length > 0 ||
+      this.guard.asking.pending.length > 0
+    );
+  }
+
+  /** When somebody last asked this conversation for something. */
+  activeAt(): number | null {
+    return this.askedAt;
+  }
+
+  /**
+   * Give the child back, because nothing is being asked of it.
+   *
+   * A `killed` child and a conversation with no runtime: nothing was
+   * interrupted, so nothing is reported as interrupted, and the transcript is
+   * whole. The next prompt starts another child against the same session file —
+   * which is where this conversation has been writing all along.
+   */
+  async unload(): Promise<boolean> {
+    if (this.busy() || this.gone !== null) return false;
+    this.givingBack = true;
+    try {
+      await this.runtime.stop();
+    } finally {
+      this.givingBack = false;
+    }
+    if (this.gone === null) return false;
+    /* The exit handler refused this session the way a death does. Coming back
+       is the whole point of an eviction, so the refusal is undone. Everything
+       Pi said about the session stays: it is the same session file, and the
+       next child reports the same model, name and room for it. */
+    this.gone = null;
+    this.givenBack = true;
+    this.options.onRuntimeUnloaded?.();
+    return true;
+  }
+
+  /** Start a child again, after an idle one was given back. */
+  private async wake(): Promise<void> {
+    if (!this.givenBack) return;
+    const runtime = await this.startChild();
+    this.runtime = runtime;
+    this.givenBack = false;
+    this.attend();
+    await this.reread();
+  }
 
   /** Every event, before the relay burns what it needs. */
   heard(event: Record<string, unknown>): void {
@@ -316,6 +418,10 @@ class Hosted implements GrapheSession {
   /** The child is gone. Everything waiting is settled as cancelled. */
   exited(how: ChildExit): void {
     this.gone = how;
+    /* Given back for being idle: not a death and not a stop. The transcript is
+       whole, nothing was in flight, and the next prompt starts another child in
+       the same session file — so nothing is said on the stream at all. */
+    if (this.givingBack) return;
     this.inFlight = 0;
     for (const resolve of this.rest.splice(0)) resolve();
     // A question nobody can answer any more. The promise belongs to the card
@@ -351,9 +457,15 @@ class Hosted implements GrapheSession {
   }
 
   /** One command, or a refusal. Never a write to a child that has gone. */
-  private send(command: { type: string; [key: string]: unknown }): Promise<Record<string, unknown>> {
-    if (this.closed) return Promise.reject(new Error('That project is no longer open.'));
-    if (this.gone !== null) return Promise.reject(new Error('That conversation is no longer running.'));
+  private async send(command: { type: string; [key: string]: unknown }): Promise<Record<string, unknown>> {
+    if (this.closed) throw new Error('That project is no longer open.');
+    /* A child given back for being idle is not a child that died: asking this
+       conversation something starts one again, against the same session file.
+       A child that died is not started again — that run was interrupted, and
+       reissuing it is not this layer's to do. */
+    if (this.givenBack) await this.wake();
+    if (this.gone !== null) throw new Error('That conversation is no longer running.');
+    this.askedAt = Date.now();
     return this.runtime.send(command);
   }
 
@@ -544,6 +656,9 @@ class Hosted implements GrapheSession {
   dispose(): void {
     if (this.closed) return;
     this.closed = true;
+    // Off the eviction registry first: a conversation that is closing is not
+    // one the ceiling should reach for.
+    childRuntimes.forget(this.token);
     this.guard.paused.hold(false);
     this.guard.releaseEverything();
     for (const resolve of this.rest.splice(0)) resolve();
@@ -676,6 +791,12 @@ class Hosted implements GrapheSession {
   /** The conversation so far, off the file the child is writing to. Called
    *  before this session is handed back, for the reason `history` gives. */
   async readBack(): Promise<void> {
+    /* Pi's own account of the session arrives on a wire and the constructor
+       asks for it without waiting, so `conversation` is null until the answer
+       lands. Reading the transcript before then finds no file and comes back
+       with an empty thread, which is what the window would draw for a
+       conversation that has one. */
+    await this.firstRead;
     const file = this.conversation;
     if (file === null) return;
     const read = await readTranscript(file).catch(() => null);

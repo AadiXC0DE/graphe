@@ -187,10 +187,16 @@ describe('the window actually sends what was decided', () => {
 describe('every session Plan has to reach', () => {
   const SHELL = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
-  /** Every `createSession({ … })` in the shell, as the text of its arguments. */
+  /** Every `openSession({ … })` in the shell, as the text of its arguments.
+   *
+   * The shell goes through `openSession`, which picks the process a
+   * conversation's agent is hosted in and builds the same options either way,
+   * so every place a session is opened is a call of that name. Scanning for
+   * the two implementations behind it would miss the whole point: a fourth
+   * call site would be a hole nobody looked at. */
   function sessionsBuilt(): readonly string[] {
     const built: string[] = [];
-    const opener = 'createSession({';
+    const opener = 'openSession({';
     for (let at = SHELL.indexOf(opener); at !== -1; at = SHELL.indexOf(opener, at + 1)) {
       let depth = 0;
       let end = at + opener.length - 1;

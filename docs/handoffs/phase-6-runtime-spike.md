@@ -90,12 +90,28 @@ Measured on this machine (Apple M1, Node 22.21.1), from the passing test run:
 - **Start latency**, `startRuntime` → `ready`: ~1.3–3.0 s cold per child. That
   covers a full Pi boot — settings, catalogue, session manager, extensions.
 - **Per-test cost** in the spike, each starting one real child: 0.6–5.0 s.
-- **Memory per runtime: not measured.** This is the honest gap. Measuring it
-  needs a packaged worker under Electron's Node on a settled conversation, and
-  that needs the build entry (below) and the `notePackagedApp` seam; a Node-only
-  figure would be a different number for a different process and is not worth
-  printing as if it were this one. 6.2's "bound concurrent runtimes using
-  measured memory capacity" therefore remains unstarted.
+- **Memory per runtime: 105 MB** (Apple M1 8 GB, macOS 24.6.0, Electron 44.4.1
+  / Node 24.21.0, Pi 0.85.1). Read with `ps -o rss=` from the shell on a child
+  that has booted Pi and settled: 100–105 MB at rest, 145–155 MB in the first
+  seconds of boot. A whole app with children open measured **51.5 MB per
+  booted child, 112.6 MB for the shell, 410 MB for the whole tree** under
+  `node scripts/measure-runtime.mjs --scenario=child`. The two disagree because
+  the second is taken seconds after boot, before Pi's lazily-loaded parts are
+  resident; the ceiling is worked out from the settled figure, since
+  under-counting memory is the direction that hurts. `RSS_PER_CHILD_BYTES` in
+  `electron/services/runtime-supervisor.ts` holds it.
+- **The ceiling**, `floor(free × 0.5 / 105MB)` clamped to `[2, 8]`: **2** on
+  this machine at launch (117 MB free), 5 on a machine with 1 GB free. Written
+  to the app log the first time a child is registered. Verified end to end:
+  three conversations opened with `GRAPHE_CHILD_RUNTIME=1` left **two children
+  alive** — the third evicted the quietest, and the window switched tabs in
+  36 ms with both alive.
+- **Confirm-dialog deadline.** The child refuses a call the shell has not
+  answered within `JUDGE_PATIENCE_MS` = **120 s** (`src/agent/pi/runtime-child.ts`).
+  A `confirm` verdict therefore has 120 s to reach a person and come back, and
+  the card in the window carries no timer of its own — a person who leaves it
+  is answered by that refusal, which is the documented outcome rather than a
+  made-up yes.
 - **Child boot under Electron's Node: verified** during the spike, separately
   from the suite — the shipped `dist/bundle/rpc-entry.js` served a full
   scripted turn under `ELECTRON_RUN_AS_NODE`, which is the packaged-worker
@@ -156,37 +172,76 @@ Stated plainly, as 6.5 requires:
 
 ## What a full migration would still need
 
-1. **A build entry for the child.** `scripts/build-electron.mjs` needs one item
-   mirroring the probe-runner's (`src/agent/pi/runtime-child.ts` →
-   `dist-electron/runtime-child.mjs`, ESM, the same `createRequire` banner), and
-   `runtime-child.mjs` added to the final `console.log`. **Not done** — the file
-   is outside this ticket's ownership. The supervisor falls back to the built
-   path and to `GRAPHE_RUNTIME_CHILD`, which is how the test builds it with
-   esbuild itself, so nothing here is blocked by it.
-2. **Wiring `electron/main.ts`.** Replacing the in-process `createSession` in
-   the runtime-launch regions with `startRuntime`, and routing
-   `onEvent` → `forwardTo`. Deliberately untouched: the instruction is that the
-   app keeps working exactly as it does now while the spike proves itself.
+1. **A build entry for the child.** Done: `scripts/build-electron.mjs` builds
+   `src/agent/pi/runtime-child.ts` → `dist-electron/runtime-child.mjs`, ESM with
+   the same `createRequire` banner, and `npm run app:build` names it. A packaged
+   copy resolves it through `app.asar.unpacked` — see `childProgram()` and the
+   `asarUnpack` entry in `electron-builder.js` — and
+   `scripts/verify-package.mjs` checks the file is unpacked and that the real
+   binary starts it far enough to say `ready`.
+2. **Wiring `electron/main.ts`.** Done: all three `createSession(` sites call
+   `openSession`, and the choice comes from `prefs.runtime`. The default is
+   still `in-process`.
 3. **The `judge` callback wired to the real Guard**, including `Confirmations`,
-   `Asking`, `Paused` and the restore-point timeline — see the gap above.
-4. **`ChildExit.unanswered` connected to the shell's dialog registry**, so a
-   named pending question settles as cancelled with the documented value. The
-   supervisor reports the ids; nobody consumes them yet.
-5. **The durable run journal.** `wroteRunNote` / `readRunNotes` /
-   `recoverAfterRestart` already exist and already answer "interrupted" for
-   in-flight work. A child exit should write and clear those notes; not wired.
-6. **Idle eviction and a concurrency ceiling**, which need the memory figure
-   that is still missing.
-7. **A `pi` upgrade contract test** for the RPC shapes, so a pre-1.0 breaking
-   change fails loudly rather than silently.
+   `Asking`, `Paused` and the restore-point timeline. Done: `guardFor()` builds
+   it in the shell and `judge` is the one part that crosses.
+4. **`ChildExit.unanswered` connected to the shell's dialog registry.** Done:
+   `Hosted.exited` calls `guard.releaseEverything()` and emits
+   `questions-withdrawn`/`asking-withdrawn`.
+5. **The durable run journal.** Still open. `wroteRunNote` / `readRunNotes` /
+   `recoverAfterRestart` exist; a child-hosted prompt does not yet write a note,
+   so a child that dies leaves the ordinary transcript marker and nothing at the
+   next launch.
+6. **Idle eviction and a concurrency ceiling.** Done: `ChildRuntimes` in
+   `electron/services/runtime-supervisor.ts`, with `IDLE_TAKE_DOWN_MS` = 10
+   minutes, the ceiling above, and `tests/child-eviction.test.ts` driving both
+   with an injected clock and injected readings.
+7. **A `pi` upgrade contract test** for the RPC shapes. Done:
+   `tests/rpc-contract.test.ts`, which asserts the command and event names
+   against the installed `docs/rpc.md` and pins the version they were read off.
+
+## What is still needed before the child path can be the default (2.8)
+
+The switch is honoured end to end — `npm run test:electron` with
+`GRAPHE_CHILD_RUNTIME=1` is a second entry of the Electron smoke job — and the
+default deliberately stays `in-process` until all four of these are true:
+
+1. **The packaged smoke starts a child in the bundle.** `verify:package` starts
+   one by hand and waits for `ready`, which is most of it; what is missing is
+   the same thing through `scripts/packaged-smoke.mjs`, in a window, with a real
+   turn. That script is not this ticket's.
+2. **The memory numbers are recorded.** Done — see above.
+3. **The `spins` fixture no longer freezes the window.** *Not done, and this is
+   the plan's own stated acceptance test.* `tests/fixtures/extensions/spins/index.mjs`
+   is a factory with `for (;;) {}` in it, and the plan's reason for 6.2 is that
+   such an add-on must not freeze the window. Today the fixture is only
+   exercised by `tests/extension-probe-child.test.ts`, which runs it in the
+   *probe* process — never as a conversation's add-on. The acceptance needs an
+   Electron smoke case: a project whose agent folder carries `spins`, a
+   conversation opened with `GRAPHE_CHILD_RUNTIME=1`, and the window still
+   answering while that factory does not. That belongs in
+   `tests/electron/smoke.test.ts`, which **this ticket may not edit** — it is
+   owned by the canvas work this round. See the integration delta in the report.
+4. **A conversation whose host died says so at the next launch.** Item 5 above:
+   the run note is not written for a child-hosted prompt.
 
 ## Reproducing
 
 ```
-npx vitest run tests/runtime-spike.test.ts
+npx vitest run tests/runtime-spike.test.ts tests/child-session.test.ts \
+  tests/rpc-contract.test.ts tests/child-eviction.test.ts
 ```
 
-Twelve tests, green. `npx tsc --noEmit` and `npx eslint` on all four files are
-clean. The spike builds its own child with esbuild (the same options
+The spike's twelve are green. The child session's ten and the contract test's
+eleven build their own child with esbuild (the same options
 `tests/extension-probe-child.test.ts` uses for the probe runner) into a temp
-folder and points `GRAPHE_RUNTIME_CHILD` at it, so it needs no built app.
+folder and point `GRAPHE_RUNTIME_CHILD` at it, so they need no built app. The
+eviction test starts nothing at all: the clock, the free-memory reading and the
+per-child figure are injected, which is what makes a ten-minute deadline
+testable in a second.
+
+The measurements above come from:
+
+```
+node scripts/measure-runtime.mjs --scenario=child,child-worked
+```

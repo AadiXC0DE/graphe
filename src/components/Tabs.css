@@ -245,6 +245,18 @@
   color: var(--text-faint);
 }
 
+/* The canvas glyph. Fainter than the state mark beside it: it says what the tab
+   is, which does not change, and the thing worth looking at is what it is doing. */
+.tabs__kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--text-faint);
+}
+
 .tabs__mark--working {
   width: 9px;
   height: 9px;

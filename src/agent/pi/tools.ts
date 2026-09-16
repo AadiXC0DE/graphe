@@ -51,6 +51,8 @@ import { Type } from 'typebox';
 import { READABLE, documentSaid, readDocument } from './documents';
 
 import { searchSymbolsTextTool } from './search-symbols-text';
+import { groupTokens } from '../../design/grouping';
+import { readTokensFor, type TokenRead } from '../../../electron/services/tokens';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
@@ -1863,6 +1865,77 @@ export const readMapTool = (cwd: string): ToolDefinition => ({
 });
 
 /* -------------------------------------------------------------------------- */
+/* The values the project styles with                                           */
+/* -------------------------------------------------------------------------- */
+
+/** Enough of a value to recognise it in a line, and short enough that forty of
+ *  them do not fill the context with font stacks. */
+const MOST_IN_A_VALUE = 60;
+
+export const TOKEN_WORDS = {
+  nothing:
+    'This project declares no values of its own in a stylesheet, so there is no design system here to read. Style with literals, or ask the person which values they want.',
+  heading: (sheets: number): string =>
+    `The values this project styles with, read from ${String(sheets)} ${sheets === 1 ? 'stylesheet' : 'stylesheets'}:`,
+  advice:
+    'Use these rather than inventing values of your own. A new colour or size the project does not already have is a change to its design system, and belongs in the stylesheet that declares the rest.',
+} as const;
+
+/** The tokens as the grouped list an agent reads before it styles anything. */
+export function saysTokens(read: TokenRead | null): string {
+  if (read === null) return TOKEN_WORDS.nothing;
+  const groups = groupTokens(read.tokens);
+  if (groups.length === 0) return TOKEN_WORDS.nothing;
+  const lines: string[] = [TOKEN_WORDS.heading(read.sheets)];
+  for (const group of groups) {
+    lines.push('', `${group.title}:`);
+    for (const token of group.tokens) {
+      const value =
+        token.value.length > MOST_IN_A_VALUE
+          ? `${token.value.slice(0, MOST_IN_A_VALUE)}…`
+          : token.value;
+      const used =
+        token.used === 0
+          ? 'used nowhere'
+          : token.used === 1
+            ? 'used once'
+            : `used ${String(token.used)} times`;
+      lines.push(`- ${token.name}: ${value} (${used}, ${token.file}:${String(token.line)})`);
+    }
+    if (group.hidden > 0) lines.push(`  and ${String(group.hidden)} more like these.`);
+  }
+  lines.push('', TOKEN_WORDS.advice);
+  return lines.join('\n');
+}
+
+/**
+ * The project's own values, read out of its stylesheets.
+ *
+ * What colours does this project have, and who uses `--space-4` — the agent had
+ * no way to ask, so it invented values and left a project with two spacings.
+ * Read-only, and cheap: nothing is read until it is called.
+ */
+export const readTokensTool = (cwd: string): ToolDefinition => ({
+  name: 'read_tokens',
+  label: 'Reading the project’s own values',
+  description:
+    'The values this project styles with: every custom property its stylesheets declare, grouped into colour, type, spacing, corners, shadow and sizes, each with the file and line it is written on and how many places reach for it. Read it before styling anything, so what you build uses the values the project already has.',
+  promptSnippet: 'read_tokens(): the values this project styles with, by group',
+  promptGuidelines: [
+    'Read it before writing any CSS, so a colour or a spacing you add is one the project already has.',
+    'A value used nowhere is one nothing has needed yet. Prefer the ones the project leans on.',
+  ],
+  parameters: Type.Object({}),
+  // Parallel: it reads files and holds up nothing, so a batch beside it is a
+  // batch that still runs.
+  executionMode: 'parallel',
+  execute: async (): ToolResult => ({
+    content: [{ type: 'text', text: saysTokens(await readTokensFor(cwd)) }],
+    details: {},
+  }),
+});
+
+/* -------------------------------------------------------------------------- */
 /* Where a piece of work goes instead of running here                         */
 /* -------------------------------------------------------------------------- */
 
@@ -2450,6 +2523,7 @@ export const grapheTools = (
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),
+      readTokensTool(projectRoot),
       runChecksTool(projectRoot, agentDir, model, thinking, noted),
       // Here rather than beside `mcp`: that one only exists once a project has
       // something connected, and the project with nothing yet is the whole
@@ -2458,7 +2532,7 @@ export const grapheTools = (
       searchSymbolsTextTool(projectRoot),
     );
   } else {
-    tools.push(searchSymbolsTextTool(process.cwd()));
+    tools.push(searchSymbolsTextTool(process.cwd()), readTokensTool(process.cwd()));
   }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));

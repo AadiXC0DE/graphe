@@ -145,6 +145,7 @@ async function launchApp(
   profile: string,
   url: string,
   scripted?: string,
+  also: Readonly<Record<string, string>> = {},
 ): Promise<{ app: ElectronApplication; window: Page }> {
   const argv = ['.', `${PROFILE_SWITCH}=${profile}`];
   // Playwright hands this straight to the child process, so an inherited
@@ -156,6 +157,7 @@ async function launchApp(
   env[PROFILE_ENV] = profile;
   env['GRAPHE_DEV_SERVER_URL'] = url;
   if (scripted !== undefined) env['GRAPHE_TEST_MODEL'] = scripted;
+  for (const [name, value] of Object.entries(also)) env[name] = value;
   const resolved = resolveProfile(argv, env, profile);
   // Pi keeps credentials and its model list outside the app's profile unless it
   // is told otherwise, so this is what stops a run from reading — or writing —
@@ -556,6 +558,72 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       });
       expect(await window.locator('.tabs__title').allTextContents()).toEqual(['say three words']);
 
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  });
+
+  /* A provider that refuses is the one failure the app has to survive without
+     anybody asking: Pi retries it on its own, and until the window was told
+     about it the reply simply stopped for the whole backoff. The step is a real
+     HTTP refusal, so what is proven here is the ordinary adapter path — the
+     same one a live account takes — with only the far end replaced. */
+  it('waits out a refused turn, says so, then takes the retry', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // Two refusals and then the answer. The default backoff is two seconds, so
+    // the wait is real and short enough for one test.
+    model.replies([
+      { fails: { status: 529, times: 2, message: 'overloaded' } },
+      { says: ['carried on'] },
+    ]);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await window.locator('.pickerrow__open').first().waitFor({ timeout: 60_000 });
+      await window.locator('.pickerrow__open').first().click();
+      await window.locator('.welcome__title').first().waitFor({ timeout: 60_000 });
+
+      await window.locator('.composer__input').fill('ask while it is busy');
+      await window.locator('.composer__send').first().click();
+
+      /* The waiting line, drawn while the backoff runs. It is the same line a
+         service that will not answer produces, which is the point: one shape for
+         "something is happening and there is nothing to look at". */
+      const waiting = window.locator('.activity', {
+        hasText: /The service is busy, so I'll wait/,
+      });
+      const saidSo = await vi
+        .waitFor(async () => expect(await waiting.count()).toBeGreaterThan(0), {
+          timeout: 30_000,
+          interval: 50,
+        })
+        .then(() => true)
+        .catch(() => false);
+      expect(saidSo, 'the window said nothing while the provider was refusing').toBe(true);
+
+      // And the turn itself lands, once the refusals are used up.
+      const arriving = window.locator('.message--graphe .message__body .md__p').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).toBe('carried on'), {
+        timeout: 60_000,
+      });
+      // Back again: the line the wait ends with, kept as its own turn.
+      await vi.waitFor(
+        async () =>
+          expect(await window.locator('.activity', { hasText: /carrying on from where it stopped/ }).count()).toBeGreaterThan(0),
+        { timeout: 15_000 },
+      );
+      // Two refusals, then the answer: three attempts at the far end.
+      expect(model.asked.length).toBe(3);
       expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
       expect(thrown).toEqual([]);
     } finally {
@@ -1258,6 +1326,129 @@ suite('the app in a real window, on a profile nothing else uses', () => {
     } finally {
       await model.stop();
       await stopFirst();
+    }
+  }, 300_000);
+
+  it('runs two asks of a canvas in turn, in one conversation, with nothing prefixed', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    const model = await scriptedModel();
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, model.url);
+    const stop = dispose(app, profile, project);
+    // One turn per block, and the two canned sentences the cards end on.
+    model.replies([{ says: ['Drew the header.'] }, { says: ['Made it sticky.'] }]);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(window);
+
+      // A canvas made from what is in the box: one ask, carrying the draft.
+      await window.locator('.composer__input').fill('Draw the header');
+      await window.locator('.composer__canvas').click();
+      await window.locator('.canvas').first().waitFor({ timeout: 60_000 });
+      expect(await window.locator('.canvas').count()).toBe(1);
+
+      /* A second ask behind the first. The panel places it and opens on what it
+         just made, so the words go into the new card rather than into the one
+         already carrying a sentence. The two blocks in one lane are the chain
+         this test is about: the second is sent after the first settles rather
+         than beside it. */
+      await window.locator('.canvas__palette button', { hasText: 'Ask' }).first().click();
+      // The panel opens on what the palette just placed, so the words go into
+      // the new card. Picking a card here would retarget the panel at the one
+      // already carrying a sentence, and the new block would start out mute.
+      await window.locator('#canvas-block-says').fill('Then make it sticky');
+      await window.keyboard.press('Escape');
+
+      await window.locator('.canvas__start').first().click();
+
+      // Both blocks end `done`, and the window says so rather than only the file.
+      await vi.waitFor(
+        async () => expect(await window.locator('.canvas__card--done').count()).toBe(2),
+        { timeout: 120_000 },
+      );
+      await vi.waitFor(
+        async () => expect(await window.locator('.canvas__foot').innerText()).toContain('Finished'),
+        { timeout: 120_000 },
+      );
+
+      /* What the model was actually sent. The second block's prompt carries no
+         prefix: two asks in one lane are already in one transcript, so repeating
+         what the first came to would be the conversation talking to itself. */
+      const asked = JSON.stringify(model.asked);
+      expect(asked).toContain('Draw the header');
+      expect(asked).toContain('Then make it sticky');
+      expect(asked).not.toContain('came to');
+
+      // And the conversation kept both: the run's turns are in one transcript,
+      // which is what "in turn" means.
+      await window.locator('.canvas__endopen').first().click();
+      await vi.waitFor(
+        async () => expect(await window.locator('.message--you').count()).toBeGreaterThanOrEqual(2),
+        { timeout: 60_000 },
+      );
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await model.stop();
+      await stop();
+    }
+  }, 300_000);
+
+  it('stays answering while an add-on holds its own thread, in a child runtime', async () => {
+    const profile = freshProfile();
+    const project = fixtureProject(profile);
+    /* A real add-on of the kind a project carries, and the one shape broken
+       that no timer can rescue: the factory never yields. In a child this is
+       the child's thread; in-process it would be the app's, and the window
+       would stop answering altogether. */
+    const carried = join(project, '.pi', 'extensions', 'spins');
+    mkdirSync(carried, { recursive: true });
+    cpSync(
+      join(here, 'tests', 'fixtures', 'extensions', 'spins', 'index.mjs'),
+      join(carried, 'index.mjs'),
+    );
+    writeFileSync(
+      join(project, '.pi', 'extensions', 'spins', 'graphe.json'),
+      `${JSON.stringify({ name: 'spins', main: 'index.mjs' })}\n`,
+    );
+    const files = await serve(BUILT_RENDERER);
+    const { app, window } = await launchApp(profile, files.url, undefined, {
+      GRAPHE_CHILD_RUNTIME: '1',
+    });
+    const stop = dispose(app, profile, project);
+
+    const thrown: string[] = [];
+    window.on('pageerror', (error) => thrown.push(String(error)));
+
+    try {
+      await openTheFolder(window);
+      // Trust it the way a person does, so the factory actually runs.
+      await window.evaluate(() => {
+        void (window as unknown as { graphe: { trustCarried: unknown } });
+      }).catch(() => undefined);
+
+      /* The window still answers. This is the whole assertion: a spinner that
+         never turns and a click that never lands are what an in-process
+         add-on holding the thread produces, and neither is an exception. */
+      const stillThere = await window.evaluate(() => document.title);
+      expect(typeof stillThere).toBe('string');
+      const before = await window.locator('.app').count();
+      await window.locator('.shelf__new').first().click({ timeout: 30_000 });
+      await vi.waitFor(
+        async () => expect(await window.locator('.tabs__title').count()).toBeGreaterThanOrEqual(1),
+        { timeout: 60_000 },
+      );
+      expect(await window.locator('.app').count()).toBe(before);
+
+      expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
+      expect(thrown).toEqual([]);
+    } finally {
+      await stop();
     }
   }, 300_000);
 });

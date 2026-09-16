@@ -36,9 +36,11 @@
  * ever appears on either stream.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { freemem } from 'node:os';
+import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
@@ -69,8 +71,16 @@ const CHILD_PROGRAM_ENV = 'GRAPHE_RUNTIME_CHILD';
  *  string `ENV_AGENT_DIR`. */
 const AGENT_DIR_ENV = 'PI_CODING_AGENT_DIR';
 
-/** Built beside the shell, like the helper and the probe runner. */
-const BUILT_CHILD = fileURLToPath(new URL('../runtime-child.mjs', import.meta.url));
+/** Built beside the shell, like the helper and the probe runner, so the built
+ *  path is right in the bundle: esbuild inlines this file into `main.mjs`, and
+ *  `./` from there is where `dist-electron/runtime-child.mjs` sits. */
+const BUILT_CHILD = fileURLToPath(new URL('./runtime-child.mjs', import.meta.url));
+
+/** Where electron-builder puts the child when it unpacks it: `asarUnpack` keeps
+ *  it a real file on disk, because an ESM entry inside the archive is not
+ *  something Node will import. Read without importing Electron — this file is
+ *  loaded by tests under plain node, where `resourcesPath` does not exist. */
+const UNPACKED_CHILD = 'dist-electron/runtime-child.mjs';
 
 /** How long a child gets to say it is ready. Past this it is killed and the
  *  start fails: a runtime nobody can reach is not a runtime. */
@@ -83,6 +93,225 @@ const STOP_GRACE_MS = 3_000;
 
 /** How much of a child's own output is kept for a log line. */
 const SAID_MOST = 4_000;
+
+/** What one child is holding, in bytes, straight from the OS. Read with `ps`
+ *  rather than from Electron's own process list, because the child is not an
+ *  Electron process — it is the same binary behaving as node. Null when it
+ *  cannot be read, which is a missing number rather than a zero. */
+export function rssOf(pid: number): number | null {
+  if (!(pid > 0)) return null;
+  const read = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' });
+  const kb = Number.parseInt((read.stdout ?? '').trim(), 10);
+  return Number.isFinite(kb) && kb > 0 ? kb * 1024 : null;
+}
+
+/** How long a conversation can sit with nothing asked of it before its child is
+ *  taken down. Long enough that a person switching tabs does not pay a start,
+ *  short enough that a project left open overnight is not holding a Pi per tab. */
+export const IDLE_TAKE_DOWN_MS = 10 * 60_000;
+
+/** The share of free memory the children may hold between them. */
+const SHARE_OF_FREE_MEMORY = 0.5;
+
+/** What one settled child really holds, measured on this machine under
+ *  `ELECTRON_RUN_AS_NODE` — the same interpreter a shipped app gives it. The
+ *  ceiling is worked out from this rather than from a guess, and the figure and
+ *  the machine it came from are in `docs/handoffs/phase-6-runtime-spike.md`. */
+export const RSS_PER_CHILD_BYTES = 105 * 1024 * 1024;
+
+/** Fewer than two children makes the child runtime a downgrade, and more than
+ *  eight is more Pis than anybody has conversations. */
+const LEAST_CHILDREN = 2;
+const MOST_CHILDREN = 8;
+
+/** How often the idle rule is looked at. A minute of slack on a ten-minute
+ *  deadline costs nothing and keeps the timer out of the way of a turn. */
+const SWEEP_EVERY_MS = 60_000;
+
+/**
+ * One conversation's child, as the eviction registry reaches it.
+ *
+ * Deliberately three facts and an act: whether anything is going on that must
+ * not be cut short, when somebody last asked it for something, and how to take
+ * it down. The registry decides *when*; the session owns *what that means*,
+ * which is why nothing here knows about Pi, sessions or windows.
+ */
+export type Evictable = {
+  /** Anything that must not be interrupted: a turn in flight, a run held
+   *  between steps, a question on screen. A quiet child is evictable. */
+  busy(): boolean;
+  /** The last moment somebody asked this conversation for something, or null
+   *  when they never have. */
+  activeAt(): number | null;
+  /** Give the child back because nothing is being asked of it. Answers whether
+   *  it really went, so the registry only ever counts children that are gone. */
+  unload(): Promise<boolean>;
+};
+
+/** The clock and the readings the two rules are worked out from, injected so a
+ *  test can drive eviction without waiting ten minutes or owning a small
+ *  machine. */
+export type RegistryPicks = {
+  now: () => number;
+  /** Free memory at launch, in bytes. */
+  freeMemory: () => number;
+  /** What one settled child holds, in bytes. */
+  rssPerChild: () => number;
+  /** How long a conversation may sit untouched before its child is given back. */
+  idleFor: number;
+  /** Where the launch line goes. Left out, the app's own log once the shell has
+   *  pointed it there, and the process's output until then. */
+  log?: (what: string, extra?: Record<string, unknown>) => void;
+};
+
+/**
+ * Every live child, and the two rules that bound them.
+ *
+ * One child per conversation is the point of 6.2 and it costs about a hundred
+ * megabytes each, so two things have to be true at once: a conversation nobody
+ * has touched for a while gives its child back, and a prompt that would take the
+ * process past what this machine can hold takes somebody else's quiet child
+ * rather than being refused. Both end the same way — `unload`, which is a
+ * `killed` child and a conversation that is `unloaded` — so the only thing a
+ * person notices is the next prompt in that conversation being slower.
+ *
+ * The ceiling is worked out once, when this registry is made, from the memory
+ * the machine had free and what a child really holds. It is written to the log
+ * the first time a child is registered, so a report of "too many runtimes" has
+ * the number that decision was made with.
+ */
+export class ChildRuntimes {
+  readonly #held = new Map<number, Evictable>();
+  readonly #picks: RegistryPicks;
+  #next = 1;
+  #sweeping: NodeJS.Timeout | null = null;
+  #said = false;
+  readonly ceiling: number;
+
+  constructor(picks: RegistryPicks) {
+    this.#picks = picks;
+    this.ceiling = ceilingFor(picks.freeMemory(), picks.rssPerChild());
+  }
+
+  /** How many children are alive right now. */
+  get count(): number {
+    return this.#held.size;
+  }
+
+  /** Take responsibility for one conversation's child, and answer with the
+   *  handle the caller keeps to ask about it afterwards. Accounting only: the
+   *  room a new child needs is made first, by `makeRoom`. */
+  register(child: Evictable): number {
+    if (!this.#said) {
+      this.#said = true;
+      (this.#picks.log ?? writeRuntimeLog)('child runtimes', {
+        ceiling: this.ceiling,
+        rssPerChildMb: Math.round(this.#picks.rssPerChild() / 1048576),
+        freeMemoryMb: Math.round(this.#picks.freeMemory() / 1048576),
+      });
+    }
+    const token = this.#next;
+    this.#next += 1;
+    this.#held.set(token, child);
+    if (this.#sweeping === null) {
+      const bell = setInterval(() => {
+        void this.sweep();
+      }, SWEEP_EVERY_MS);
+      // A timer that held the process up would keep a shell whose last
+      // conversation has closed from ever exiting.
+      bell.unref();
+      this.#sweeping = bell;
+    }
+    return token;
+  }
+
+  /**
+   * Make room for one more child, before there is one.
+   *
+   * This is the ceiling as the plan states it: past it, the prompt that would
+   * start another child takes the quiet one nobody has spoken to for longest
+   * instead of being refused. Nothing quiet to take — every other conversation
+   * is working — and the prompt goes through anyway, because somebody asking a
+   * question is not a request to say no to. A child that will not let go stays
+   * registered, so what is counted is children that are really alive.
+   */
+  async makeRoom(): Promise<void> {
+    /* Oldest first, and each one asked at most once: a child that will not let
+       go must not be asked again in a loop, and the loop must end even when
+       nothing does. A machine whose children all refuse keeps them, which is
+       the honest outcome — they are alive, and this is not the layer that kills
+       a process that would not stop. */
+    for (const spare of this.#quietestFirst()) {
+      if (this.#held.size < this.ceiling) return;
+      this.#held.delete(spare.token);
+      if (!(await spare.child.unload())) this.#held.set(spare.token, spare.child);
+    }
+  }
+
+  /** The child went, or the conversation closed. Nothing to evict afterwards. */
+  forget(token: number): void {
+    this.#held.delete(token);
+    if (this.#held.size === 0 && this.#sweeping !== null) {
+      clearInterval(this.#sweeping);
+      this.#sweeping = null;
+    }
+  }
+
+  /**
+   * Every child nothing has been asked of for `idleFor`, given back.
+   *
+   * Run on the registry's own timer, and directly by a test that would rather
+   * not wait ten minutes for the answer. A child that will not let go stays
+   * registered, so what is counted is children that are really alive.
+   */
+  async sweep(): Promise<void> {
+    const at = this.#picks.now();
+    for (const [token, child] of [...this.#held]) {
+      if (child.busy()) continue;
+      const last = child.activeAt();
+      if (last !== null && at - last < this.#picks.idleFor) continue;
+      if (await child.unload()) this.forget(token);
+    }
+  }
+
+  /** Every child that could be given back, quietest first. Read once, before
+   *  anything is asked of it: a list that changed under the loop would be a
+   *  loop whose end depends on children that refuse. */
+  #quietestFirst(): { token: number; child: Evictable }[] {
+    return [...this.#held]
+      .filter(([, child]) => !child.busy())
+      .sort(([, one], [, two]) => (one.activeAt() ?? 0) - (two.activeAt() ?? 0))
+      .map(([token, child]) => ({ token, child }));
+  }
+}
+
+/** The ceiling: half of what was free at launch, divided by what a child
+ *  holds, and held between the two ends that make the runtime worth having. */
+function ceilingFor(freeMemory: number, rssPerChild: number): number {
+  if (!(rssPerChild > 0)) return LEAST_CHILDREN;
+  const fits = Math.floor((freeMemory * SHARE_OF_FREE_MEMORY) / rssPerChild);
+  return Math.min(MOST_CHILDREN, Math.max(LEAST_CHILDREN, fits));
+}
+
+/** Where the launch line goes until the shell points it at the app's log, which
+ *  is what a diagnostics report reads. */
+let writeRuntimeLog: (what: string, extra?: Record<string, unknown>) => void = (what, extra) => {
+  console.info(what, extra ?? {});
+};
+
+/** Point the runtime log at the app's own log, so the ceiling is a line
+ *  somebody reporting "too many runtimes" can be asked for. */
+export function noteRuntimeLog(write: (what: string, extra?: Record<string, unknown>) => void): void {
+  writeRuntimeLog = write;
+}
+
+/** Every child this process is holding, and the rules that bound them. */
+export const childRuntimes = new ChildRuntimes({
+  now: () => Date.now(),
+  freeMemory: () => freemem(),
+  rssPerChild: () => RSS_PER_CHILD_BYTES,
+  idleFor: IDLE_TAKE_DOWN_MS,
+});
 
 /** What the shell answers about one call. Mirrors the Guard's own verdict as
  *  far as the boundary needs it: run, or do not and say why. */
@@ -253,7 +482,24 @@ function responseFor(request: UiRequest, answer: ExtensionAnswer): Record<string
 export function childProgram(): string | null {
   const named = (process.env[CHILD_PROGRAM_ENV] ?? '').trim();
   if (named !== '') return existsSync(named) ? named : null;
-  return existsSync(BUILT_CHILD) ? BUILT_CHILD : null;
+  if (existsSync(BUILT_CHILD)) return BUILT_CHILD;
+  return unpackedChild();
+}
+
+/**
+ * The child as a shipped app holds it, in `app.asar.unpacked`.
+ *
+ * An ESM entry inside the archive is not something Node reliably imports, which
+ * is why `asarUnpack` keeps this one a real file. `resourcesPath` is read off
+ * `process` rather than from Electron's module, because this file is loaded
+ * under plain node by the suite and by the spike; absent — an unpackaged run —
+ * there is nothing to find, which is the honest answer.
+ */
+function unpackedChild(): string | null {
+  const resources: unknown = process.resourcesPath;
+  if (typeof resources !== 'string' || resources === '') return null;
+  const at = join(resources, 'app.asar.unpacked', UNPACKED_CHILD);
+  return existsSync(at) ? at : null;
 }
 
 /**
@@ -400,6 +646,15 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
     }
     const event = asObject(line);
     if (event === null) return;
+    /* What this child costs, once a turn has come to rest: the moment nothing
+       is streaming and nothing is queued, so what is read is the runtime
+       holding a conversation rather than a turn in progress. Recorded rather
+       than acted on — the ceiling is a launch-time decision, and this is the
+       figure that says whether it was a good one. */
+    if (event['type'] === 'agent_settled' && pid > 0) {
+      const bytes = rssOf(pid);
+      if (bytes !== null) writeRuntimeLog('child settled', { pid, rssMb: Math.round(bytes / 1048576) });
+    }
     if (event['type'] === 'response') {
       const id = typeof event['id'] === 'string' ? event['id'] : '';
       const settle = pending.get(id);

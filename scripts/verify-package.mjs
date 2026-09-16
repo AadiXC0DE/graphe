@@ -265,6 +265,45 @@ for (const bundle of bundles) {
     } catch (cause) {
       fault(`the memory store does not open inside the bundle: ${String(cause).split('\n')[0]}`);
     }
+
+    /* The child runtime, which a conversation is hosted in once the switch is
+       on. Two claims, and the second is the one that costs an afternoon when it
+       is false: the file is *outside* the archive — an ESM entry Node has to
+       import, which is why `asarUnpack` names it — and the real binary under the
+       real interpreter starts it far enough to say it is ready. A worker that
+       cannot say that is a conversation that cannot open, and nothing else in
+       the pipeline notices: the app installs, opens, and fails on the first
+       message somebody sends. */
+    const child = join(app, 'Contents/Resources/app.asar.unpacked/dist-electron/runtime-child.mjs');
+    if (!(await exists(child))) {
+      fault('dist-electron/runtime-child.mjs is not unpacked from the archive — no conversation can start one');
+    } else {
+      pass('the child runtime is unpacked, where an ESM entry can be imported');
+      /* Pi's entry, handed over the way the shell hands it over. `startRuntime`
+         sets these three, so this is the same start rather than a lookalike. */
+      const ready = [
+        "const { spawn } = require('node:child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(child)}, '--no-extensions', '--no-approve'], {`,
+        "  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', GRAPHE_RUNTIME_NONCE: 'verify',",
+        `    GRAPHE_RUNTIME_PI_ENTRY: ${JSON.stringify(join(app, 'Contents/Resources/app.asar.unpacked/node_modules', PI, 'dist/index.js'))} },`,
+        "  stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],",
+        '});',
+        "let said = '';",
+        'child.stdio[3].setEncoding("utf8");',
+        `child.stdio[3].on('data', (c) => { said += c; if (said.includes('"ready"')) { console.log('ready:' + said.trim()); child.kill('SIGKILL'); } });`,
+        "child.on('exit', () => { if (!said.includes('\"ready\"')) { console.error('no ready line'); process.exit(1); } });",
+      ].join('\n');
+      try {
+        const { stdout } = await run(binary, ['-e', ready], {
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          timeout: 90_000,
+        });
+        if (/"type":"ready"/.test(stdout)) pass('the child runtime starts in the bundle and says it is ready');
+        else fault(`the child runtime started but never said it was ready — ${stdout.trim()}`);
+      } catch (cause) {
+        fault(`the child runtime does not start in the bundle: ${String(cause).split('\n')[0]}`);
+      }
+    }
   }
 }
 

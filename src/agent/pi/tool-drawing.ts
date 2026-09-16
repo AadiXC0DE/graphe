@@ -136,9 +136,12 @@ function draw(
   invoke: (render: AnyRenderer) => unknown,
 ): string[] | null {
   if (typeof renderer !== 'function') return null;
-  const component = componentIn(invoke(renderer as AnyRenderer));
-  if (component === null) return null;
   try {
+    // Calling the renderer is inside the try as well: an add-on whose drawing
+    // throws on the way to a component is the same failure as one whose
+    // `render` does, and neither is a reason to lose the step.
+    const component = componentIn(invoke(renderer as AnyRenderer));
+    if (component === null) return null;
     const lines = component.render(width);
     if (!Array.isArray(lines)) return null;
     return plainLines(lines.filter((one): one is string => typeof one === 'string'));

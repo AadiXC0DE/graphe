@@ -27,7 +27,7 @@ every key in it yours to change.
 
 <br>
 
-<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files on the left, things to start from in the middle, and a rail on the right holding what is running in the background and what the sitting has cost.">
+<img src="site/assets/web/app-start-dark.webp" width="100%" alt="The Graphe window: the project's files down the left, things to start from in the middle, and a rail on the right holding what git has, what is running in the background, and what is waiting on you.">
 
 </div>
 
@@ -66,10 +66,10 @@ without sub-agents or plan mode. Graphe is what it becomes with both, plus the w
 the version history, the memory, the money, and the pull request.
 
 One request can go wide as **helpers**, each with its own role and its own context, the read-only
-ones unable to touch anything and the builder working in a copy of the project it can only reach
-inside. A chat works in your project folder; ask for a worktree and it gets a copy of its own to
-work in beside the rest. Set a job going and close the window: it carries on, and you come back to
-what finished, what is waiting, and what it cost.
+ones unable to touch anything and the builder working in a worktree it can only reach inside. A
+chat works in your project folder; ask for a worktree and it gets one of its own to work in beside
+the rest. Set a job going and close the window: it carries on, and you come back to what finished,
+what is waiting, and what it cost.
 
 ---
 
@@ -80,16 +80,16 @@ what finished, what is waiting, and what it cost.
 | **Made yours** | Light and dark, following the system; every chord rebindable from one registry the palette and the keyboard both read, and `graphe.css` for anything the builder does not offer |
 | **One thing decides when it carries on** | A checklist, a goal, a helper that finished, an add-on asking for a turn and a run that fell over are five reasons through one door, counted against one budget and named out loud |
 | **Works in parallel, and keeps working** | Helpers run side by side, each in its own context; jobs outlast your attention |
-| **One request, many helpers** | Each gets its own role and its own context: reviewer, researcher and helper read; the builder writes, in a copy it can only reach inside |
+| **One request, many helpers** | Each gets its own role and its own context: reviewer, researcher and helper read; the builder writes, in a worktree it can only reach inside |
 | **One goal, kept working toward** | A sentence that says what done means; it checks after every round and starts the next itself |
-| **A copy, when you ask for one** | A chat works in your project folder; a worktree gives it a copy of its own to build in, with its own branch, and a merge back when you say so |
-| **A review with a verdict** | A pull request is read in a copy of its own, so nothing you have open moves. Ships, needs work, or do not land, findings ranked with file and line, and one press posts them |
+| **A worktree, when you ask for one** | A chat works in your project folder; a worktree gives it one of its own to build in, with its own branch, and a merge back when you say so |
+| **A review with a verdict** | A pull request is read in a worktree of its own, so nothing you have open moves. Ships, needs work, or do not land, findings ranked with file and line, and one press posts them |
 | **The bill, before it lands** | An estimate before a big job, a running total, a ceiling that ends it, in your currency, not tokens |
-| **Memory between sittings** | Facts kept per project on your machine, ranked by meaning, loaded at the next start |
+| **Memory between sessions** | Facts kept per project on your machine, ranked by meaning, loaded at the next start |
 | **A browser, beside the conversation** | The running project lives in the window next to the agent building it, servers that stay up, and a comment on any element that reaches the agent with the line it was written on |
 | **A browser it can drive anywhere** | Any address, not just your own site: opens it, reads it, presses things, types into them, on from the first turn |
 | **Works the computer itself** | For the tools that are not websites: a picture of the screen, then presses, typing and drags on it |
-| **A folder of several projects** | `backend/` and `frontend/` beside each other: each with its own lines of work, versions and preview |
+| **A folder of several projects** | `backend/` and `frontend/` beside each other: each with its own branches, versions and preview |
 | **Things a project always does** | Format what was written, run the tests, whatever this project expects every time, in one file kept with the project |
 | **A real debugger** | Attaches lldb, dlv or debugpy to a stuck program; reads frames, steps, evaluates |
 | **Skills off the shelf** | `@skill` brings in craft you installed; `/command` expands a prompt you wrote |
@@ -143,18 +143,18 @@ lowered.
 
 ---
 
-## How a sitting goes
+## How a session goes
 
 1. **Point it at a project.** Open a folder and it is one, recent ones sit on a shelf with what each cost last time.
 2. **Say what you want, however you have it.** Type it, paste a screenshot, point at a file. There is no syntax to learn.
 3. **Big jobs come back as a plan.** A numbered plan, an estimate, and a wait for "Go ahead". Small jobs just get done.
-4. **It works where you can see it.** The file tree marks what changed; the rail names what it's doing right now.
+4. **It works where you can see it.** The file tree marks what changed; the rail holds what git has, what is running in the background, and what is waiting on you.
 5. **You look, then you decide.** The diff is there file by file: take the whole thing, or take the three hunks you wanted.
-6. **Open a pull request.** A properly named line of work, a title that matches it, and the change described in the body.
+6. **Open a pull request.** A properly named branch, a title that matches it, and the change described in the body.
 
 <div align="center">
 
-<img src="site/assets/web/app-history-dark.webp" width="49%" alt="The history view: every saved moment drawn as lines, with short ids, parents and the names on each.">
+<img src="site/assets/web/app-history-dark.webp" width="49%" alt="The history view: every commit drawn as lines, with short ids, parents and the names on each.">
 <img src="site/assets/web/app-skills-dark.webp" width="49%" alt="The skills view: craft installed off the shelf, each one described, ready to bring into a request.">
 
 </div>
@@ -230,7 +230,7 @@ Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Releasing: [RELEASING.md](RELE
 
 | | |
 |---|---|
-| `~/Library/Application Support/Graphe` | Checkouts and copies of your projects, conversation transcripts, the version timeline's working copies, logs, preferences and the recent-projects shelf. Credentials Graphe holds are sealed by the login keychain, never written in the clear |
+| `~/Library/Application Support/Graphe` | Checkouts and worktrees of your projects, conversation transcripts, the version timeline's working copies, logs, preferences and the recent-projects shelf. Credentials Graphe holds are sealed by the login keychain, never written in the clear |
 | `~/.pi/agent` | The agent runtime's own folder: the provider you connected, installed add-ons, and the project memory |
 | Your project folder | Ordinary git. Every version Graphe makes is a real commit in your repository |
 

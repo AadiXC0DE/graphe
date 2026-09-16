@@ -91,6 +91,15 @@ type Props = {
    */
   draft?: string;
   /**
+   * Turn what is in the box into a canvas, and open it.
+   *
+   * Handed the live words and the attachments rather than reading them back
+   * later: the press is the moment somebody decided this message is a set of
+   * steps, and a draft read afterwards is a draft that has moved on. Absent
+   * where there is nowhere for a canvas to go, and then the press is not drawn.
+   */
+  onCanvas?: (draft: string, attachments: readonly Attachment[]) => void;
+  /**
    * The box's own words on their way back to the conversation they belong to.
    *
    * Called when the box moves to another conversation, with what was in it,
@@ -162,6 +171,13 @@ type Props = {
    */
   readOnly?: string;
 };
+
+/** The one control here that is not about sending: what is in the box, as a set
+ *  of steps to draw and then run. */
+const CANVAS_WORDS = {
+  label: 'Canvas',
+  says: 'Draw these words as steps, then start them',
+} as const;
 
 /** What the file picker offers, in the same order a designer would think of
  *  them. The drop and paste paths accept the same things and say so themselves
@@ -300,6 +316,7 @@ export default function Composer({
   waiting,
   readOnly,
   onWait,
+  onCanvas,
 }: Props) {
   const [value, setValue] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -1047,6 +1064,26 @@ export default function Composer({
                 />
               </svg>
             )}
+          </button>
+        )}
+
+        {/* Beside the worktree row rather than in a menu: the sentence somebody
+            has just typed is the first step of the canvas, and turning it into
+            one is the control their hand is already near. */}
+        {onCanvas === undefined ? null : (
+          <button
+            type="button"
+            className="composer__canvas"
+            onClick={() => onCanvas(value, attachments ?? [])}
+            title={CANVAS_WORDS.says}
+            aria-label={CANVAS_WORDS.says}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <rect x="1.75" y="4" width="5.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+              <rect x="8.75" y="8.5" width="5.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M7.25 5.75h3v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+            <span>{CANVAS_WORDS.label}</span>
           </button>
         )}
 

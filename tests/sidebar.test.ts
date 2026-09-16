@@ -107,7 +107,6 @@ describe('the places the shelf can go', () => {
 
   it('offers no name for a screen that was retired', () => {
     const tips = [...placesIn(draw({ open: true }), '.shelf__more', 'tip')];
-    expect(tips).not.toContain('Canvas');
     expect(tips).not.toContain('Design');
   });
 });

@@ -407,8 +407,10 @@ function tenThousandMessages(marker) {
 /* ========================================================================== */
 
 /** Everything this run is allowed to know: a profile of its own, a renderer it
- *  serves itself, and a model that answers from a script. */
-async function launchApp(profile, url, providerUrl) {
+ *  serves itself, and a model that answers from a script. `extra` is where a
+ *  scenario asks for a switch the app reads at launch — `GRAPHE_CHILD_RUNTIME`
+ *  is the one that matters here. */
+async function launchApp(profile, url, providerUrl, extra = {}) {
   const launchArgs = ['.', `--profile=${profile}`, `--user-data-dir=${profile}`];
   const env = {};
   for (const [name, value] of Object.entries(process.env)) {
@@ -418,6 +420,7 @@ async function launchApp(profile, url, providerUrl) {
   env['GRAPHE_DEV_SERVER_URL'] = url;
   env['PI_CODING_AGENT_DIR'] = join(profile, 'agent');
   env['GRAPHE_TEST_MODEL'] = providerUrl;
+  Object.assign(env, extra);
 
   const spawnedAt = Date.now();
   const app = await electron.launch({ args: launchArgs, cwd: here, env });
@@ -1253,6 +1256,185 @@ async function projectCase(files, model, { name, chats, huge, turns }) {
 }
 
 /* ========================================================================== */
+/* The child runtime, one conversation each                                    */
+/* ========================================================================== */
+
+/** One conversation's process, as the OS reports it: the shell's own reading of
+ *  what a running child costs, taken the same way `rssOf` takes it. */
+function rssOfChildren(mainPid) {
+  const listing = spawnSync('ps', ['-o', 'pid=,ppid=,rss=,args=', '-ax'], { encoding: 'utf8' }).stdout ?? '';
+  const rows = listing
+    .split('\n')
+    .map((line) => {
+      const read = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+      return read === null
+        ? null
+        : { pid: Number(read[1]), ppid: Number(read[2]), rssKb: Number(read[3]), command: read[4] };
+    })
+    .filter((one) => one !== null);
+  const isChild = (one) => one.command.includes('runtime-child.mjs');
+  const children = rows.filter(isChild);
+  const shell = rows.find((one) => one.pid === mainPid);
+  return {
+    count: children.length,
+    pids: children.map((one) => one.pid),
+    rssMb: children.map((one) => round(one.rssKb / 1024)),
+    shellRssMb: shell === undefined ? null : round(shell.rssKb / 1024),
+    /** What the whole tree costs, which is what a person's machine really pays:
+     *  the shell, its helpers, and every child. */
+    treeRssMb: processTree(mainPid).rssMb,
+    byKind: processTree(mainPid).byKind,
+  };
+}
+
+/**
+ * N conversations, each in a child of its own, and what they cost.
+ *
+ * The point of the scenario is the number 6.2's ceiling is worked out from, and
+ * the one it must not regress: a child per conversation is a Pi per
+ * conversation, so N of them is roughly N times the memory, and the shell has to
+ * still be responsive with all of them open.
+ *
+ * `turns` decides whether each conversation is prompted. A child that has never
+ * been asked anything is still booted — Pi is loaded, the catalogue is read, the
+ * extensions are in — but it has no conversation in memory, so the two are
+ * different numbers and both are worth having.
+ */
+async function childCase(files, model, { chats, prompt }) {
+  const profile = freshProfile();
+  const project = fixtureRepo(profile);
+  rememberProject(profile, project);
+  const titles = [];
+  for (let chat = 1; chat <= chats; chat += 1) {
+    const id = `child-${String(chat).padStart(2, '0')}`;
+    const title = `${id} opening words`;
+    titles.push(title);
+    writeTranscript(profile, {
+      id,
+      cwd: project,
+      startedAt: Date.now() - (chats - chat + 1) * 60_000,
+      words: [
+        { role: 'user', text: title },
+        { role: 'assistant', text: `Answer to ${id}.` },
+      ],
+    });
+  }
+
+  /* The scripted model, as an add-on the child loads by path.
+   *
+   * `GRAPHE_TEST_MODEL` is the shell's own seam and it does not cross: that
+   * provider is registered in the shell's process by `registerScriptedModel`.
+   * A child boots Pi of its own, so it has to be given a provider the same way
+   * a real person's model would reach it — an extension on the trusted list,
+   * which is exactly what `argsFor` hands over as `-e`. */
+  const agentFolder = join(profile, 'agent', 'extensions');
+  mkdirSync(agentFolder, { recursive: true });
+  writeFileSync(
+    join(agentFolder, 'scripted-provider.mjs'),
+    `export default function provider(pi) {
+  pi.registerProvider('graphe-scripted', {
+    name: 'Scripted test model',
+    baseUrl: ${JSON.stringify(model.url)},
+    api: 'pi-messages',
+    apiKey: 'scripted',
+    models: [{
+      id: 'scripted',
+      name: 'Scripted replies',
+      reasoning: false,
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    }],
+  });
+}
+`,
+  );
+
+  const { app, window, spawnedAt, windowAt } = await launchApp(profile, files.url, model.url, {
+    // The switch, exactly as a test or a person turns it on. The default stays
+    // in-process until 2.8 is green.
+    GRAPHE_CHILD_RUNTIME: '1',
+  });
+  const found = {};
+  try {
+    await installProbe(window);
+    found.projectOpenMs = await press(window, '.pickerrow__open', null, PROJECT_OPEN);
+    found.launch = { windowMs: windowAt - spawnedAt, ...(await toUsableComposer(window, spawnedAt)) };
+
+    found.open = [];
+    for (const title of titles) {
+      found.open.push(await press(window, '.shelf__convo .shelf__row', title, conversationOpen(title)));
+    }
+    // Every conversation opened, so every one of them has a child. The window's
+    // own answer for "it really started" is the file it names, which only a
+    // child that booted Pi can know.
+    found.started = await window.evaluate(() => window.__probe.rows('.tabs__title'));
+
+    if (prompt === true) {
+      found.turns = [];
+      for (const title of titles) {
+        await press(window, '.tabs__open', title, conversationOpen(title));
+        const bodies = await window.evaluate(() => window.__probe.rows('.message--graphe .message__body'));
+        // Send is disabled until there is something to send, so the box is
+        // filled first — the same keystroke a person makes, and the same
+        // reason `toUsableComposer` types rather than sets.
+        await window.locator('.composer__input').fill(`say something in ${title}`);
+        model.answer(SHORT_STREAM);
+        found.turns.push(
+          await press(window, '.composer__send', null, firstToken(bodies)),
+        );
+        // Settled before the next one, so what is measured is children at rest
+        // rather than children mid-turn.
+        await window
+          .waitForFunction(NOT_STREAMING, undefined, { timeout: WINDOW_WITHIN })
+          .catch(() => undefined);
+      }
+    }
+
+    // A moment for each child to reach its resting size: the reading taken the
+    // instant a turn settles still has the turn's own allocations in it.
+    await pause(3_000);
+    found.children = rssOfChildren(app.process().pid);
+    found.childrenAfterTurns = found.children;
+    found.app = await sampleApp(app, 2_000);
+    found.renderer = await describe(window);
+
+    // One switch with every child alive: the cost that matters to a person is
+    // whether the window still answers, not what the memory is.
+    await installProbe(window);
+    found.switchMs = await press(window, '.tabs__open', titles[0], conversationOpen(titles[0]));
+  } catch (cause) {
+    const screen = await window
+      .evaluate(() => ({
+        tabs: Array.from(document.querySelectorAll('.tabs__title')).map((one) => one.textContent),
+        rows: document.querySelectorAll('.thread__row').length,
+        said: (document.body.innerText || '').replace(/\s+/g, ' ').slice(-600),
+      }))
+      .catch(() => null);
+    found.failure = { message: String(cause), screen };
+    console.error(`\nchild stopped: ${String(cause)}\n${JSON.stringify(found.failure, null, 2)}`);
+  } finally {
+    await finished(app, profile);
+  }
+
+  const perChild = (found.children?.rssMb ?? [])[0] ?? null;
+  return {
+    project: `a git repo with 21 files, ${String(chats)} conversations each in a child of its own`,
+    chats,
+    prompted: prompt === true,
+    ...found,
+    sessionOpen: stats(found.open),
+    firstTokens: found.turns === undefined ? null : stats(found.turns),
+    rssPerChildMb: perChild,
+    rssAllChildrenMb:
+      (found.children?.rssMb ?? []).length === 0
+        ? null
+        : round((found.children.rssMb.reduce((total, one) => total + one, 0)) / found.children.rssMb.length),
+  };
+}
+
+/* ========================================================================== */
 /* Running it                                                                  */
 /* ========================================================================== */
 
@@ -1285,6 +1467,12 @@ const cases = {
   small: () => projectCase(files, model, { name: 'small', chats: 4, turns: true }),
   long: () => projectCase(files, model, { name: 'long', chats: 3, huge: true, turns: false }),
   twenty: () => projectCase(files, model, { name: 'twenty', chats: 20, turns: true }),
+  // The child runtime, which is what 6.2's ceiling is worked out from. Two
+  // sizes because the interesting number is the *first* one — what a child
+  // costs — and the second is what N of them cost, which is where a per-child
+  // figure that does not scale shows up.
+  child: () => childCase(files, model, { chats: 3, prompt: false }),
+  'child-worked': () => childCase(files, model, { chats: 3, prompt: true }),
 };
 
 for (const name of WANTED) {
@@ -1312,7 +1500,7 @@ if (JSON_PATH !== null) {
 /* The budgets, side by side with what was measured                            */
 /* -------------------------------------------------------------------------- */
 
-const { empty, small, long, twenty } = report.scenarios;
+const { empty, small, long, twenty, child, 'child-worked': childWorked } = report.scenarios;
 const loaded = twenty ?? small;
 const idle = empty?.idleSecondWindow;
 
@@ -1342,6 +1530,13 @@ const rows = [
   ['conversation list re-read by the shell', said(twenty?.listConversationsMs, ' ms')],
   ['DOM rows drawn for the 10k transcript', said(long?.hugeRows, '')],
   ['open/close plateau, last three cycles of RSS', said((loaded?.cycles ?? []).slice(-3).map((one) => one.rssMb).join('/'), ' MB')],
+  ['child runtimes started', said(child?.children?.count, '')],
+  ['RSS per booted child', said(child?.rssPerChildMb, ' MB')],
+  ['RSS per child after a turn', said(childWorked?.rssAllChildrenMb, ' MB')],
+  ['shell RSS with children open', said(child?.children?.shellRssMb, ' MB')],
+  ['whole tree RSS, children open', said(child?.children?.treeRssMb, ' MB')],
+  ['tab switch with children open', said(child?.switchMs)],
+  ['first token, hosted in a child (p95)', said(childWorked?.firstTokens?.p95)],
 ];
 
 console.log('\nbudget                                          measured');

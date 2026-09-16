@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentEvent, ToolCall } from '../src/agent/types';
-import { batcher, EVERY_MS, mustGoNow, packFrame, type Framed, type Waiting } from '../src/lib/batching';
+import { batcher, EVERY_MS, mustGoNow, packFrame, PENDING_BYTES, type Framed, type Waiting } from '../src/lib/batching';
 import type { Clock } from '../src/lib/streaming';
 
 /** A clock a test winds by hand. */
@@ -217,6 +217,99 @@ describe('gathering events', () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0][0].events).toEqual([{ type: 'message-delta', text: 'x'.repeat(60) }]);
+  });
+});
+
+/* ========================================================================== */
+/* A consumer that is behind                                                   */
+/* ========================================================================== */
+
+describe('a consumer that has stopped reading', () => {
+  const CHUNK = 'x'.repeat(64);
+  /** Text one frame may carry: the cap counts bytes, and the wrapper and the
+   *  event are charged on top, so the characters cannot reach half of it —
+   *  plus the one event that crossed the line. */
+  const MOST_TEXT = PENDING_BYTES / 2;
+
+  function saidBy(batches: readonly Framed[][], conversation: string): string {
+    return heardBy(batches, conversation)
+      .filter((event) => event.type === 'message-delta')
+      .map((event) => (event.type === 'message-delta' ? event.text : ''))
+      .join('');
+  }
+
+  it('hands a run over rather than growing past the cap, with no tick at all', () => {
+    const clock = fakeClock();
+    const batches: Framed[][] = [];
+    const gather = batcher((frames) => batches.push([...frames]), EVERY_MS, clock);
+
+    // A window that has stopped reading: the clock is never wound, so only the
+    // cap can get anything out of the queue.
+    for (let at = 0; at < 1000; at += 1) gather.push(waiting('/a', 'one', delta(CHUNK)));
+
+    expect(batches.length).toBeGreaterThan(1);
+    for (const batch of batches) {
+      for (const frame of batch) {
+        const text = frame.events.reduce(
+          (chars, event) => chars + (event.type === 'message-delta' ? event.text.length : 0),
+          0,
+        );
+        expect(text).toBeLessThanOrEqual(MOST_TEXT + CHUNK.length);
+      }
+    }
+
+    // Early frames cost trips, never content.
+    clock.tick(EVERY_MS);
+    expect(saidBy(batches, 'one')).toBe(CHUNK.repeat(1000));
+  });
+
+  it('keeps every conversation in order when the cap is what sends the frame', () => {
+    const clock = fakeClock();
+    const batches: Framed[][] = [];
+    const gather = batcher((frames) => batches.push([...frames]), EVERY_MS, clock);
+
+    let one = '';
+    let two = '';
+    for (let at = 0; at < 700; at += 1) {
+      one += `one-${String(at)} `;
+      two += `two-${String(at)} `;
+      gather.push(waiting('/a', 'one', delta(`one-${String(at)} `)));
+      gather.push(waiting('/b', 'two', delta(`two-${String(at)} `)));
+    }
+    gather.flush();
+
+    expect(batches.length).toBeGreaterThan(1);
+    expect(saidBy(batches, 'one')).toBe(one);
+    expect(saidBy(batches, 'two')).toBe(two);
+  });
+
+  it('sends a state change at once, with the run ahead of it in order', () => {
+    const clock = fakeClock();
+    const send = vi.fn();
+    const gather = batcher(send, EVERY_MS, clock);
+
+    for (let at = 0; at < 100; at += 1) gather.push(waiting('/a', 'one', delta(CHUNK)));
+    expect(send).not.toHaveBeenCalled();
+
+    gather.push(waiting('/a', 'one', { type: 'settled', how: 'finished' }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(unwelded(send.mock.calls[0]?.[0][0].events)).toEqual([
+      `text:${CHUNK.repeat(100)}`,
+      'settled',
+    ]);
+  });
+
+  it('sends one event larger than the cap on its own rather than holding it', () => {
+    const clock = fakeClock();
+    const send = vi.fn();
+    const gather = batcher(send, EVERY_MS, clock);
+
+    const huge = 'y'.repeat(PENDING_BYTES);
+    gather.push(waiting('/a', 'one', delta(huge)));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0][0].events).toEqual([{ type: 'message-delta', text: huge }]);
   });
 });
 

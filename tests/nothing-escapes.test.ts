@@ -9,6 +9,8 @@
  * see it — a floating element is valid CSS, typechecks, and every test passes
  * while it covers half the panel. So the rule is written down here instead: no
  * band in the panel may position anything out of flow.
+ *
+ *  Source text, not behaviour: the panel bands', the edge panels' and the shared scrollbar's CSS; jsdom lays these rules out nowhere, so none of it can be run.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';

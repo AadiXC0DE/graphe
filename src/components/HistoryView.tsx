@@ -7,8 +7,6 @@ import './Sheet.css';
 
 type Props = {
   versions: readonly SavedVersion[];
-  /** What each version looked like, by id. */
-  pictures?: Readonly<Record<string, string>>;
   git: GitSnapshot | null;
   busy?: boolean;
   onClose: () => void;
@@ -79,7 +77,6 @@ function yOf(row: number): number {
  */
 export default function HistoryView({
   versions,
-  pictures,
   git,
   busy,
   onClose,
@@ -243,10 +240,6 @@ export default function HistoryView({
           {chosen === null ? null : (
             <aside className="graph__about">
               <h2 className="sheet__blocktitle">{SAYS.about}</h2>
-
-              {pictures?.[chosen.id] === undefined ? null : (
-                <img className="graph__shot" src={pictures[chosen.id]} alt="" />
-              )}
 
               <p className="graph__abouttitle">{chosen.title}</p>
               <p className="graph__aboutwhen">{`${ago(chosen.at)} · ${clockTime(new Date(chosen.at))}`}</p>

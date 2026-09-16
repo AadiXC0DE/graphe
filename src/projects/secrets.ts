@@ -49,14 +49,14 @@ const SAY = {
 
 type Stored = { version: 1; secrets: Record<string, string> };
 
-function asSealed(value: unknown): Map<string, Buffer> {
-  const sealed = new Map<string, Buffer>();
-  if (typeof value !== 'object' || value === null) return sealed;
-  const raw = (value as { secrets?: unknown }).secrets;
+function asSealed(value: unknown): Map<string, string> {
+  const sealed = new Map<string, string>();
+  if (typeof value !== 'object' || value === null || !('secrets' in value)) return sealed;
+  const raw = value.secrets;
   if (typeof raw !== 'object' || raw === null) return sealed;
   for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof entry !== 'string' || entry === '') continue;
-    sealed.set(name, Buffer.from(entry, 'base64'));
+    sealed.set(name, entry);
   }
   return sealed;
 }
@@ -65,6 +65,12 @@ export class SecretFile {
   /** Unlocked, and held only in memory. Whatever could not be unlocked is
    *  simply not here. */
   #values = new Map<string, string>();
+
+  /** The entries that were in the file and this login could not open, kept as
+   *  they were found. Reading is whole-file and writing serialises memory, so
+   *  without these the next unrelated `keep` would erase an account that a
+   *  different login — or this one after a keychain reset — still owns. */
+  #unopened = new Map<string, string>();
 
   private constructor(
     private readonly file: string,
@@ -121,7 +127,11 @@ export class SecretFile {
 
   /** Letting go never needs the lock, so it always works. */
   async forget(name: string): Promise<void> {
-    if (!this.#values.delete(name)) return;
+    // An entry this login could not open is still this login's to let go of,
+    // and leaving it behind would bring it back on the next write.
+    const held = this.#values.delete(name);
+    const unreadable = this.#unopened.delete(name);
+    if (!held && !unreadable) return;
     await this.#write();
   }
 
@@ -134,7 +144,7 @@ export class SecretFile {
   }
 
   async #read(): Promise<void> {
-    let sealed: Map<string, Buffer>;
+    let sealed: Map<string, string>;
     try {
       sealed = asSealed(JSON.parse(await readFile(this.file, 'utf8')));
     } catch {
@@ -143,10 +153,12 @@ export class SecretFile {
     if (!this.#lockWorks()) return;
     for (const [name, entry] of sealed) {
       try {
-        const value = this.cipher.decrypt(entry);
+        const value = this.cipher.decrypt(Buffer.from(entry, 'base64'));
         if (value !== '') this.#values.set(name, value);
       } catch {
-        // Locked by a different machine or a different login. Not ours to read.
+        // Locked by a different machine or a different login. Not ours to read,
+        // but still somebody's: it goes back to the disk untouched.
+        this.#unopened.set(name, entry);
       }
     }
   }
@@ -160,6 +172,13 @@ export class SecretFile {
       }
     } catch {
       return false;
+    }
+    // An entry this login could not open is not an empty one: it goes back
+    // exactly as it was found, unless this run has since kept something under
+    // the same name.
+    const held = new Set(this.#values.keys());
+    for (const [name, entry] of this.#unopened) {
+      if (!held.has(name)) secrets[name] = entry;
     }
 
     const stored: Stored = { version: 1, secrets };

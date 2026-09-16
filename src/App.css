@@ -119,7 +119,7 @@
 
 /* The overview owns the right-hand edge; the ramp belongs to the conversation. */
 .app--overviewed::before {
-  right: var(--rail-width);
+  right: var(--overview-take);
 }
 
 /* A tab shows one thing. With a canvas in front the conversation is not behind
@@ -455,7 +455,7 @@
 
 /* The overview owns the right-hand edge, so the strip stops where it starts. */
 .app--overviewed .topbar {
-  right: var(--rail-width);
+  right: var(--overview-take);
 }
 
 .topbar__name,
@@ -465,10 +465,15 @@
 
 /* The project is a destination in its own right, so it owns the menu anchor.
    Keeping this wrapper in the header avoids a viewport-centred menu that feels
-   disconnected from the name that opened it. */
+   disconnected from the name that opened it.
+
+   It gives way before the row of what is open does: the strip is the work and
+   the name is a label, so it ellipsises down to the width the chevron and a few
+   characters need before the tabs lose any room at all. */
 .topbar__project {
   position: relative;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 64px;
   display: flex;
   align-items: center;
   margin-left: auto;
@@ -648,8 +653,12 @@
    --------------------------------------------------------------------------- */
 
 .app--overviewed {
-  --overview-take: var(--rail-width);
-  padding-right: var(--rail-width);
+  /* The first to give way — see the shelf's own rule below for the order. */
+  --overview-take: min(
+    var(--rail-width),
+    max(0px, calc(100vw - var(--shelf-take) - var(--files-take) - var(--chat-floor)))
+  );
+  padding-right: var(--overview-take);
 }
 
 .app--overviewed .app__column {
@@ -661,15 +670,22 @@
    open and 54px when it is reduced to its mark; the composition pads by
    whichever is true, and — like the shelf itself — the change is instant,
    because collapsing a sidebar is the definition of the hundred-times-a-day
-   motion the frequency rule bans. */
+   motion the frequency rule bans.
+
+   But a panel only holds its width while there is still a readable conversation
+   beside it, which at the window's own 620px floor there is not — the three of
+   them together want 688px. So each one in turn gives way to --chat-floor, in
+   the order they are least needed in: the inspector, then the file panel, then
+   the shelf, which is navigation and only goes when the window itself is
+   narrower than the conversation needs. */
 .app--shelved {
-  --shelf-take: var(--shelf-width);
-  padding-left: var(--shelf-width);
+  --shelf-take: min(var(--shelf-width), max(0px, calc(100vw - var(--chat-floor))));
+  padding-left: var(--shelf-take);
 }
 
 .app--shelved.app--shelfclosed {
-  --shelf-take: var(--shelf-thin);
-  padding-left: var(--shelf-thin);
+  --shelf-take: min(var(--shelf-thin), max(0px, calc(100vw - var(--chat-floor))));
+  padding-left: var(--shelf-take);
 }
 
 /* ---------------------------------------------------------------------------
@@ -691,7 +707,62 @@
 }
 
 .app--files {
-  --files-take: var(--files-width);
+  /* Takes its width only while the conversation still has its own: see the
+     shelf's rule above for the order these give way in. */
+  --files-take: min(
+    var(--files-width),
+    max(0px, calc(100vw - var(--shelf-take) - var(--chat-floor)))
+  );
+}
+
+/* A panel is worth a column only once it can hold one. Below the widths where
+   it cannot, the composition gives it nothing (the two --*-take rules above are
+   the same arithmetic) and it is not drawn either: half a column of clipped
+   rows is not a panel, and a window it cannot be seen in is one a keyboard
+   still walks into. The sums, said the way a media feature has to say them:
+
+     file panel   232 shelf + 420 conversation + 150 of its own
+     inspector    232 shelf + 216 file panel + 420 + 200 of its own
+
+   and 54 in place of the 232 where the shelf is folded. */
+@media (max-width: 801px) {
+  .app--files:not(.app--shelfclosed) {
+    --files-take: 0px;
+  }
+
+  .app--files:not(.app--shelfclosed) .filespanel {
+    display: none;
+  }
+}
+
+@media (max-width: 623px) {
+  .app--files.app--shelfclosed {
+    --files-take: 0px;
+  }
+
+  .app--files.app--shelfclosed .filespanel {
+    display: none;
+  }
+}
+
+@media (max-width: 1067px) {
+  .app--overviewed:not(.app--shelfclosed) {
+    --overview-take: 0px;
+  }
+
+  .app--overviewed:not(.app--shelfclosed) .overview {
+    display: none;
+  }
+}
+
+@media (max-width: 889px) {
+  .app--overviewed.app--shelfclosed {
+    --overview-take: 0px;
+  }
+
+  .app--overviewed.app--shelfclosed .overview {
+    display: none;
+  }
 }
 
 /* The strip along the top stops where the panel starts, the same way it stops
@@ -706,16 +777,20 @@
   top: 0;
   bottom: 0;
   left: var(--shelf-take);
-  width: var(--files-width);
+  /* The same number the composition pads by: a panel wider than the room it was
+     given would sit over the conversation. */
+  width: var(--files-take);
   z-index: 3;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   /* Nothing sits above this panel — the strip along the top starts where the
      panel ends — so its title lands on the shelf's band, not below it. */
-  padding: var(--space-2) var(--space-2) var(--space-3);
+  /* And a panel given no room paints no room: its padding and its edge go with
+     its width rather than standing there as a 17px sliver of background. */
+  padding: var(--space-2) min(var(--space-2), var(--files-take)) var(--space-3);
   background: var(--bg);
-  border-right: 1px solid var(--border);
+  border-right: min(1px, var(--files-take)) solid var(--border);
   overflow: hidden;
 }
 
@@ -1016,3 +1091,102 @@ p {
   right: var(--browser-take);
 }
 
+
+/* The second pane: another conversation of the same project, read beside the
+   one being worked on.
+
+   It is a real second view rather than a second window — the same desk holds
+   both conversations whole, so nothing is fetched and no second session is
+   built. It takes no typing: the hand is in the focused pane, and this one is
+   for reading what is happening next to what you are working on.
+
+   Laid out beneath the column rather than beside it, because the window's
+   scroller is the page itself (use-stick-to-bottom watches `.app`) and a
+   side-by-side split would put a second scroller inside a scroller. The
+   conversation being typed into stays the one that owns the page's scroll
+   position, which is what keeps "jump to latest" honest. */
+.beside {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-width: var(--thread-width);
+  margin: var(--space-5) auto var(--space-6);
+  padding: 0 var(--column-pad);
+  border-top: 1px solid var(--border);
+}
+
+.beside__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 var(--space-2);
+}
+
+.beside__name {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.beside__scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.app--panes {
+  --beside-take: min(45vw, calc((100vw - var(--shelf-take) - var(--files-take)) / 2));
+  padding-right: var(--beside-take);
+}
+
+.app--panes .beside {
+  position: fixed;
+  top: var(--topbar-height);
+  right: 0;
+  bottom: var(--commands-take);
+  width: var(--beside-take);
+  min-width: 0;
+  margin: 0;
+  padding: 0 var(--space-3);
+  border-top: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.app--panes .beside__scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}
+
+.beside__head button {
+  flex: none;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.beside__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 800px) {
+  .app--panes {
+    --beside-take: 0px;
+    padding-bottom: 38vh;
+  }
+  .app--panes .beside {
+    top: auto;
+    left: calc(var(--shelf-take) + var(--files-take));
+    width: auto;
+    height: 38vh;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    z-index: 2;
+  }
+}

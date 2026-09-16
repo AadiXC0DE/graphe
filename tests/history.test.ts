@@ -94,6 +94,12 @@ async function projectWithOneVersion(): Promise<{ root: string; line: Timeline; 
   return { root, line, first: first as Version };
 }
 
+/** The newest saved moment, read raw. Saved moments are kept under the app's own
+ *  namespace, off the branch somebody works on, so this is where they are. */
+async function newestSaved(root: string, args: string[]): Promise<string> {
+  return storage(root, ['log', '-1', 'refs/graphe/checkpoints', ...args]);
+}
+
 /* ========================================================================== */
 /* H-01 a folder that has never kept a history                                 */
 /* ========================================================================== */
@@ -607,7 +613,7 @@ describe('H-07 a project that already has history', () => {
 describe('H-08 identity and configuration', () => {
   it('attributes automatic saves to Graphe, never to the user', async () => {
     const { root } = await projectWithOneVersion();
-    const who = (await storage(root, ['log', '-1', '--format=%an%x09%ae%x09%cn%x09%ce'])).trim();
+    const who = (await newestSaved(root, ['--format=%an%x09%ae%x09%cn%x09%ce'])).trim();
 
     expect(who).toBe(
       [
@@ -629,12 +635,12 @@ describe('H-08 identity and configuration', () => {
     await storage(root, ['config', 'user.email', 'dev@example.test']);
 
     await line.snapshot({ by: 'graphe' });
-    const automatic = (await storage(root, ['log', '-1', '--format=%an%x09%ae'])).trim();
+    const automatic = (await newestSaved(root, ['--format=%an%x09%ae'])).trim();
     expect(automatic).toBe([repo.AUTOMATIC_IDENTITY.name, repo.AUTOMATIC_IDENTITY.email].join('\t'));
 
     await writeFile(path.join(root, 'index.html'), '<h1>two</h1>');
     await line.snapshot({ by: 'you' });
-    const pressed = (await storage(root, ['log', '-1', '--format=%an%x09%ae%x09%cn%x09%ce'])).trim();
+    const pressed = (await newestSaved(root, ['--format=%an%x09%ae%x09%cn%x09%ce'])).trim();
     expect(pressed).toBe(['A Developer', 'dev@example.test', 'A Developer', 'dev@example.test'].join('\t'));
   });
 
@@ -646,7 +652,7 @@ describe('H-08 identity and configuration', () => {
     await put(root, 'index.html', 'x');
     await line.snapshot();
 
-    expect((await storage(root, ['log', '-1', '--format=%ae'])).trim()).toBe('studio@example.test');
+    expect((await newestSaved(root, ['--format=%ae'])).trim()).toBe('studio@example.test');
   });
 
   it('cannot be blocked by settings the project itself carries', async () => {

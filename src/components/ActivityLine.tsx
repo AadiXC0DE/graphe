@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { type Advice, advice } from '../lib/describe';
 import './ActivityLine.css';
 
-export type ActivityState = 'running' | 'done' | 'failed';
+export type ActivityState = 'running' | 'done' | 'failed' | 'interrupted';
+
+/** Past this many characters a step's detail is more than the two lines it
+ *  draws at rest, so the row offers the rest. The advisor's row measures the
+ *  same way, for the same reason. */
+const A_GLANCE_AND_NO_MORE = 180;
 
 type Props = {
   state: ActivityState;
@@ -46,10 +51,16 @@ type Props = {
  * state is carried by icon shape as well as colour, so nothing here depends on
  * colour alone. */
 export default function ActivityLine({ state, label, detail, meta, real, lead = false }: Props) {
+  const [open, setOpen] = useState(false);
   const machinery = lead && real !== undefined && real !== '';
   /* The one line in the feed a second model wrote. It is drawn as what it is
      rather than as another grey particular, because nobody asked for it. */
   const said = advice(label, detail);
+  /* What is cut off at two lines: a long output replayed from a saved
+     conversation, a helper's paragraph. The size of it is said beside the
+     press rather than left to be discovered. */
+  const clipped = detail !== undefined && (detail.length > A_GLANCE_AND_NO_MORE || detail.includes('\n'));
+  const far = detail === undefined ? 0 : detail.length - A_GLANCE_AND_NO_MORE;
 
   return (
     <div className={`activity activity--${state}`} title={machinery ? label : undefined}>
@@ -83,6 +94,13 @@ export default function ActivityLine({ state, label, detail, meta, real, lead = 
             />
           </svg>
         ) : null}
+        {/* A bar, not a cross: a step the record never saw finish did not fail,
+            it stopped where it was. */}
+        {state === 'interrupted' ? (
+          <svg viewBox="0 0 14 14" width="14" height="14" fill="none">
+            <path d="M3.5 7h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        ) : null}
       </span>
 
       <span className="activity__text">
@@ -94,7 +112,24 @@ export default function ActivityLine({ state, label, detail, meta, real, lead = 
         {said !== null ? (
           <Said said={said} />
         ) : detail ? (
-          <span className="activity__detail">{detail}</span>
+          <>
+            <span className={`activity__detail ${open ? 'activity__detail--open' : ''}`}>
+              {detail}
+            </span>
+            {clipped ? (
+              <button
+                type="button"
+                className="activity__expand"
+                aria-expanded={open}
+                onClick={() => setOpen((was) => !was)}
+              >
+                {open ? 'Show less' : 'Show more'}
+                {open || far <= 0 ? null : (
+                  <span className="activity__count">{`${String(far)} more characters`}</span>
+                )}
+              </button>
+            ) : null}
+          </>
         ) : null}
         {real !== undefined && real !== '' && !machinery ? (
           <code className="activity__real">{real}</code>
@@ -102,12 +137,20 @@ export default function ActivityLine({ state, label, detail, meta, real, lead = 
       </span>
 
       {/* A word, not a card. A step that failed is a step that failed; painting
-          the conversation for it is the app blaming the work. */}
+          the conversation for it is the app blaming the work. A step that was
+          interrupted is neither: the record simply stops before the result. */}
       {state === 'failed' ? <span className="activity__failed">Did not work</span> : null}
+      {state === 'interrupted' ? <span className="activity__interrupted">Never finished</span> : null}
       {meta ? <span className="activity__meta">{meta}</span> : null}
 
       <span className="activity__sr">
-        {state === 'running' ? 'in progress' : state === 'done' ? 'done' : 'did not work'}
+        {state === 'running'
+          ? 'in progress'
+          : state === 'done'
+            ? 'done'
+            : state === 'interrupted'
+              ? 'never finished'
+              : 'did not work'}
       </span>
     </div>
   );

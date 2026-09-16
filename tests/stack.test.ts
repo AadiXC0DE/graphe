@@ -330,8 +330,6 @@ describe('S-05 nothing here names the machinery', () => {
       ...Object.values(stackWords).map((one) =>
         typeof one === 'function' ? '' : one,
       ),
-      stackWords.takeAll(2),
-      stackWords.takeAll(4),
       stackWords.behind('Calm the hero'),
       stackWords.meets('Calm the hero', 'Tighten the nav', ['hero.css']),
       stackWords.loop(['Calm the hero', 'Tighten the nav']),
@@ -346,13 +344,6 @@ describe('S-05 nothing here names the machinery', () => {
     for (const banned of ['merge', 'rebase', 'branch', 'stack', 'commit', 'git', 'conflict']) {
       expect(said.toLowerCase()).not.toContain(banned);
     }
-  });
-
-  /** WHY: the press has to say how many, because the whole point of it is that
-   *  it is not one of them. */
-  it('counts them on the press itself', () => {
-    expect(stackWords.takeAll(2)).toBe('Take both');
-    expect(stackWords.takeAll(4)).toBe('Take all four');
   });
 });
 

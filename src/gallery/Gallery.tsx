@@ -13,29 +13,23 @@ import HelperRail from '../components/HelperRail';
 import InLine from '../components/InLine';
 import Message from '../components/Message';
 import Steps from '../components/Steps';
-import EvidenceReel from '../components/EvidenceReel';
-import Inspector from '../components/Inspector';
-import type { Reading } from '../preview/inspect';
-import SeeFirst from '../components/SeeFirst';
-import type { Held } from '../diff/holdshot';
-import type { Recording } from '../diff/flow';
 import Tabs, { type Tab } from '../components/Tabs';
 import type { StepTurn } from '../lib/steps';
 import type { HowFar } from '../agent/guard/policy';
 import Away from '../components/Away';
 import Running from '../components/Running';
-import InStep from '../components/InStep';
-import Landing from '../components/Landing';
-import { gateOf, USUAL } from '../design/gate';
 import ProjectMenu from '../components/ProjectMenu';
 import ProjectPicker from '../components/ProjectPicker';
-import DesignView from '../components/DesignView';
 import HistoryView from '../components/HistoryView';
 import Overview from '../components/Overview';
 import Sidebar from '../components/Sidebar';
 import VersionRow from '../components/VersionRow';
 import Versions from '../components/Versions';
 import Welcome from '../components/Welcome';
+import CanvasView from '../components/canvas/CanvasView';
+import type { BlockAttachment } from '../components/canvas/BlockPanel';
+import { asRunId } from '../domain/identity';
+import { newFlow, place, join, type BlockRun, type Flow, type Run } from '../work/canvas';
 import type {
   CarriedExtension,
   ConnectionState,
@@ -43,7 +37,6 @@ import type {
   FileEntry,
   FoundAccount,
   Away as AwayState,
-  Landing as LandingState,
   PutBack,
   RecentProject,
   SavedVersion,
@@ -54,10 +47,6 @@ import { createLimit } from '../cost/limits';
 import { money } from '../cost/money';
 import { biggerJob, estimateNote, longConversation } from '../cost/phrasing';
 import type { Estimate } from '../cost/estimate';
-import { findMoved, saysInStep, type Design } from '../design/moved';
-import { readDesign } from '../design/reading';
-import { findDrift } from '../design/drift';
-import { readMotion } from '../motion/read';
 import { behind, realWords } from '../lib/showme';
 import './Gallery.css';
 
@@ -217,33 +206,97 @@ const HELPING: readonly Helper[] = [
 /** Four conversations across three codebases, at the four states a tab can be
  *  in. Two of them share a project, which is the case the underline exists for. */
 const OPEN: readonly Tab[] = [
-  { id: 't1', title: 'the hero, tighter', project: 'paper-street', projectPath: '/a', kind: 'chat', state: 'idle' },
-  { id: 't2', title: 'pricing page at phone width', project: 'paper-street', projectPath: '/a', kind: 'chat', state: 'working' },
-  { id: 't3', title: 'the sign-in flow', project: 'atlas-studio', projectPath: '/b', kind: 'chat', state: 'asking' },
-  { id: 't4', title: 'docs site', project: 'field-notes', projectPath: '/c', kind: 'chat', state: 'finished' },
+  { id: 't1', title: 'the hero, tighter', project: 'paper-street', projectPath: '/a', state: 'idle' },
+  { id: 't2', title: 'pricing page at phone width', project: 'paper-street', projectPath: '/a', state: 'working' },
+  { id: 't3', title: 'the sign-in flow', project: 'atlas-studio', projectPath: '/b', state: 'asking' },
+  { id: 't4', title: 'docs site', project: 'field-notes', projectPath: '/c', state: 'finished' },
 ];
-
-/** A walkthrough of the states nobody screenshots, including one that could not
- *  be photographed — a run that quietly read as complete would be the one thing
- *  this feature must never do. */
-const WALKED: Recording = {
-  id: 'r1',
-  says: 'Buying something on a phone',
-  startedAt: 0,
-  frames: [
-    { id: 'f1', says: 'At the start', after: 0, shot: PAGE_SHOT, missing: null },
-    { id: 'f2', says: 'After pressing Add to basket', after: 1400, shot: PAGE_SHOT, missing: null },
-    { id: 'f3', says: 'After the page changed on its own', after: 2100, shot: PAGE_SHOT, missing: null },
-    { id: 'f4', says: 'After typing in Card number', after: 6800, shot: null, missing: 'The window was hidden.' },
-    { id: 'f5', says: 'After pressing Pay', after: 9200, shot: PAGE_SHOT, missing: null },
-  ],
-  note: null,
-};
 
 const ATTACHED: readonly Attachment[] = [
   { id: 'a1', kind: 'figma', name: 'Landing v4', note: 'Figma file', url: 'https://figma.com' },
   { id: 'a2', kind: 'image', name: 'hero-sketch.png', note: 'PNG · 1.2 MB', preview: SCREENSHOT },
   { id: 'a3', kind: 'document', name: 'Brand guidelines.pdf', note: 'PDF · 4.8 MB' },
+];
+
+/* -------------------------------------------------------------------------- */
+/* The canvas                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Four canvases at the four states worth looking at, built with the model's
+ *  own functions rather than by hand: what the gallery draws is what pressing
+ *  the palette draws. */
+function canvasDrawn(): Flow {
+  let flow: Flow = { ...newFlow(), name: 'Tighten the pricing page' };
+  flow = place(flow, 'ask');
+  flow = place(flow, 'checks');
+  flow = place(flow, 'review');
+  const [asked, checks, review] = flow.blocks.map((one) => one.id);
+  if (asked === undefined || checks === undefined || review === undefined) return flow;
+  flow = join(flow, checks, asked);
+  flow = join(flow, review, checks);
+  return {
+    ...flow,
+    blocks: flow.blocks.map((one, at) => ({
+      ...one,
+      says:
+        at === 0
+          ? 'Tighten the pricing page on phone width. The three cards stack with too much air between them.'
+          : one.says,
+      ...(at === 0 ? { at: { x: 40, y: 60 } } : at === 1 ? { at: { x: 380, y: 60 } } : { at: { x: 720, y: 60 } }),
+    })),
+  };
+}
+
+/** A run of that canvas, at whichever state is being drawn. */
+function canvasRun(flow: Flow, state: 'running' | 'done' | 'failed'): Run {
+  const lane = { id: 'lane-0', workspaceId: 'w1', conversationId: 'c1', branch: null };
+  const blocks: Record<string, BlockRun> = {};
+  flow.blocks.forEach((one, at) => {
+    blocks[one.id] = {
+      state:
+        at === 0
+          ? 'done'
+          : at === 1
+            ? state === 'running'
+              ? 'running'
+              : state === 'failed'
+                ? 'failed'
+                : 'done'
+            : state === 'done'
+              ? 'done'
+              : 'stopped',
+      lane: 'lane-0',
+      startedAt: NOW + at * 30_000,
+      endedAt: at === 0 || state !== 'running' ? NOW + (at + 1) * 30_000 : null,
+      said:
+        at === 0
+          ? 'The three cards are on your 12-column grid now. The air between them is two steps of your scale, not three.'
+          : at === 1
+            ? state === 'failed'
+              ? null
+              : 'Checks pass. 214 tests, 0 failures.'
+            : null,
+      turns: at === 0 ? 2 : 1,
+      spent: { minor: at === 0 ? 4200 : 1800, currency: 'INR' },
+      rounds: at === 1 && state === 'failed' ? 2 : 0,
+      result: null,
+      failure: at === 1 && state === 'failed' ? 'npm run build exits 1: could not resolve lucide-react' : null,
+    };
+  });
+  return {
+    id: asRunId('run-gallery'),
+    state,
+    startedAt: NOW - 240_000,
+    endedAt: state === 'running' ? null : NOW - 60_000,
+    lanes: [lane],
+    blocks,
+    spent: { minor: 7800, currency: 'INR' },
+  };
+}
+
+const CANVAS_ATTACHED: readonly BlockAttachment[] = [
+  { id: 'c-1', name: 'pricing-phone.png', kind: 'image', mimeType: 'image/png', thumb: SCREENSHOT },
+  { id: 'c-2', name: 'Brand guidelines.pdf', kind: 'document', mimeType: 'application/pdf', thumb: null },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -283,68 +336,6 @@ const REMEMBERED: readonly RecentProject[] = [
     branch: null,
   },
 ];
-
-/** A stylesheet with enough in it that every band of the design view has
- *  something real to say: values to move, movement to watch, and two near-misses
- *  written by hand. */
-const STYLESHEET = `:root {
-  --accent: #b8492c;
-  --text: #1a1a19;
-  --text-muted: #a3a3a0;
-  --bg: #fbfbfa;
-  --space-3: 12px;
-  --space-4: 16px;
-  --radius-md: 10px;
-  --dur-ui: 200ms;
-}
-
-.card {
-  padding: 15px;
-  border-radius: var(--radius-md);
-  transition: transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
-}
-
-.card:hover {
-  transform: translateY(-2px);
-}
-
-.badge {
-  background: #b8492d;
-  transition: opacity 140ms ease;
-}
-`;
-
-const STYLES = {
-  file: 'src/styles/tokens.css',
-  text: STYLESHEET,
-  tokens: [
-    { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 2, steps: [] },
-    { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 3, steps: [] },
-    { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 4, steps: [] },
-    { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 5, steps: [] },
-    {
-      name: '--space-3',
-      value: '12px',
-      kind: 'space' as const,
-      line: 6,
-      steps: ['8px', '12px', '16px', '24px'],
-    },
-    {
-      name: '--space-4',
-      value: '16px',
-      kind: 'space' as const,
-      line: 7,
-      steps: ['8px', '12px', '16px', '24px'],
-    },
-    {
-      name: '--radius-md',
-      value: '10px',
-      kind: 'radius' as const,
-      line: 8,
-      steps: ['6px', '10px', '14px'],
-    },
-  ],
-};
 
 const TIMELINE: readonly SavedVersion[] = [
   {
@@ -536,148 +527,6 @@ const SEVERAL_REPOS = [
   },
 ] as const;
 
-/** A header as it was built from, and the same header after somebody spent a
- *  Tuesday on it. The findings under it are not written here: they are what the
- *  comparison makes of these two. */
-const BUILT_FROM: Design = {
-  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 96 }],
-  values: {
-    colors: { 'color-brand-primary': '#b8492c', 'color-ink': '#1a1a19' },
-    spacing: { 'space-gutter': '24px' },
-    text: { 'font-family-heading': 'Söhne' },
-  },
-};
-
-const IN_FIGMA_NOW: Design = {
-  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 128 }],
-  values: {
-    colors: { 'color-brand-primary': '#8f3620', 'color-ink': '#1a1a19' },
-    spacing: { 'space-gutter': '32px' },
-    text: { 'font-family-heading': 'Söhne' },
-  },
-};
-
-const MOVED = findMoved(BUILT_FROM, IN_FIGMA_NOW, { name: 'Header' });
-
-const IN_STEP = {
-  following: {
-    id: '8Kx2ABcd',
-    name: 'Header',
-    url: 'https://www.figma.com/design/8Kx2ABcd/Landing-v4?node-id=1-23',
-    readAt: NOW - 4 * 60_000,
-  },
-  moved: MOVED,
-  says: saysInStep('Header', MOVED),
-  trouble: null,
-};
-
-/** A piece of work finished and waiting to be looked at, with both of the
- *  things that can send anywhere reachable. The state worth drawing, because it
- *  is the one where every press in the band means something. */
-/** What comes back from pointing at a button on a real React 19 dev server:
- *  the component and the line, its tokens, one value a hair off one of them,
- *  and an honest note about what could not be worked out. */
-const POINTED: Reading = {
-  title: 'A button: “Start a project”',
-  made: {
-    how: 'stack',
-    sure: 'likely',
-    component: 'Welcome',
-    where: { file: 'src/components/Welcome.tsx', line: 84, column: 11 },
-    alsoIn: ['src/components/Landing.tsx', 'src/gallery/Gallery.tsx'],
-    screens: ['/', '/pricing'],
-    find: 'Welcome',
-    says: 'Made by Welcome, at src/components/Welcome.tsx:84.',
-  },
-  using: [
-    { what: 'the background', name: '--accent', value: '#b8492c', says: 'The background is your --accent.' },
-    { what: 'the corners', name: '--radius-sm', value: '6px', says: 'The corners are your --radius-sm.' },
-  ],
-  adrift: [
-    {
-      what: 'the space inside',
-      wrote: '13px',
-      mine: { name: '--space-3', value: '12px' },
-      confidence: 'likely',
-      says: 'The space inside is 13px, a hair off your --space-3.',
-      detail: '13px vs 12px',
-    },
-  ],
-  changed: {
-    name: 'Made the first screen ask one question',
-    when: NOW - 3 * 3_600_000,
-    says: 'Last changed 3 hours ago, in “Made the first screen ask one question”.',
-  },
-  widths: {
-    all: [
-      { id: 'phone', name: 'Phone', width: 390, height: 844, here: false },
-      { id: 'tablet', name: 'Tablet', width: 834, height: 1112, here: true },
-      { id: 'desktop', name: 'Desktop', width: 1440, height: 900, here: false },
-    ],
-    says: 'Shown at Tablet.',
-  },
-  unsure: ['I could not tell which of your text sizes this is using.'],
-};
-
-/** Work waiting in a copy, photographed before it is let in — including one
- *  width that would not build, because that is half of these. */
-const HELD: Held = {
-  id: 'held-1',
-  doing: 'Make the pricing cards breathe a bit more',
-  at: NOW - 90_000,
-  sights: [
-    { id: 'phone', name: 'Phone', width: 390, now: PAGE_SHOT, changed: PAGE_SHOT, missing: null, trouble: null },
-    { id: 'desktop', name: 'Desktop', width: 1440, now: PAGE_SHOT, changed: PAGE_SHOT, missing: null, trouble: null },
-    {
-      id: 'wide',
-      name: 'Wide',
-      width: 1920,
-      now: null,
-      changed: null,
-      missing: 'The project would not build at this width.',
-      trouble: null,
-    },
-  ],
-  note: null,
-  // A page that moved a little, one nobody has a picture for yet, and one that
-  // would not build — the three answers a width can come back with.
-  changes: [
-    {
-      kind: 'compared',
-      id: 'phone',
-      name: 'Phone',
-      width: 390,
-      changed: 4_800,
-      pixels: 329_160,
-      bands: [0, 0, 3_100, 1_700, 0, 0, 0, 0],
-    },
-    { kind: 'first', id: 'desktop', name: 'Desktop', width: 1440 },
-    {
-      kind: 'nopicture',
-      id: 'wide',
-      name: 'Wide',
-      width: 1920,
-      why: 'The project would not build at this width.',
-    },
-  ],
-};
-
-const LANDING: LandingState = {
-  waiting: {
-    id: 'held-1',
-    doing: 'make the pricing cards breathe a bit more',
-    state: 'waiting',
-    at: NOW - 90_000,
-  },
-  held: HELD,
-  holdBack: true,
-  keepLogins: false,
-  canHandOver: true,
-  handOverSays: 'Everything needed is here.',
-  canPutOnline: true,
-  onlineSays: 'Everything needed is here.',
-};
-
 /**
  * Work that carried on without anybody, in the three states that look nothing
  * alike: one stopped on a question it will not answer for itself, one finished
@@ -757,63 +606,10 @@ const AWAY: AwayState = {
       question: null,
     },
   ],
-  repeats: [
-    {
-      id: 'every-1',
-      doing: 'Check the site still builds and tell me if it doesn’t',
-      says: 'Every day at 7:00am',
-      next: 'Tomorrow at 7:00am',
-      on: true,
-      lastSaid: 'It builds.',
-    },
-  ],
   atOnce: 4,
   spent: { minor: 37, currency: 'USD' },
   sinceYouWere: 'One thing waiting on you, one thing ready to look at, one thing still going.',
 };
-
-/** A second folder with work of its own, so the board can be seen doing the
- *  thing it exists for: one place for everything, wherever it is running. */
-const AWAY_ELSEWHERE: readonly { where: string; project: string; away: AwayState }[] = [
-  {
-    where: '/work/almanac',
-    project: 'almanac',
-    away: {
-      pieces: [
-        {
-          id: 'away-b1',
-          doing: 'Rebuild the archive page from the new grid',
-          state: 'running',
-          at: NOW - 9 * 60_000,
-          picture: null,
-          says: null,
-          trouble: null,
-          spent: inr(1100),
-          question: null,
-        },
-        {
-          id: 'away-b2',
-          doing: 'Replace the placeholder photographs',
-          state: 'needs-you',
-          at: NOW - 30 * 60_000,
-          picture: null,
-          says: 'I need one more thing before I can carry on.',
-          trouble: null,
-          question: {
-            callId: 'call-9',
-            question: 'Use the photographs in “shoot-april” for the archive?',
-            detail: 'They are the only ones in the folder at the right size.',
-            consequence: 'Nothing else changes.',
-          },
-        },
-      ],
-      repeats: [],
-      atOnce: 4,
-      spent: { minor: 11, currency: 'USD' },
-      sinceYouWere: null,
-    },
-  },
-];
 
 /** A shelf with something on it, so the two things you can do to a conversation
  *  can be seen where they actually sit. */
@@ -1068,6 +864,9 @@ function Section({ title, note, children }: { title: string; note: string; child
 
 function noop() {}
 
+/** The shell answers whether a sentence said to a running piece was taken. */
+const says = (): Promise<boolean> => Promise.resolve(true);
+
 /** What origin answers with in the gallery. Real shapes, so the two rows show
  *  the two answers that matter: one that can be fast-forwarded and one that
  *  cannot. */
@@ -1110,7 +909,6 @@ const OVERVIEW_VIEW = {
   research: RESEARCH,
   references: REFERENCES,
   versions: TIMELINE,
-  pictures: {},
   kept: [],
   putBack: JUST_PUT_BACK,
   spent: SPENT,
@@ -1125,28 +923,7 @@ const OVERVIEW_VIEW = {
     { name: 'brand', value: '#b8492c' },
     { name: 'ink', value: '#1a1a19' },
   ],
-  styles: {
-    file: 'src/styles/tokens.css',
-    tokens: [
-      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
-      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
-      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
-      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
-      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
-    ],
-    text: ':root { --accent: #b8492c; }',
-  },
-  reading: readDesign(null),
-  inStep: IN_STEP,
-  landing: LANDING,
-  going: null,
-  landed: null,
-  decided: null,
   away: AWAY,
-  elsewhere: AWAY_ELSEWHERE,
-  project: 'paper-street',
-  gate: gateOf(HELD.changes),
-  howMuch: USUAL.id,
   clock: NOW,
 } as const;
 
@@ -1292,8 +1069,8 @@ export default function Gallery() {
               />
               <ActivityLine
                 state="running"
-                label="Checking it against your design system"
-                detail="Comparing the built page with the frame you linked"
+                label="Writing src/components/Hero.tsx"
+                detail="keeping to your spacing scale"
               />
             </div>
             <p className="gallery__caption">
@@ -1320,52 +1097,8 @@ export default function Gallery() {
           </Section>
 
           <Section
-            title="Point at anything and be told what it is"
-            note="A click already knew the selector, the label, the markup and the computed styles, and threw all of it away into one sentence. This is the designer's version of DevTools: which component made it, which of your tokens it is using, which values are a hair off one of them, when it last changed, and what it looks like at the other sizes."
-          >
-            <div className="gallery__rail">
-              <Inspector reading={POINTED} onAsk={noop} onWidth={noop} />
-            </div>
-            <p className="gallery__caption">
-              The chain degrades rather than failing: on a React 19 dev server it names the component
-              and the line; on a production build it falls back through the selector, the markup and
-              the visible text until it has something the agent can go and find. What it could not
-              work out is written down rather than left out.
-            </p>
-          </Section>
-
-          <Section
-            title="See it before you say yes"
-            note="We already show a before-and-after after a change lands, and the timeline can take you back, but both of those are recovery. The designer's version of reading a diff is seeing the rendered result before approving it. The work happens in a copy, the copy gets photographed, and the decision arrives with the picture attached."
-          >
-            <div className="thread-sample">
-              <SeeFirst waiting={LANDING.waiting} held={HELD} onDecide={noop} />
-            </div>
-            <p className="gallery__caption">
-              This turns the safest mode in the app from something you switch on out of caution into
-              the one you want, because it is the only one that shows you what you are agreeing to.
-              A width that would not build says so and is still decidable, never a blank frame.
-            </p>
-          </Section>
-
-          <Section
-            title="Evidence, not a diff"
-            note="Everything the app photographs otherwise is a page at rest. Real interface work lives in the states nobody screenshots: hover, focus, loading, empty, error, the third step of a form, the toast that lasts two seconds. Click through your own app with this watching and every state is captured with the thing that produced it."
-          >
-            <div className="thread-sample">
-              <EvidenceReel recording={WALKED} openAtFirst width={260} height={180} />
-            </div>
-            <p className="gallery__caption">
-              With one agent you read the diff. With five you cannot, and this is the only review
-              artifact that scales with the number of them: recordings can be watched side by side,
-              diffs cannot. A state that could not be photographed keeps its place in the run and
-              says why, so a recording never quietly reads as complete.
-            </p>
-          </Section>
-
-          <Section
             title="What you have open"
-            note="A tab is a conversation or a canvas. That is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
+            note="A tab is a conversation. That is the unit of work people switch between, and it is the only shape in which “two agents in one codebase” can be said at all. Two lines each: the conversation, and under it the project in quieter type. The 2px underline groups by codebase without nesting anything."
           >
             <Tabs tabs={OPEN} at="t2" onOpen={noop} onClose={noop} onNew={noop} />
             <p className="gallery__caption">
@@ -1392,7 +1125,7 @@ export default function Gallery() {
 
           <Section
             title="Waiting in line"
-            note="A second thought typed while something is still running. It joins a line instead of being swallowed by a box that will not take it, and goes out on its own the moment the one before it is finished."
+            note="A second thought typed while something is still running. It joins a line instead of being swallowed by a box that will not take it, and goes out on its own the moment the one before it is finished. The line above it is the other wait: another chat is working in the same folder, so the shell is holding the message and names who has it, with a copy of the project to work in instead."
           >
             <div className="thread-sample">
               <InLine
@@ -1400,7 +1133,16 @@ export default function Gallery() {
                   { id: 'w1', text: 'and make the footer links the same size' },
                   { id: 'w2', text: 'then show me the pricing page at phone width' },
                 ]}
+                queued={[
+                  {
+                    id: 'q1',
+                    text: 'put the pricing page in its own section',
+                    workspace: '/Users/you/Sites/paper-street',
+                    ahead: 'Footer links',
+                  },
+                ]}
                 onTake={noop}
+                onNewWorktree={noop}
               />
             </div>
             <p className="gallery__caption">
@@ -1578,6 +1320,115 @@ export default function Gallery() {
               Running and finished. Nothing is lost either way, and the full conversation is still
               there to scroll back through, which is the fear that keeps people in bloated
               conversations in the first place, so it is the half of the sentence that matters.
+            </p>
+          </Section>
+
+          <Section
+            title="Canvas"
+            note="Steps you place, join up, and then start. Each block is an ordinary turn in one conversation, with the same tools and the same Guard a sentence typed into the composer would get, so a canvas is a way of sending rather than a second kind of agent. Four of them: nothing drawn yet, a flow drawn, one going with its line carrying the work, and one that came back failed. Everything here is drawn by the same functions the model uses, so what is on this page is what pressing the palette draws."
+
+          >
+            <div className="gallery__canvas">
+              <CanvasView
+                flow={newFlow()}
+                onFlow={noop}
+                onStart={noop}
+                onStop={noop}
+                onContinue={noop}
+                connection={CONNECT_STATE}
+                full={false}
+                onFull={noop}
+                canvases={[
+                  { id: 'flow-1', name: 'Tighten the pricing page' },
+                  { id: 'flow-2', name: 'Move the docs onto the new theme' },
+                ]}
+                onOpenCanvas={noop}
+                onRenameCanvas={noop}
+                onDeleteCanvas={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Empty is a screen rather than a blank board: three templates somebody already worked
+              out, each drawn as its own shape so you can read what you are about to place, and
+              under them the project's other canvases. A canvas is a thing a project has several
+              of, and the way back to one is here rather than behind a menu. Placing a block is a
+              press; the block lands beside whatever was picked and is picked itself, so the panel
+              is already open on the words it needs.
+            </p>
+
+            <div className="gallery__canvas">
+              <CanvasView
+                flow={canvasDrawn()}
+                onFlow={noop}
+                onStart={noop}
+                onStop={noop}
+                onContinue={noop}
+                connection={CONNECT_STATE}
+                full={false}
+                onFull={noop}
+                onWatch={noop}
+                onReview={noop}
+                onKeepAttachments={() => Promise.resolve(CANVAS_ATTACHED)}
+                attachments={CANVAS_ATTACHED}
+              />
+            </div>
+            <p className="gallery__caption">
+              Drawn. Every wait is one curve out of the right of a card into the left of the next,
+              and the head says which way round it is; a card dragged behind the one it follows gets
+              a loop rather than a line through its own middle. A line at rest drifts, so the board
+              says which way the work will go rather than only what is joined. The dot on the right
+              of a card is where a drag starts, and it carries 44px of invisible hit area, because a
+              9px dot is not something a hand can hit. The same gesture over a line that is already
+              there takes the line off again.
+            </p>
+
+            <div className="gallery__canvas">
+              <CanvasView
+                flow={{ ...canvasDrawn(), runs: [canvasRun(canvasDrawn(), 'running')] }}
+                onFlow={noop}
+                onStart={noop}
+                onStop={noop}
+                onContinue={noop}
+                connection={CONNECT_STATE}
+                full={false}
+                onFull={noop}
+                onWatch={noop}
+                onReview={noop}
+                learning={{ step: 'Writing src/styles/pricing.css', asking: false }}
+              />
+            </div>
+            <p className="gallery__caption">
+              Going. The card being worked on carries a hairline that travels, and the step it is on
+              is said under what it was asked; the line feeding it carries the same motion in the
+              same direction. Watch is the one press on a running block, and it puts that lane's
+              conversation in the other pane. A canvas that drew progress and gave you no way to
+              read it would be a progress bar pretending to be a drawing. The only thing that turns
+              is the ring in the foot, and it never turns without a sentence beside it.
+            </p>
+
+            <div className="gallery__canvas">
+              <CanvasView
+                flow={{ ...canvasDrawn(), runs: [canvasRun(canvasDrawn(), 'failed')] }}
+                onFlow={noop}
+                onStart={noop}
+                onStop={noop}
+                onContinue={noop}
+                connection={CONNECT_STATE}
+                full={false}
+                onFull={noop}
+                onWatch={noop}
+                onReview={noop}
+                onResume={noop}
+              />
+            </div>
+            <p className="gallery__caption">
+              Ended. <strong>Failed</strong> is not <strong>Stopped</strong>: a block that went wrong
+              says why on the card, and the blocks behind it never ran. The foot says it once with
+              the counts, what it cost and the last thing it said, and puts the whole conversation
+              one press away: the messages are the detail, this is the verdict. A worktree lane that
+              made a branch gets a line and a press into the Review queue, and a run that Graphe
+              itself did not finish says so and offers to carry on from where it stopped rather than
+              pretending it ended.
             </p>
           </Section>
 
@@ -1876,7 +1727,6 @@ export default function Gallery() {
                   research: RESEARCH,
                   references: REFERENCES,
                   versions: TIMELINE,
-                  pictures: {},
                   kept: [],
                   putBack: JUST_PUT_BACK,
                   spent: SPENT,
@@ -1891,57 +1741,26 @@ export default function Gallery() {
                     { name: 'brand', value: '#b8492c' },
                     { name: 'ink', value: '#1a1a19' },
                   ],
-                  styles: {
-                    file: 'src/styles/tokens.css',
-                    tokens: [
-                      { name: '--space-4', value: '16px', kind: 'space' as const, line: 42, steps: ['8px', '12px', '16px', '24px'] },
-                      { name: '--accent', value: '#b8492c', kind: 'colour' as const, line: 95, steps: [] },
-                      { name: '--text', value: '#1a1a19', kind: 'colour' as const, line: 96, steps: [] },
-                      { name: '--text-muted', value: '#a3a3a0', kind: 'colour' as const, line: 97, steps: [] },
-                      { name: '--bg', value: '#fbfbfa', kind: 'colour' as const, line: 98, steps: [] },
-                    ],
-                    text: ':root { --accent: #b8492c; }',
-                  },
-                  reading: readDesign(null),
-                  inStep: IN_STEP,
-                  landing: LANDING,
-                  going: null,
-                  landed: null,
-                  decided: null,
                   away: AWAY,
-                  elsewhere: AWAY_ELSEWHERE,
-                  project: 'paper-street',
-                  gate: gateOf(HELD.changes),
-                  howMuch: USUAL.id,
                   clock: NOW,
                 }}
                 onPutBack={noop}
                 onName={noop}
                 onKeep={noop}
-                onHowMuch={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
-            onLimit={noop}
-            onSave={noop}
-                onOpenDesign={noop}
+                onLimit={noop}
+                onSave={noop}
                 onSwitchBranch={() => {}}
                 onCreateBranch={() => {}}
                 onFetch={fetched}
                 onFastForward={fetched}
                 onOpenGraph={noop}
-                onShare={noop}
-                onDecide={noop}
-                onHandOver={noop}
-                onOpenLink={noop}
                 onOpenFile={noop}
-                onKeepGoing={noop}
-                onStartAfter={noop}
                 onKeepAway={noop}
                 onDropAway={noop}
                 onAnswerAway={noop}
-                onAddRepeat={noop}
-                onSwitchRepeat={noop}
-                onForgetRepeat={noop}
+                onSayToAway={says}
               />
             </div>
             <p className="gallery__caption">
@@ -1969,59 +1788,26 @@ export default function Gallery() {
                 onPutBack={noop}
                 onName={noop}
                 onKeep={noop}
-                onHowMuch={noop}
                 onDismissPutBack={noop}
                 onShowSplit={noop}
                 onLimit={noop}
                 onSave={noop}
-                onOpenDesign={noop}
                 onSwitchBranch={noop}
                 onCreateBranch={noop}
                 onFetch={fetched}
                 onFastForward={fetched}
                 onOpenGraph={noop}
-                onShare={noop}
-                onDecide={noop}
-                onHandOver={noop}
-                onOpenLink={noop}
                 onOpenFile={noop}
-                onKeepGoing={noop}
-                onStartAfter={noop}
                 onKeepAway={noop}
                 onDropAway={noop}
                 onAnswerAway={noop}
-                onAddRepeat={noop}
-                onSwitchRepeat={noop}
-                onForgetRepeat={noop}
+                onSayToAway={says}
               />
             </div>
             <p className="gallery__caption">
               The names are the projects' own folder names, because that is what the person typed
               when they made them. Save only appears on a project with something to save; the row
               of names above the timeline says whose history is in front.
-            </p>
-          </Section>
-
-          <Section
-            title="In step with Figma"
-            note="Every other tool reads a Figma file once, on the way in, and never looks again. The design moves on a Tuesday and nobody finds out until somebody opens the site and winces. This band holds what was read and says, in design's own words, what differs now. Each row carries the one press that puts the work back in step."
-          >
-            <div className="gallery__overview">
-              <InStep
-                state={IN_STEP}
-                detail
-                onFollow={noop}
-                onLookAgain={noop}
-                onBuildIn={noop}
-                onCaughtUp={noop}
-                onStop={noop}
-              />
-            </div>
-            <p className="gallery__caption">
-              The two colours meet along one seam, the way the near-miss rows meet: a shade you
-              cannot see is exactly when the sentence has to do the work. Nothing here is read on a
-              timer: a tool that opens somebody's Figma file every ten minutes without being asked
-              is a different product.
             </p>
           </Section>
 
@@ -2076,50 +1862,16 @@ export default function Gallery() {
                 away={AWAY}
                 now={NOW}
                 busy={false}
-                onKeepGoing={noop}
-                onStartAfter={noop}
                 onKeep={noop}
                 onDrop={noop}
                 onAnswer={noop}
-                onAddRepeat={noop}
-                onSwitchRepeat={noop}
-                onForgetRepeat={noop}
+                onSay={says}
               />
             </div>
             <p className="gallery__caption">
-              The question first, whole, in the Guard's own words. Under it the sheet, then one box
-              that gets on with something whether or not this window stays open, then the things
-              asked for over and over, each with when it happens next and a way to stop it. Nothing
-              runs here that a person cannot see and end.
-            </p>
-          </Section>
-
-          <Section
-            title="Ready to ship"
-            note="The foot of the overview. Work checked in a copy sits until somebody answers it; both answers are undoable. Handing work to a developer never does it on one press: the confirmation says what is about to leave, in the same sentences the shell would use. Putting something online is a conversation with the agent, not a button that only works for one host."
-          >
-            <div className="gallery__overview">
-              <Landing
-                state={LANDING}
-                busy={false}
-                showMe={false}
-                going={null}
-                outcome={null}
-                decided={null}
-                onDecide={noop}
-                gate={gateOf(HELD.changes)}
-                howMuch={USUAL.id}
-                onHowMuch={noop}
-                onUndo={noop}
-                onHandOver={noop}
-                onShare={noop}
-                onOpenLink={noop}
-              />
-            </div>
-            <p className="gallery__caption">
-              Nothing here is named after how it works. "Work in a copy, and ask me first" rather than
-              anything about sandboxes; "Let it in" and "Set it aside" rather than approve and reject.
-              What is waiting says what it was asked for, in the person's own words.
+              The question first, whole, in the Guard's own words. Under it every piece this folder
+              has going: what each one made, what it cost, and where each one is. A run that stopped
+              on a question stays stopped until somebody answers it.
             </p>
           </Section>
 
@@ -2164,58 +1916,12 @@ vite v6.0.5 building for production...
           </Section>
 
           <Section
-            title="Design"
-            note="Everything about how the project looks, over the conversation rather than squeezed into a 328px column. A grid, so a palette is a palette and a hundred movements are a list you can find something in. ⌘D opens it; Esc leaves."
-          >
-            <div className="gallery__sheet">
-              <DesignView
-                at="styles"
-                data={{
-                  styles: STYLES,
-                  motion: readMotion(STYLESHEET),
-                  drifted: findDrift(STYLESHEET, STYLES.tokens),
-                  unreadable: readDesign(STYLES).unreadable,
-                  fixing: null,
-                  looks: [],
-                  looksSay: '',
-                  checkingWidths: false,
-                  workingAt: null,
-                  inStep: IN_STEP,
-                  lookingAtFigma: false,
-                  busy: false,
-                  showMe: false,
-                }}
-                changes={0}
-                onSave={noop}
-                onDiscard={noop}
-                onClose={noop}
-                onNudge={noop}
-                onNudgeMotion={noop}
-                onFixColour={noop}
-                onCheckWidths={noop}
-                onWorkAt={noop}
-                onFollowDesign={noop}
-                onLookAgain={noop}
-                onBuildIn={noop}
-                onCaughtUp={noop}
-                onStopFollowing={noop}
-              />
-            </div>
-            <p className="gallery__caption">
-              Each band keeps its own empty state rather than disappearing, so pressing a chip
-              never lands on nothing. The two long ones, every movement and every near-miss, draw a
-              screenful and offer the rest, because each row here is a live demonstration.
-            </p>
-          </Section>
-
-          <Section
             title="History, as lines"
             note="The rail beside the conversation says what the project looked like then. This says how the work actually ran: what came after what, where two goes at the same thing were tried side by side, and where they came back together. Every row carries the short id, so anybody who wants to go and do something with it elsewhere can."
           >
             <div className="gallery__sheet">
               <HistoryView
                 versions={TIMELINE}
-                pictures={{}}
                 git={GIT_DIRTY}
                 onClose={noop}
                 onPutBack={noop}

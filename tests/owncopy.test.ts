@@ -13,6 +13,8 @@
  * conversation, which the shell answers about whichever is in front — and one
  * of the two presses deletes; and an "are you sure" left standing while the
  * screen moves on to another conversation.
+ *
+ *  Source text, not behaviour: that the window calls the two ways out of a copy, names the conversation it acts on and is told the fact per conversation; electron/main.ts sits behind IPC and App.tsx needs the whole window, so neither join has anything a test can call.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';

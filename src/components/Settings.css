@@ -901,3 +901,93 @@ button.settings__row {
     color: var(--text);
   }
 }
+
+/* ---------------------------------------------------------------------------
+   What was deleted
+   The same rows as the folders above, told apart by the box at the front: a
+   ticked row is one to throw away, and the press under the list says how many
+   of those there are rather than standing for all of them.
+   --------------------------------------------------------------------------- */
+
+.settings__trash {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The checkbox and the row's words are one target, so picking a row is a press
+   anywhere along it rather than on a thirteen-pixel square. On the name's line
+   rather than the middle of a row that is two lines tall. */
+.settings__trashpick {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.settings__trashpick input {
+  flex: none;
+  margin: 2px 0 0;
+  cursor: pointer;
+}
+
+.settings__trashdo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+}
+
+/* Wider than the folder rows' Clear, which is one word: this press is two, and
+   a fixed 54px would cut it. */
+.settings__trashdo .settings__folderdo {
+  width: auto;
+  padding: 0 var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Older chats, moved across
+   The counts the move wrote down, and the two presses anybody does with a
+   number they do not like. Closed by default: it is read on purpose, by
+   somebody who already suspects what happened to a chat.
+   --------------------------------------------------------------------------- */
+
+.settings__moved {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__movedhead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+/* The folder rows' fixed width is for one word. */
+.settings__folderdo--wide {
+  width: auto;
+  padding: 0 var(--space-2);
+}
+
+.settings__said {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.settings__moveddo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-3);
+}
+
+.settings__trashpicked {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}

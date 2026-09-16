@@ -26,6 +26,7 @@ import {
   type CommandRan,
 } from '../work/commands-ran';
 import { terminalWords } from '../work/terminals';
+import TerminalPane from './TerminalPane';
 import './Commands.css';
 
 /** How often a server's tail is read again while its tab is in front. Slow
@@ -49,6 +50,18 @@ type Props = {
   page?: string | null;
   /** What that page has printed. */
   onPageSaid?: () => Promise<readonly Said[]>;
+  /** A shell of somebody's own in this workspace. Left off, the drawer is what
+   *  it has always been: the record of what was run, reading only. The two are
+   *  never mixed — one is a shell nobody is watching and the other is the
+   *  Guard's account of the agent — so the switch swaps the whole body. */
+  terminal?: {
+    conversation?: string | null;
+    /** The folder the shell opens in. */
+    workspace: string | null;
+    /** Whether the terminal is the pane being shown. */
+    open: boolean;
+    onOpen: (open: boolean) => void;
+  };
 };
 
 /** Whether this window is the one being looked at. The timer rests when it is
@@ -81,7 +94,7 @@ function keyOf(one: Said): string {
 }
 
 export default function Commands(props: Props) {
-  const { open, onClose, turns, servers, onStop, onOpenAddress, page = null } = props;
+  const { open, onClose, turns, servers, onStop, onOpenAddress, page = null, terminal } = props;
   const focused = useFocused();
   /* The window hands these down as fresh closures every render, and an effect
      that depended on their identity would tear its own timer down and start
@@ -199,6 +212,17 @@ export default function Commands(props: Props) {
           </button>
         ))}
         <span className="commands__spacer" />
+        {terminal === undefined ? null : (
+          <button
+            type="button"
+            className="commands__press"
+            aria-pressed={terminal.open}
+            title={terminal.open ? terminalWords.hidePanel : terminalWords.showPanel}
+            onClick={() => terminal.onOpen(!terminal.open)}
+          >
+            {terminalWords.panel}
+          </button>
+        )}
         {server?.address == null ? null : (
           <button
             type="button"
@@ -226,7 +250,14 @@ export default function Commands(props: Props) {
         </button>
       </div>
 
-      {at === 'agent' ? (
+      {terminal !== undefined && terminal.open ? (
+        <TerminalPane
+          workspace={terminal.workspace}
+          conversation={terminal.conversation}
+          open
+          onClose={() => terminal.onOpen(false)}
+        />
+      ) : at === 'agent' ? (
         <AgentTab rows={shown} openRow={openRow} onRow={setOpenRow} />
       ) : at === PAGE ? (
         <PageTab notes={notes} />
@@ -284,7 +315,10 @@ function AgentTab(props: {
   const { rows, openRow, onRow } = props;
   const scroller = useRef<HTMLDivElement | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
-  const span = useWindowed(rows.length, { scroller, list, guess: 26 });
+  const span = useWindowed(
+    rows.map((one) => one.id),
+    { scroller, list, guess: 26 },
+  );
 
   /* Newest at the bottom, so the drawer opens on the command that just ran. */
   const count = rows.length;
@@ -301,14 +335,13 @@ function AgentTab(props: {
     <div className="commands__pane scroll--auto" ref={scroller}>
       <div ref={list}>
         <div style={{ height: span.before }} />
-        {rows.slice(span.first, span.last).map((one, index) => {
-          const here = span.first + index;
+        {rows.slice(span.first, span.last).map((one) => {
           const shown = openRow === one.id;
           return (
             <div
               key={one.id}
               className="commands__row"
-              ref={(el) => span.measure(here, el)}
+              ref={(el) => span.measure(one.id, el)}
             >
               <button
                 type="button"

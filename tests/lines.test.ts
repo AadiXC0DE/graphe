@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** Moving between lines of work, and the switcher that does it.
  *
  * The failure behind this file is not arithmetic. The control existed, looked
@@ -6,13 +7,17 @@
  * first render — no folder open — and returned before it did anything. Clicking
  * a name was indistinguishable from a control that had not been built.
  *
- * The rules below are the half that can be tested without a browser: which rows
- * to draw, what each one says about where it stands, and which names to refuse
- * before somebody presses rather than after.
+ * Most of the rules below are the half that can be tested without a browser:
+ * which rows to draw, what each one says about where it stands, and which names
+ * to refuse before somebody presses rather than after. The last one draws the
+ * pill, because a word written down in a table is not the word on screen.
  */
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import Lines from '../src/components/Lines';
 import type { GitBranch } from '../src/lib/ipc';
 import { LINE_WORDS, linesMatching, refuseName, saysStanding } from '../src/lib/lines';
 
@@ -32,6 +37,47 @@ const LINES: readonly GitBranch[] = [
   line({ name: 'pricing-page', upstream: 'origin/pricing-page', ahead: 3, message: 'Pricing table, second pass' }),
   line({ name: 'hero-rework', message: 'One big line for the hero' }),
 ];
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+const hosts: HTMLElement[] = [];
+const roots: Root[] = [];
+afterEach(() => {
+  act(() => {
+    for (const one of roots.splice(0)) one.unmount();
+  });
+  for (const host of hosts.splice(0)) host.remove();
+});
+
+/** The switcher, drawn: what the control says and what opening it offers. */
+function switcher(): { pill: string | null; offer: string | null } {
+  const host = document.createElement('div');
+  document.body.append(host);
+  hosts.push(host);
+  const root = createRoot(host);
+  roots.push(root);
+  act(() => {
+    root.render(
+      createElement(Lines, {
+        branches: LINES,
+        fallback: 'main',
+        onSwitch: () => {},
+        onCreate: () => {},
+      }),
+    );
+  });
+  const now = host.querySelector<HTMLButtonElement>('.lines__now');
+  if (now === null) throw new Error('the switcher is not drawn');
+  act(() => {
+    now.click();
+  });
+  return {
+    pill: now.getAttribute('aria-label'),
+    offer: host.querySelector('.lines__new')?.textContent ?? null,
+  };
+}
 
 describe('where a line stands', () => {
   it('says nothing when there is nothing worth saying', () => {
@@ -122,14 +168,11 @@ describe('the words', () => {
     }
   });
 
-  it('is the word actually shown, not just written down', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const read = (name: string): string =>
-      readFileSync(fileURLToPath(new URL(`../src/components/${name}`, import.meta.url)), 'utf8');
-    // The heading over the pill is the Git band's now; the pill itself still
-    // says what pressing it does.
-    expect(read('Lines.tsx')).toContain('LINE_WORDS.open');
-    expect(read('Overview.tsx')).not.toContain('LINE_WORDS.plainly');
+  it('is the word actually shown, not just written down', () => {
+    const drawn = switcher();
+    // The pill is the control somebody presses, and it says what pressing it
+    // does; the panel it opens offers the create row in the same words.
+    expect(drawn.pill).toBe(LINE_WORDS.open);
+    expect(drawn.offer).toBe(LINE_WORDS.newLine);
   });
 });

@@ -26,12 +26,15 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tasksPath = join(root, 'eval/tasks.json');
+/** Where the runner puts its JSON. Vitest 5 stopped printing the report to
+ *  stdout, so it is asked for a file and read back from there. */
+const reportPath = join(root, '.vitest', 'eval-report.json');
 
 function readTasks() {
   try {
@@ -44,24 +47,35 @@ function readTasks() {
 function runTests() {
   const start = Date.now();
   // vitest JSON reporter gives machine-readable per-test pass/fail; fallback to stdout parse
-  const out = spawnSync('npx', ['vitest', 'run', '--reporter=json'], {
-    cwd: root,
-    encoding: 'utf8',
-    maxBuffer: 100 * 1024 * 1024,
-    env: { ...process.env, CI: '1' },
-  });
+  rmSync(reportPath, { force: true });
+  mkdirSync(join(root, '.vitest'), { recursive: true });
+  const out = spawnSync(
+    'npx',
+    ['vitest', 'run', '--reporter=json', `--outputFile=${reportPath}`],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 100 * 1024 * 1024,
+      env: { ...process.env, CI: '1' },
+    },
+  );
   const durationMs = Date.now() - start;
   const stdout = out.stdout ?? '';
   const stderr = out.stderr ?? '';
   let json = null;
   try {
-    // vitest --reporter=json writes a single JSON blob to stdout
-    const trimmed = stdout.trim();
-    // Sometimes vite prints banner before JSON — find the JSON start
-    const jsonStart = trimmed.indexOf('{');
-    if (jsonStart !== -1) json = JSON.parse(trimmed.slice(jsonStart));
+    // Read the file the reporter was told to write. The stdout parse stays as a
+    // fallback for a runner that answers on the stream instead.
+    const written = readFileSync(reportPath, 'utf8');
+    json = JSON.parse(written);
   } catch {
-    json = null;
+    try {
+      const trimmed = stdout.trim();
+      const jsonStart = trimmed.indexOf('{');
+      if (jsonStart !== -1) json = JSON.parse(trimmed.slice(jsonStart));
+    } catch {
+      json = null;
+    }
   }
   return { json, stdout, stderr, durationMs, status: out.status };
 }

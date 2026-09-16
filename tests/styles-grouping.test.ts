@@ -1,9 +1,9 @@
 /** Which shelf a value lands on, and in what order.
  *
- * The panel is dense enough now that a wrong guess is loud: a colour on the
- * spacing shelf, a scale that does not climb, or the same name drawn twice
- * because a theme restated it. All of that is arithmetic and words, so it is
- * settled here rather than in front of a screen.
+ * The band is dense enough that a wrong guess is loud: a colour on the spacing
+ * shelf, a scale that does not climb, or the same name drawn twice because a
+ * theme restated it. All of that is arithmetic and words, so it is settled here
+ * rather than in front of a screen.
  */
 
 import { readFileSync } from 'node:fs';
@@ -12,8 +12,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canShow,
-  controlFor,
-  countShown,
   GROUP_ORDER,
   groupOf,
   groupTokens,
@@ -21,7 +19,7 @@ import {
   readable,
   specimenSize,
 } from '../src/design/grouping';
-import { readTokens, steps } from '../src/design/tokens';
+import { readTokens, usesIn } from '../src/design/tokens';
 import type { StyleToken } from '../src/lib/ipc';
 
 let line = 0;
@@ -30,13 +28,11 @@ function make(
   name: string,
   value: string,
   kind: StyleToken['kind'],
-  stops: readonly string[] = [],
+  used = 1,
 ): StyleToken {
   line += 1;
-  return { name, value, kind, line, steps: stops };
+  return { name, value, kind, line, used, file: 'src/styles/tokens.css' };
 }
-
-const RAMP = ['4px', '8px', '12px', '16px'];
 
 const shelves = (tokens: readonly StyleToken[]): string[] =>
   groupTokens(tokens).map((group) => group.id);
@@ -53,42 +49,34 @@ const names = (tokens: readonly StyleToken[], id: string): string[] =>
 describe('what shelf a value belongs on', () => {
   it('puts each kind where a designer would look for it', () => {
     expect(groupOf(make('--brand', '#3355ff', 'colour'))).toBe('colour');
-    expect(groupOf(make('--space-2', '8px', 'space', RAMP))).toBe('spacing');
-    expect(groupOf(make('--radius-md', '10px', 'radius', RAMP))).toBe('corners');
+    expect(groupOf(make('--space-2', '8px', 'space'))).toBe('spacing');
+    expect(groupOf(make('--radius-md', '10px', 'radius'))).toBe('corners');
     expect(groupOf(make('--shadow-md', '0 4px 16px #0001', 'shadow'))).toBe('shadow');
   });
 
   it('separates the sizes that are type from the sizes that are furniture', () => {
-    expect(groupOf(make('--text-base', '1rem', 'size', RAMP))).toBe('type');
-    expect(groupOf(make('--font-lg', '20px', 'size', RAMP))).toBe('type');
-    expect(groupOf(make('--heading-xl', '32px', 'size', RAMP))).toBe('type');
-    expect(groupOf(make('--topbar-height', '38px', 'size', RAMP))).toBe('size');
-    expect(groupOf(make('--icon-sm', '16px', 'size', RAMP))).toBe('size');
+    expect(groupOf(make('--text-base', '1rem', 'size'))).toBe('type');
+    expect(groupOf(make('--font-lg', '20px', 'size'))).toBe('type');
+    expect(groupOf(make('--heading-xl', '32px', 'size'))).toBe('type');
+    expect(groupOf(make('--topbar-height', '38px', 'size'))).toBe('size');
+    expect(groupOf(make('--icon-sm', '16px', 'size'))).toBe('size');
   });
 
   it('drops anything it cannot place onto the last shelf rather than guessing', () => {
-    expect(groupOf(make('--dur-ui', '200ms', 'other', ['100ms', '200ms']))).toBe('other');
+    expect(groupOf(make('--dur-ui', '200ms', 'other'))).toBe('other');
   });
 
   it('survives a kind it has never heard of', () => {
-    const strange = { ...make('--mystery', '3', 'other', ['1', '3']), kind: 'gradient' };
+    const strange = { ...make('--mystery', '3', 'other'), kind: 'gradient' };
     expect(groupOf(strange as unknown as StyleToken)).toBe('other');
     expect(shelves([strange as unknown as StyleToken])).toEqual(['other']);
   });
 });
 
-describe('what can be moved, and what can only be seen', () => {
-  it('gives a colour a picker and a measured value a slider', () => {
-    expect(controlFor(make('--brand', '#3355ff', 'colour'))).toBe('colour');
-    expect(controlFor(make('--space-2', '8px', 'space', RAMP))).toBe('steps');
-  });
-
-  it('offers no control for something with nowhere to step to', () => {
-    expect(controlFor(make('--shadow-md', '0 4px 16px #0001', 'shadow'))).toBe('none');
-    expect(controlFor(make('--font-ui', 'Inter, sans-serif', 'other'))).toBe('none');
-  });
-
-  it('still shows a shadow, because it can be drawn', () => {
+describe('what is worth drawing', () => {
+  it('shows every kind it can place a value in', () => {
+    expect(canShow(make('--brand', '#3355ff', 'colour'))).toBe(true);
+    expect(canShow(make('--space-2', '8px', 'space'))).toBe(true);
     expect(canShow(make('--shadow-md', '0 4px 16px #0001', 'shadow'))).toBe(true);
   });
 
@@ -97,12 +85,17 @@ describe('what can be moved, and what can only be seen', () => {
     expect(shelves([make('--font-ui', 'Inter, sans-serif', 'other')])).toEqual(['type']);
   });
 
-  it('leaves out everything else neither moved nor drawn', () => {
-    expect(canShow(make('--brand', 'some prose that is not a value', 'other'))).toBe(false);
+  /* A duration, a unit, a grid: not a colour or a size, and still a decision
+     somebody wrote in the file and will come here to look up. */
+  it('shows a value that is a number even when it is neither', () => {
+    expect(canShow(make('--dur-ui', '200ms', 'other'))).toBe(true);
+    expect(canShow(make('--columns', '12', 'other'))).toBe(true);
+    expect(shelves([make('--dur-ui', '200ms', 'other')])).toEqual(['other']);
   });
 
-  it('shows a colour even though it has no steps at all', () => {
-    expect(canShow(make('--brand', '#3355ff', 'colour'))).toBe(true);
+  it('leaves out anything that is only prose in a custom property', () => {
+    expect(canShow(make('--brand', 'some prose that is not a value', 'other'))).toBe(false);
+    expect(shelves([make('--brand', 'some prose', 'other')])).toEqual([]);
   });
 });
 
@@ -113,17 +106,16 @@ describe('what can be moved, and what can only be seen', () => {
 describe('grouping a project', () => {
   it('has nothing to say about a project with no styles', () => {
     expect(groupTokens([])).toEqual([]);
-    expect(countShown(groupTokens([]))).toBe(0);
   });
 
   it('returns the shelves in the same order every time', () => {
     const mixed = [
       make('--shadow-md', '0 4px 16px #0001', 'shadow'),
-      make('--topbar-height', '38px', 'size', RAMP),
-      make('--space-2', '8px', 'space', RAMP),
+      make('--topbar-height', '38px', 'size'),
+      make('--space-2', '8px', 'space'),
       make('--brand', '#3355ff', 'colour'),
-      make('--text-base', '16px', 'size', RAMP),
-      make('--radius-md', '10px', 'radius', RAMP),
+      make('--text-base', '16px', 'size'),
+      make('--radius-md', '10px', 'radius'),
     ];
     expect(shelves(mixed)).toEqual(['colour', 'type', 'spacing', 'corners', 'shadow', 'size']);
     expect(shelves(mixed)).toEqual(shelves([...mixed].reverse()));
@@ -139,7 +131,7 @@ describe('grouping a project', () => {
   it('lays a shelf out in the order it will be read', () => {
     const ids = groupTokens([
       make('--brand', '#3355ff', 'colour'),
-      make('--space-2', '8px', 'space', RAMP),
+      make('--space-2', '8px', 'space'),
     ]).map((group) => group.id);
     for (const id of ids) expect(GROUP_ORDER).toContain(id);
   });
@@ -147,7 +139,7 @@ describe('grouping a project', () => {
   it('gives every shelf a name a designer would use', () => {
     const titles = groupTokens([
       make('--brand', '#3355ff', 'colour'),
-      make('--radius-md', '10px', 'radius', RAMP),
+      make('--radius-md', '10px', 'radius'),
     ]).map((group) => group.title);
     expect(titles).toEqual(['Colour', 'Corners']);
     for (const title of titles) {
@@ -156,7 +148,7 @@ describe('grouping a project', () => {
     }
   });
 
-  it('draws the same name once, keeping the declaration a nudge writes back to', () => {
+  it('draws the same name once, keeping the declaration the file wins with', () => {
     const themed = [
       make('--brand', '#3355ff', 'colour'),
       make('--brand', '#7799ff', 'colour'),
@@ -167,14 +159,15 @@ describe('grouping a project', () => {
     expect(colours[0]?.value).toBe('#3355ff');
   });
 
-  it('counts what it will actually draw', () => {
+  it('draws every value it was given, and each one once', () => {
     const groups = groupTokens([
       make('--brand', '#3355ff', 'colour'),
       make('--paper', '#ffffff', 'colour'),
-      make('--space-2', '8px', 'space', RAMP),
+      make('--space-2', '8px', 'space'),
       make('--font-ui', 'Inter, sans-serif', 'other'),
     ]);
-    expect(countShown(groups)).toBe(4);
+    const drawn = groups.flatMap((group) => group.tokens.map((token) => token.name));
+    expect(drawn.toSorted()).toEqual(['--brand', '--font-ui', '--paper', '--space-2']);
   });
 });
 
@@ -185,19 +178,19 @@ describe('grouping a project', () => {
 describe('the order values sit in on a shelf', () => {
   it('makes a scale climb, however the file lists it', () => {
     const jumbled = [
-      make('--space-4', '16px', 'space', RAMP),
-      make('--space-1', '4px', 'space', RAMP),
-      make('--space-8', '72px', 'space', RAMP),
-      make('--space-2', '8px', 'space', RAMP),
+      make('--space-4', '16px', 'space'),
+      make('--space-1', '4px', 'space'),
+      make('--space-8', '72px', 'space'),
+      make('--space-2', '8px', 'space'),
     ];
     expect(names(jumbled, 'spacing')).toEqual(['--space-1', '--space-2', '--space-4', '--space-8']);
   });
 
   it('compares sizes across units rather than by their digits', () => {
     const mixed = [
-      make('--text-lg', '1.5rem', 'size', ['1rem', '1.5rem']),
-      make('--text-sm', '13px', 'size', ['12px', '13px']),
-      make('--text-base', '1rem', 'size', ['0.875rem', '1rem']),
+      make('--text-lg', '1.5rem', 'size'),
+      make('--text-sm', '13px', 'size'),
+      make('--text-base', '1rem', 'size'),
     ];
     expect(names(mixed, 'type')).toEqual(['--text-sm', '--text-base', '--text-lg']);
   });
@@ -213,18 +206,15 @@ describe('the order values sit in on a shelf', () => {
 
   it('puts a value it cannot measure after the scale, not inside it', () => {
     const odd = [
-      make('--space-fluid', 'clamp(1rem, 2vw, 2rem)', 'space', ['clamp(1rem, 2vw, 2rem)', '8px']),
-      make('--space-2', '8px', 'space', RAMP),
-      make('--space-1', '4px', 'space', RAMP),
+      make('--space-fluid', 'clamp(1rem, 2vw, 2rem)', 'space'),
+      make('--space-2', '8px', 'space'),
+      make('--space-1', '4px', 'space'),
     ];
     expect(names(odd, 'spacing')).toEqual(['--space-1', '--space-2', '--space-fluid']);
   });
 
   it('keeps two values of the same size in the order they were declared', () => {
-    const tied = [
-      make('--gap-b', '8px', 'space', RAMP),
-      make('--gap-a', '8px', 'space', RAMP),
-    ];
+    const tied = [make('--gap-b', '8px', 'space'), make('--gap-a', '8px', 'space')];
     expect(names(tied, 'spacing')).toEqual(['--gap-b', '--gap-a']);
   });
 });
@@ -257,7 +247,7 @@ describe('a shelf that will not end', () => {
   });
 
   it('caps each shelf on its own', () => {
-    const spacing = RAMP.map((step) => make(`--s-${step}`, step, 'space', RAMP));
+    const spacing = [4, 8, 12, 16].map((step) => make(`--s-${String(step)}`, `${String(step)}px`, 'space'));
     const both = [...many.slice(0, 10), ...spacing];
     const groups = groupTokens(both, 6);
     expect(groups.map((group) => group.tokens.length)).toEqual([6, 4]);
@@ -310,10 +300,12 @@ describe('how large a specimen is drawn', () => {
 
 describe('grouping the tokens this app ships with', () => {
   const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8');
+  const uses = usesIn([css]);
   const read = readTokens(css);
   const ours: readonly StyleToken[] = read.map((token) => ({
     ...token,
-    steps: steps(token, read),
+    used: uses.get(token.name) ?? 0,
+    file: 'src/styles/tokens.css',
   }));
   const groups = groupTokens(ours);
   const shelf = (id: string): readonly StyleToken[] =>
@@ -358,5 +350,14 @@ describe('grouping the tokens this app ships with', () => {
   it('never offers the same name twice', () => {
     const drawn = groups.flatMap((group) => group.tokens.map((token) => token.name));
     expect(new Set(drawn).size).toBe(drawn.length);
+  });
+
+  /* The column that makes the band worth reading: a value the whole app leans
+     on and a value nothing has reached for yet look identical without it. */
+  it('knows which of its own values the app actually uses', () => {
+    const asked = ours.find((token) => token.name === '--accent');
+    const never = ours.find((token) => token.name === '--dur-exit');
+    expect(asked?.used ?? 0).toBeGreaterThan(0);
+    expect(never?.used).toBe(0);
   });
 });

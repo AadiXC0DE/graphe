@@ -1,0 +1,9 @@
+/* Above everything in the column: the start screen, a file, a conversation.
+   Room under it so the first thing in the column does not touch it. */
+
+.appwide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}

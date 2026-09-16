@@ -115,6 +115,63 @@
   }
 }
 
+/* The same foot as the copy control, one seat along. It carries a word rather
+   than a glyph, so it sits past the 20px icon and grows to the right, which
+   nothing else in the foot has to know about. */
+.message__action {
+  position: absolute;
+  top: var(--space-1);
+  left: calc(var(--space-1) * -1 + var(--space-5));
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .message__action {
+    opacity: 0;
+  }
+}
+
+.message:hover .message__action,
+.message:focus-within .message__action {
+  opacity: 1;
+}
+
+.message__action:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .message__action:hover:not(:disabled) {
+    color: var(--text);
+  }
+}
+
+/* Nowhere to fork from yet: the press stays visible and says why, because a
+   control that disappears is one nobody looks for again. */
+.message__action:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message__action {
+    transition: none;
+  }
+}
+
 /* What you attached, kept with the message you attached it to. */
 .message__pictures {
   display: flex;

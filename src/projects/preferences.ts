@@ -92,9 +92,13 @@ export type Preferences = {
    *  radius, density, fonts, motion. Five colour presets were the whole of it
    *  before, and a preset is somebody else's taste. */
   appearance: Appearance;
+  /** Which process hosts a conversation's agent. `in-process` is what every
+   *  copy of the app has always done; `child` gives each conversation a process
+   *  of its own, so an add-on that spins cannot freeze the window. */
+  runtime: 'child' | 'in-process';
   /** How much time each model should take before it answers. The map is keyed
-   * by its provider and model id because different models support different
-   * choices. */
+   *  by its provider and model id because different models support different
+   *  choices. */
   thinking: Readonly<Record<string, ThinkingLevel>>;
   /**
    * Versions somebody chose to keep at the top of the rail, by project folder.
@@ -126,20 +130,6 @@ export type Preferences = {
    */
   showFiles: boolean;
   /**
-   * Whether each project holds work back to be looked at first, keyed by its
-   * path.
-   *
-   * Per project, so saying "ask me first" in one folder never changes another:
-   * what a designer decides for a shared codebase they do not own is not what
-   * they want for their own. On where nothing has been said: work that has not
-   * moved the page is let through without a word, so being asked means
-   * something moved rather than that a turn finished.
-   *
-   * Read it through `holdsBack`, never by hand — absent is off, and a `true`
-   * here is somebody having turned it on.
-   */
-  heldBack: Readonly<Record<string, boolean>>;
-  /**
    * Whether each project's browser keeps its logins between sittings, by path.
    *
    * Off where nothing has been said: a browser that remembers is a browser
@@ -147,14 +137,6 @@ export type Preferences = {
    * turn on rather than a thing to discover. Read it through `keepsLogins`.
    */
   keptLogins: Readonly<Record<string, boolean>>;
-  /**
-   * How much a picture has to move before work is stopped, by id.
-   *
-   * One of `HOW_MUCH` in `src/design/gate.ts`, or null for the middle one. Not
-   * per project: it is a reading of how fussy somebody is, and they are the
-   * same person in every folder.
-   */
-  howMuch: string | null;
   /**
    * The ceiling on spending, or null when nobody has set one.
    *
@@ -171,9 +153,6 @@ export type Preferences = {
   /** Name a conversation from what was first asked in it. On, because an
    *  untitled row is a row nobody can find again. */
   nameConversations: boolean;
-  /** Ask before a conversation that is still working is closed. On: closing
-   *  one throws away a turn somebody is paying for. */
-  askBeforeClosing: boolean;
   /** Put a version down before a job's work first reaches the person's folder,
    *  so the moment before is one press away. */
   snapBeforeApply: boolean;
@@ -238,17 +217,15 @@ export const defaultPreferences: Preferences = {
   editor: null,
   terminal: null,
   appearance: defaultAppearance,
+  runtime: 'in-process',
   thinking: {},
   kept: {},
   trusted: {},
   showFiles: false,
-  heldBack: {},
   keptLogins: {},
-  howMuch: null,
   ceiling: null,
   theme: 'system',
   nameConversations: true,
-  askBeforeClosing: true,
   snapBeforeApply: true,
   replyLanguage: '',
   whenRunFinishes: 'system',
@@ -302,17 +279,15 @@ function asPreferences(value: unknown): Preferences {
     editor: typeof record['editor'] === 'string' ? record['editor'] : null,
     terminal: typeof record['terminal'] === 'string' ? record['terminal'] : null,
     appearance,
+    runtime: record['runtime'] === 'child' ? 'child' : 'in-process',
     thinking,
     kept: asKept(record['kept']),
     trusted: asTrusted(record['trusted']),
     showFiles: record['showFiles'] === true,
-    heldBack: asHeldBack(record['heldBack']),
     keptLogins: asHeldBack(record['keptLogins']),
-    howMuch: typeof record['howMuch'] === 'string' ? record['howMuch'] : null,
     ceiling: asCeiling(record['ceiling']),
     theme: appearance.base,
     nameConversations: record['nameConversations'] !== false,
-    askBeforeClosing: record['askBeforeClosing'] !== false,
     snapBeforeApply: record['snapBeforeApply'] !== false,
     replyLanguage: asLanguage(record['replyLanguage']),
     whenRunFinishes: asTelling(record['whenRunFinishes']),
@@ -406,8 +381,6 @@ export class PreferenceFile {
     const unchanged =
       next.showMe === this.#preferences.showMe &&
       next.showFiles === this.#preferences.showFiles &&
-      next.howMuch === this.#preferences.howMuch &&
-      sameHeldBack(next.heldBack, this.#preferences.heldBack) &&
       sameHeldBack(next.keptLogins, this.#preferences.keptLogins) &&
       next.model?.providerId === this.#preferences.model?.providerId &&
       next.model?.modelId === this.#preferences.model?.modelId &&
@@ -417,12 +390,12 @@ export class PreferenceFile {
       next.advisorGates.loopGate === this.#preferences.advisorGates.loopGate &&
       next.addons === this.#preferences.addons &&
       sameAppearance(next.appearance, this.#preferences.appearance) &&
+      next.runtime === this.#preferences.runtime &&
       sameThinking(next.thinking, this.#preferences.thinking) &&
       sameKept(next.kept, this.#preferences.kept) &&
       sameTrusted(next.trusted, this.#preferences.trusted) &&
       next.theme === this.#preferences.theme &&
       next.nameConversations === this.#preferences.nameConversations &&
-      next.askBeforeClosing === this.#preferences.askBeforeClosing &&
       next.snapBeforeApply === this.#preferences.snapBeforeApply &&
       next.replyLanguage === this.#preferences.replyLanguage &&
       next.whenRunFinishes === this.#preferences.whenRunFinishes &&

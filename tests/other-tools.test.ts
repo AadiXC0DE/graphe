@@ -10,6 +10,8 @@
  * markup contains a word — it is that the offer is on this screen, that a press
  * saves the start line we checked, and that a tool already connected stops
  * being offered.
+ *
+ *  Source text, not behaviour: what this screen's stylesheet animates and what it refuses to lift out of flow; no behavioural test can reach it — jsdom never applies an imported stylesheet.
  */
 
 import { readFileSync } from 'node:fs';

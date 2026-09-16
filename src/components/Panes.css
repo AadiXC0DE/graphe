@@ -1,0 +1,101 @@
+/* Which pane the hand is in. Drawn only once there are two: with one there is
+   no question, and the press that makes a second sits at the end of the
+   conversation tab strip instead. */
+
+.panes {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.panes__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.panes__one {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.panes__one--here {
+  border-color: var(--accent);
+}
+
+.panes__tab {
+  max-width: 22ch;
+  overflow: hidden;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.panes__one--here .panes__tab {
+  color: var(--text);
+}
+
+.panes__close {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+/* On keyboard focus as well as on hover: a control only a mouse can find is one
+   half the people cannot use. */
+.panes__close:hover,
+.panes__close:focus-visible {
+  color: var(--text);
+}
+
+.panes__acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panes__pinned {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.panes__act {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.panes__act:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.panes__act--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

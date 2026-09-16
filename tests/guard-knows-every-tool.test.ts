@@ -94,8 +94,6 @@ describe('every tool Graphe registers', () => {
       'reflect',
       'memory_edit',
       'forget',
-      'set_going',
-      'try_ways',
       'ask_advisor',
       'record_advisor_outcome',
     ];

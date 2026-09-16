@@ -1,15 +1,23 @@
+// @vitest-environment jsdom
 /** Two panels, and whether what is in them can be reached.
  *
  *  Both of these are the kind of thing a passing suite and a screenshot of the
  *  top of the screen will happily agree is fine. The settings panel drew every
- *  row it had; it just put half of them where nobody could scroll to. */
+ *  row it had; it just put half of them where nobody could scroll to.
+ *
+ *  Source text, not behaviour: the sheet rules that decide whether the settings panel and the cost meter can be scrolled to the end; jsdom computes no layout, so no render can see them. */
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-const read = (name: string): string =>
-  readFileSync(new URL(`../src/components/${name}`, import.meta.url), 'utf8');
+import Sidebar from '../src/components/Sidebar';
+
+// jsdom has no file URL for this file, so the sheet is read by path.
+const read = (name: string): string => readFileSync(join(process.cwd(), 'src/components', name), 'utf8');
 
 describe('settings can be scrolled to the end', () => {
   const css = read('Settings.css');
@@ -96,15 +104,66 @@ describe('the money at the foot of the rail keeps its height', () => {
   });
 });
 
-describe('a conversation in the shelf offers one thing, not two', () => {
-  it('can be thrown away, and cannot be copied', () => {
-    const shelf = read('Sidebar.tsx');
-    expect(shelf).toContain('shelf__forget');
-    expect(shelf).not.toContain('shelf__copy');
-    expect(shelf).not.toContain('onCopyConversation');
-  });
+/* ========================================================================== */
 
-  it('leaves no styling behind for a button that is gone', () => {
-    expect(read('Sidebar.css')).not.toContain('.shelf__copy');
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+afterEach(() => {
+  act(() => root?.unmount());
+  host?.remove();
+  root = null;
+  host = null;
+});
+
+const NOTHING = (): void => undefined;
+const NOW = Date.parse('2026-09-15T12:00:00Z');
+
+/** One conversation in the shelf, as the shell hands it over. */
+const THE_ROW = {
+  id: 'a',
+  path: '/sessions/a.jsonl',
+  title: 'the pricing page',
+  at: NOW - 60_000,
+  messages: 4,
+};
+
+describe('a conversation in the shelf offers one thing, not two', () => {
+  it('can be thrown away, and the press names its own row', () => {
+    const deleted: string[] = [];
+    const where = document.createElement('div');
+    host = where;
+    document.body.append(where);
+    root = createRoot(where);
+    act(() => {
+      root?.render(
+        createElement(Sidebar, {
+          projects: [],
+          openPath: '/p',
+          onOpen: NOTHING,
+          onBrowse: NOTHING,
+          pinned: [],
+          conversations: [THE_ROW],
+          openConversation: null,
+          onOpenConversation: NOTHING,
+          onNewConversation: NOTHING,
+          onDeleteConversation: (path: string) => deleted.push(path),
+          open: true,
+          onToggle: NOTHING,
+          now: NOW,
+        }),
+      );
+    });
+
+    const throwItAway = where.querySelector<HTMLButtonElement>('.shelf__convo .shelf__forget');
+    expect(throwItAway).not.toBeNull();
+    act(() => {
+      throwItAway?.click();
+    });
+    expect(deleted).toEqual([THE_ROW.path]);
   });
 });

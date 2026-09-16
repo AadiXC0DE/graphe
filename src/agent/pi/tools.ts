@@ -50,7 +50,9 @@ import type { AgentToolResult, AgentToolUpdateCallback, ToolDefinition } from '@
 import { Type } from 'typebox';
 import { READABLE, documentSaid, readDocument } from './documents';
 
-import { lspRenameTool, lspTool } from './lsp';
+import { searchSymbolsTextTool } from './search-symbols-text';
+import { groupTokens } from '../../design/grouping';
+import { readTokensFor, type TokenRead } from '../../../electron/services/tokens';
 import { createReader, describeForModel, parseFigmaUrl, type Frame, type TokenSet } from '../../design/figma';
 import { ProjectHistory, type ReviewTarget } from '../../history/repo';
 import { mapFrom, saysMap, type SourceFile } from '../../files/map';
@@ -71,7 +73,6 @@ import {
   type CheckVerdict,
   type ProjectCheck,
 } from './checks';
-import { selectCorrect, type CandidateSignals } from './correctness';
 import { browserFolder, browserTools } from './computer';
 import { desktopHere, desktopTools } from './desktop';
 import { SEARCH_PROVIDERS, chainSearch, formatSearch } from './search';
@@ -1170,6 +1171,8 @@ export function stopChild(child: ChildProcess): void {
 type Watching = {
   /** Given the way to end this child, for as long as it is alive. */
   begun: (stop: () => void) => void;
+  /** Whether the fleet stopped this run while setup was awaiting. */
+  stopped?: () => boolean;
   spent: (line: { amount: Money; label: string; reason: SpendReason }) => void;
 };
 
@@ -1195,6 +1198,9 @@ async function runSubagent(
   const cwd = job.cwd ?? process.cwd();
   const boundary: BoundaryFacts = { asked: false, observed: null, because: null };
   if (missing !== null) return { outcome: { ok: false, error: missing }, boundary };
+  if (signal?.aborted || watching?.stopped?.()) {
+    return { outcome: { ok: false, error: 'This piece of work was stopped.' }, boundary };
+  }
 
   // Which addresses this helper may reach, before the boundary is built: the
   // profile has to name the door, or the door is something the child may
@@ -1206,6 +1212,9 @@ async function runSubagent(
   const bound = await hold(process.execPath, [runner], helperBounds(cwd, job.agentDir, through));
   boundary.asked = bound.held;
   if (!bound.held) boundary.because = bound.sentence;
+  if (signal?.aborted || watching?.stopped?.()) {
+    return { outcome: { ok: false, error: 'This piece of work was stopped.' }, boundary };
+  }
 
   return new Promise((resolve) => {
     const child = spawn(
@@ -1258,6 +1267,10 @@ async function runSubagent(
       if (signal?.aborted === true) finish({ ok: false, error: 'This piece of work was stopped.' });
     };
     signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted || watching?.stopped?.()) {
+      finish({ ok: false, error: 'This piece of work was stopped.' });
+      return;
+    }
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (data: string) => {
@@ -1399,6 +1412,7 @@ export const taskTool = (
     // word: anything else is the helper this tool has always been.
     if (taskMode(params.mode) === 'background') {
       const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
+      if (signal?.aborted === true) return say('This piece of work was stopped.');
       if (putOnBoard === undefined) return say(TASK_BACKGROUND_WORDS.noBoard);
       const answer = await putOnBoard(helperBrief(spec, params.task), null);
       if (!answer.ok) return say(TASK_BACKGROUND_WORDS.refused(answer.because));
@@ -1410,7 +1424,14 @@ export const taskTool = (
     // The project this helper's spending belongs to. The model's `cwd` is a
     // suggestion; the folder the session was opened on is the fact.
     const project = helperWorkingDirectory(projectRoot, params.cwd);
-    const admitted = fleet.begin({ id: callId, kind: 'helper', stop: () => {} });
+    let stoppedByFleet = false;
+    const admitted = fleet.begin({
+      id: callId,
+      kind: 'helper',
+      stop: () => {
+        stoppedByFleet = true;
+      },
+    });
     if (!admitted.ok) {
       return { content: [{ type: 'text', text: admitted.because }], details: {} };
     }
@@ -1419,12 +1440,19 @@ export const taskTool = (
     // rule is measured from the folder it is given, so the copy is not a
     // convenience — it is the entire reason a helper may write at all.
     let copy: BuilderCopy | null = null;
-    if (spec.needsCopy) {
-      copy = await makeBuilderCopy(project, callId);
-      if (copy === null) {
-        fleet.ended(callId);
-        return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+    try {
+      if (spec.needsCopy) {
+        copy = await makeBuilderCopy(project, callId);
+        if (copy === null) {
+          fleet.ended(callId);
+          return { content: [{ type: 'text', text: NO_COPY_TO_BUILD_IN }], details: {} };
+        }
       }
+    } catch (cause) {
+      // The reservation is taken before copy creation. Never strand it when
+      // setup fails before the main run finally block exists.
+      fleet.ended(callId);
+      throw cause;
     }
     const where = copy?.folder ?? project;
 
@@ -1458,6 +1486,7 @@ export const taskTool = (
         },
         {
           begun: (stop) => fleet.watch(callId, stop),
+          stopped: () => stoppedByFleet,
           spent: (line) => fleet.spentUnseen(callId, { ...line, project }),
         },
         (text) => {
@@ -1852,7 +1881,7 @@ export const readMapTool = (cwd: string): ToolDefinition => ({
     'How this project is put together: its folders, how many files are in each, which folders reach into which, where a change starts from, and where the styles are. Read it before breaking a big request into pieces, so the pieces touch different areas rather than colliding.',
   promptSnippet: 'read_map(): how the project is put together, by folder',
   promptGuidelines: [
-    'Read it before setting several pieces of work going, so each piece can be given an area of its own.',
+    'Read it before splitting a big request between helpers, so each one can be given an area of its own.',
     'It is the shape, not the contents. Open the files themselves for anything it does not answer.',
   ],
   parameters: Type.Object({}),
@@ -1864,262 +1893,87 @@ export const readMapTool = (cwd: string): ToolDefinition => ({
 });
 
 /* -------------------------------------------------------------------------- */
-/* Several pieces at once                                                     */
+/* The values the project styles with                                           */
 /* -------------------------------------------------------------------------- */
 
-/** How many pieces one request may put on the board. Past this it is not a
- *  plan, it is a machine, and nobody reads the results of a machine. */
-export const MOST_APART = 8;
+/** Enough of a value to recognise it in a line, and short enough that forty of
+ *  them do not fill the context with font stacks. */
+const MOST_IN_A_VALUE = 60;
 
+export const TOKEN_WORDS = {
+  nothing:
+    'This project declares no values of its own in a stylesheet, so there is no design system here to read. Style with literals, or ask the person which values they want.',
+  heading: (sheets: number): string =>
+    `The values this project styles with, read from ${String(sheets)} ${sheets === 1 ? 'stylesheet' : 'stylesheets'}:`,
+  advice:
+    'Use these rather than inventing values of your own. A new colour or size the project does not already have is a change to its design system, and belongs in the stylesheet that declares the rest.',
+} as const;
+
+/** The tokens as the grouped list an agent reads before it styles anything. */
+export function saysTokens(read: TokenRead | null): string {
+  if (read === null) return TOKEN_WORDS.nothing;
+  const groups = groupTokens(read.tokens);
+  if (groups.length === 0) return TOKEN_WORDS.nothing;
+  const lines: string[] = [TOKEN_WORDS.heading(read.sheets)];
+  for (const group of groups) {
+    lines.push('', `${group.title}:`);
+    for (const token of group.tokens) {
+      const value =
+        token.value.length > MOST_IN_A_VALUE
+          ? `${token.value.slice(0, MOST_IN_A_VALUE)}…`
+          : token.value;
+      const used =
+        token.used === 0
+          ? 'used nowhere'
+          : token.used === 1
+            ? 'used once'
+            : `used ${String(token.used)} times`;
+      lines.push(`- ${token.name}: ${value} (${used}, ${token.file}:${String(token.line)})`);
+    }
+    if (group.hidden > 0) lines.push(`  and ${String(group.hidden)} more like these.`);
+  }
+  lines.push('', TOKEN_WORDS.advice);
+  return lines.join('\n');
+}
+
+/**
+ * The project's own values, read out of its stylesheets.
+ *
+ * What colours does this project have, and who uses `--space-4` — the agent had
+ * no way to ask, so it invented values and left a project with two spacings.
+ * Read-only, and cheap: nothing is read until it is called.
+ */
+export const readTokensTool = (cwd: string): ToolDefinition => ({
+  name: 'read_tokens',
+  label: 'Reading the project’s own values',
+  description:
+    'The values this project styles with: every custom property its stylesheets declare, grouped into colour, type, spacing, corners, shadow and sizes, each with the file and line it is written on and how many places reach for it. Read it before styling anything, so what you build uses the values the project already has.',
+  promptSnippet: 'read_tokens(): the values this project styles with, by group',
+  promptGuidelines: [
+    'Read it before writing any CSS, so a colour or a spacing you add is one the project already has.',
+    'A value used nowhere is one nothing has needed yet. Prefer the ones the project leans on.',
+  ],
+  parameters: Type.Object({}),
+  // Parallel: it reads files and holds up nothing, so a batch beside it is a
+  // batch that still runs.
+  executionMode: 'parallel',
+  execute: async (): ToolResult => ({
+    content: [{ type: 'text', text: saysTokens(await readTokensFor(cwd)) }],
+    details: {},
+  }),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Where a piece of work goes instead of running here                         */
+/* -------------------------------------------------------------------------- */
+
+/** Hand one piece of work to the board rather than running it inside the call.
+ *  `ways` names a group the board can compare together. */
 export type PutOnBoard = (
   doing: string,
   after: string | null,
   ways?: string | null,
 ) => Promise<{ ok: true; id: string } | { ok: false; because: string }>;
-
-/** How many goes at one thing are worth comparing. Past three nobody looks at
- *  the fourth, and each one costs what the first one did. */
-export const MOST_WAYS = 3;
-
-export const WAYS_WORDS = {
-  none: 'Say what to make, and two or three different ways of going about it.',
-  one: 'Two ways at least, or it is not a choice. One way is ordinary work.',
-  tooMany: `Three ways at most. Past that nobody looks at the fourth, and each one costs what the first did.`,
-  went: (count: number): string =>
-    `${count === 2 ? 'Two' : String(count)} goes at the same thing are running, each in its own copy. They finish as pictures on the board, side by side, with what each one cost. Keeping one throws the others away, so say what you set going and stop.`,
-} as const;
-
-export const APART_WORDS = {
-  none: 'Nothing to set going: say what each piece of work is.',
-  tooMany: `That is more than ${String(MOST_APART)} pieces at once. Put the biggest ${String(MOST_APART)} on and ask again when they are done.`,
-  /** What comes back to the model once the pieces are on the board. */
-  went: (count: number): string =>
-    count === 1
-      ? 'One piece of work is on the board, in its own copy of the project. It runs whether or not this conversation carries on.'
-      : `${String(count)} pieces of work are on the board, each in its own copy of the project. Four run at a time and the rest wait their turn; they carry on whether or not this conversation does.`,
-  /** Said alongside, so the model does not sit and wait for them. */
-  dontWait:
-    'Do not wait for them or ask about them again. The person watches them finish on the board and decides which to keep. Say what you set going and stop.',
-  /** When the piece it could not start without never went on itself. */
-  lostItsTurn: 'the piece it waits for did not go on, so this one did not either.',
-} as const;
-
-/**
- * Break one request into pieces that run at the same time, each in its own copy.
- *
- * The board already ran several pieces side by side, each isolated, with a way
- * to say one waits for another — but only a person could put anything on it, so
- * a big request was one agent walking a list alone. This is the same board,
- * asked for by the agent that just worked out what the list is.
- *
- * A piece may wait for one earlier piece in the same call, named by its place
- * in the list. Anything else is refused rather than guessed at.
- */
-export const setGoingTool = (put: PutOnBoard): ToolDefinition => ({
-  name: 'set_going',
-  label: 'Setting work going',
-  description:
-    'Put several pieces of work on the board at once. Each gets its own copy and its own agent, four run at a time, and they carry on without this conversation. Use it when a request breaks into pieces touching different files, one per area, rather than one list you walk yourself. A piece can wait for an earlier one.',
-  promptSnippet: 'set_going(pieces): put several pieces of work on the board, each in its own copy',
-  promptGuidelines: [
-    'Use it when a request breaks into pieces that touch different files. Two pieces changing one file will collide, and only one of them can be kept.',
-    'Say what each piece is in the words the person used, whole enough to be worked on by somebody who cannot see this conversation.',
-    'Give a piece `after` only when it genuinely cannot start until another has finished. A piece that waits is a piece not running.',
-    'Having set them going, say what you set going and stop. They are watched on the board, not here.',
-  ],
-  parameters: Type.Object({
-    pieces: Type.Array(
-      Type.Object({
-        doing: Type.String({ description: 'What this piece of work is, in plain words.', minLength: 1 }),
-        after: Type.Optional(
-          Type.Number({
-            description: 'The place in this list (1 for the first) of the piece this one waits for. Leave it out unless it truly cannot start first.',
-          }),
-        ),
-      }),
-      { description: 'The separate pieces of work, in the order they should be started.' },
-    ),
-  }),
-  executionMode: 'sequential',
-  execute: async (
-    _callId: string,
-    params: { pieces?: readonly { doing: string; after?: number }[] },
-  ): ToolResult => {
-    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
-    const asked = (params.pieces ?? []).filter((one) => one.doing.trim() !== '');
-    if (asked.length === 0) return say(APART_WORDS.none);
-    if (asked.length > MOST_APART) return say(APART_WORDS.tooMany);
-
-    // Names as the board gave them, by place in the list, so "after: 2" can be
-    // turned into the real name of the second piece.
-    const names: (string | null)[] = [];
-    const went: string[] = [];
-    const refused: string[] = [];
-    for (const [index, piece] of asked.entries()) {
-      const doing = piece.doing.trim();
-      const waitsFor = piece.after;
-      // Only ever an earlier one in this same list. A number pointing forwards,
-      // at itself, or at nothing is refused rather than turned into "waits for
-      // nothing in particular".
-      const wanted = waitsFor !== undefined && waitsFor >= 1 && waitsFor <= index ? waitsFor : null;
-      const after = wanted === null ? null : names[wanted - 1] ?? null;
-      // The one it was told it could not start without never went on. Starting
-      // it now is the opposite of what was asked for.
-      if (wanted !== null && after === null) {
-        names.push(null);
-        refused.push(`${doing}: ${APART_WORDS.lostItsTurn}`);
-        continue;
-      }
-      const answer = await put(doing, after);
-      names.push(answer.ok ? answer.id : null);
-      if (answer.ok) went.push(doing);
-      else refused.push(`${doing}: ${answer.because}`);
-    }
-
-    if (went.length === 0) {
-      return say(`Nothing went on the board.\n${refused.join('\n')}`);
-    }
-    const lines = [APART_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
-    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
-    lines.push(APART_WORDS.dontWait);
-    return say(lines.join('\n'));
-  },
-});
-
-/* -------------------------------------------------------------------------- */
-/* Correctness selection                                                       */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Select among completed candidates with objective signals.
- *
- * This is deliberately separate from `try_ways`: layouts and wording stay a
- * human choice; code with a right answer can be ranked by completed checks,
- * lint/type errors and diff size. It selects but never lands a copy, and it
- * refuses to name a winner while the best objective signal is still failing.
- */
-export const scoreCandidatesTool: ToolDefinition = {
-  name: 'score_candidates',
-  label: 'Selecting the correct candidate',
-  description:
-    'Select the best of N completed code candidates where there is a right answer. Completed project checks decide first, then lint/type errors, then smaller diff. Unknown is not clean; an unfinished or still-failing candidate cannot win. This ranks transparently and never lands a copy. Keep using try_ways for taste, where a person must choose.',
-  promptSnippet: 'score_candidates(candidates): rank N correct-answer candidates on measured evidence',
-  promptGuidelines: [
-    'Use only where there is a right answer. For layout, colour, wording or other taste, leave try_ways human-judged.',
-    'Run the same checks against every candidate and pass their real results. This ranks what you give it and cannot measure anything itself, so a number you did not actually take makes the answer confident rather than correct. Missing evidence is not a pass.',
-    'A null winner means stop: checks failed, did not finish, no objective signal exists, or the leaders tied.',
-    'This selects only. Never claim it landed or kept a working copy.',
-  ],
-  parameters: Type.Object({
-    candidates: Type.Array(
-      Type.Object({
-        id: Type.String({ minLength: 1 }),
-        ready: Type.Optional(Type.Boolean()),
-        checks: Type.Array(
-          Type.Object({
-            key: Type.String(),
-            name: Type.Optional(Type.String()),
-            ok: Type.Boolean(),
-            said: Type.String(),
-          }),
-        ),
-        lintErrors: Type.Optional(Type.Number({ minimum: 0 })),
-        typeErrors: Type.Optional(Type.Number({ minimum: 0 })),
-        diffLines: Type.Optional(Type.Number({ minimum: 0 })),
-      }),
-    ),
-  }),
-  executionMode: 'parallel',
-  execute: async (_callId, params: {
-    candidates: readonly {
-      id: string;
-      ready?: boolean;
-      checks: readonly { key: string; name?: string; ok: boolean; said: string }[];
-      lintErrors?: number;
-      typeErrors?: number;
-      diffLines?: number;
-    }[];
-  }): ToolResult => {
-    const candidates: CandidateSignals[] = params.candidates.map((one) => ({
-      id: one.id,
-      ...(one.ready === undefined ? {} : { ready: one.ready }),
-      checks: one.checks.map((check) => ({
-        check: { key: check.key, name: check.name ?? check.key, line: '' },
-        ok: check.ok,
-        said: check.said,
-      })),
-      ...(one.lintErrors === undefined ? {} : { lintErrors: one.lintErrors }),
-      ...(one.typeErrors === undefined ? {} : { typeErrors: one.typeErrors }),
-      ...(one.diffLines === undefined ? {} : { diffLines: one.diffLines }),
-    }));
-    const selection = selectCorrect(candidates);
-    const lines = [
-      selection.winner === null
-        ? `No winner: ${selection.reason}`
-        : `Winner: ${selection.winner}. ${selection.reason}`,
-      '',
-      'Ranking:',
-      ...selection.ranking.map(
-        (one) =>
-          `- ${one.id}${one.disqualified ? ' (disqualified)' : ''}: ${one.reasons.join('; ')}`,
-      ),
-    ];
-    return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-      details: { selection },
-    };
-  },
-};
-
-/**
- * Two or three goes at one thing, to be compared and chosen between.
- *
- * Not the same as several pieces of work: these are alternatives. They run at
- * the same time in their own copies, they finish as pictures beside each other,
- * and keeping one throws the rest away. On anything with taste in it the second
- * attempt is usually the good one, and this is the only way to have both.
- */
-export const tryWaysTool = (put: PutOnBoard): ToolDefinition => ({
-  name: 'try_ways',
-  label: 'Trying it more than one way',
-  description:
-    'Make the same thing two or three ways, side by side, and keep one. Use it when the request has taste in it and no single right answer: a layout, a colour, a piece of writing, a page\'s shape. Not for a request with one correct result. Each way runs in its own copy; keeping one discards the rest.',
-  promptSnippet: 'try_ways(doing, ways): make the same thing two or three ways, and compare them',
-  promptGuidelines: [
-    'Use it where taste decides and there is no single right answer. Where there is one correct result, generate candidates separately and use score_candidates on the same objective checks.',
-    'Make the ways genuinely different from each other. Three versions of one idea is one idea, and the comparison is worthless.',
-    'Say what each way is in a sentence the person can tell apart from the others at a glance, because that is what they will read under the pictures.',
-  ],
-  parameters: Type.Object({
-    doing: Type.String({ description: 'What is being made, the same for every way.', minLength: 1 }),
-    ways: Type.Array(Type.String({ minLength: 1 }), {
-      description: 'How each go should differ: two or three genuinely different approaches.',
-    }),
-  }),
-  executionMode: 'sequential',
-  execute: async (callId: string, params: { doing?: string; ways?: readonly string[] }): ToolResult => {
-    const say = (text: string): AgentToolResult<unknown> => ({ content: [{ type: 'text', text }], details: {} });
-    const doing = (params.doing ?? '').trim();
-    const ways = (params.ways ?? []).map((one) => one.trim()).filter((one) => one !== '');
-    if (doing === '' || ways.length === 0) return say(WAYS_WORDS.none);
-    if (ways.length === 1) return say(WAYS_WORDS.one);
-    if (ways.length > MOST_WAYS) return say(WAYS_WORDS.tooMany);
-
-    const group = `ways-${callId}`;
-    const went: string[] = [];
-    const refused: string[] = [];
-    for (const way of ways) {
-      const answer = await put(`${doing}: ${way}`, null, group);
-      if (answer.ok) went.push(way);
-      else refused.push(`${way}: ${answer.because}`);
-    }
-
-    if (went.length === 0) return say(`Nothing went on the board.\n${refused.join('\n')}`);
-    const lines = [WAYS_WORDS.went(went.length), ...went.map((one) => `\u2022 ${one}`)];
-    if (refused.length > 0) lines.push('These did not go on:', ...refused.map((one) => `\u2022 ${one}`));
-    return say(lines.join('\n'));
-  },
-});
 
 /* -------------------------------------------------------------------------- */
 /* The page beside the conversation                                           */
@@ -2659,7 +2513,6 @@ export const grapheTools = (
     webfetchTool,
     readDocumentTool,
     taskTool(agentDir, model, thinking, projectRoot, putOnBoard),
-    scoreCandidatesTool,
     // A browser of its own, on from the first turn. Every other agent ships one
     // and hides it behind a plugin; this one is simply there, and the program
     // behind it is fetched the first time somebody asks for a page rather than
@@ -2698,22 +2551,19 @@ export const grapheTools = (
   if (projectRoot !== undefined && projectRoot !== '') {
     tools.push(
       readMapTool(projectRoot),
+      readTokensTool(projectRoot),
       runChecksTool(projectRoot, agentDir, model, thinking, noted),
       // Here rather than beside `mcp`: that one only exists once a project has
       // something connected, and the project with nothing yet is the whole
       // point of this one.
       connectingTool(projectRoot),
-      lspTool(projectRoot),
-      lspRenameTool(projectRoot),
+      searchSymbolsTextTool(projectRoot),
     );
   } else {
-    tools.push(lspTool(process.cwd()), lspRenameTool(process.cwd()));
+    tools.push(searchSymbolsTextTool(process.cwd()), readTokensTool(process.cwd()));
   }
   const token = (figmaToken ?? '').trim();
   if (token !== '') tools.push(figmaReadTool(token));
-  // Only where there is a board to put work on. The runs on the board must not
-  // hold this tool: a piece that can fill the board it is running on is a loop.
-  if (putOnBoard !== undefined) tools.push(setGoingTool(putOnBoard), tryWaysTool(putOnBoard));
   // Only where a shell has said there is a page. Anywhere else — a helper in
   // its own process, a test — there is no page to work on and no tool for it.
   if (livePage !== null) tools.push(...pageTools(projectRoot));

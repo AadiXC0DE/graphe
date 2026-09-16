@@ -196,6 +196,28 @@ xattr -p com.apple.quarantine /Applications/Graphe.app   # present on Homebrew 6
 
 ---
 
+## Rolling back
+
+A release that turns out badly is undone by moving the cask back to the previous
+zip, and the app has to survive that: an older build meeting a profile a newer one
+wrote must refuse to write rather than tidy it away. That is what
+`parseIndex`'s `future` reading is for -- a file from a newer version is not
+corruption, the workspace index is left exactly as it is, and the shell keeps
+running without persisting the registry until the newer app is back.
+
+To roll back:
+
+1. Keep the previous release's zip and its checksum. Do not delete them when you
+   publish a new one; that zip is the rollback.
+2. Point the cask at the previous version and its sha256 (`brew bump-cask-pr`
+   does this in one step, in reverse: a normal PR with the older version).
+3. On a machine that already ran the newer version, expect the older app to say
+   the profile is newer than it is. Do not delete `workspaces.json` by hand to
+   silence it -- that is the record of where every conversation's files are.
+4. If somebody has to go back further than the release before, restore the
+   `.bak` copies the migration wrote next to the index files, with the app
+   closed.
+
 ## Signing, said once and plainly
 
 - `mac.identity: null` in `electron-builder.yml` turns Apple code signing off.

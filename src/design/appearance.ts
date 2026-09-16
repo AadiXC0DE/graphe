@@ -308,9 +308,18 @@ export function asCss(tokens: Readonly<Record<string, string>>, selector = ':roo
 export function cssFor(one: Appearance, on: Base = 'light', under?: string): string {
   const at = under ?? ':root, :root[data-theme]';
   const root = asCss(tokensFor(one, on), at);
-  if (one.ligatures) return root;
+  /* Increase Contrast in System Settings is the same request the Contrast
+     setting makes, so it gets the same palette: without this the renderer is
+     told more contrast is wanted and no rule answers it. Only the shipped
+     sheet answers the OS switch; a preview is somebody's own swatch. */
+  const asked =
+    under !== undefined || one.contrast === 'high'
+      ? ''
+      : `\n@media (prefers-contrast: more) {\n${asCss(tokensFor({ ...one, contrast: 'high' }, on), at)}\n}`;
+  const sheet = `${root}${asked}`;
+  if (one.ligatures) return sheet;
   const inside = under === undefined ? '' : `${under} `;
-  return `${root}\n${inside}code, ${inside}pre, ${inside}kbd, ${inside}samp {\n  font-variant-ligatures: none;\n}`;
+  return `${sheet}\n${inside}code, ${inside}pre, ${inside}kbd, ${inside}samp {\n  font-variant-ligatures: none;\n}`;
 }
 
 /* -------------------------------------------------------------------------- */

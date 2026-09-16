@@ -4,6 +4,8 @@
  *  have to hold: a file that will not read stops everything rather than running
  *  half of it, and a command that runs on its own has to be one the Guard would
  *  allow outright.
+ *
+ *  Source text, not behaviour: the template written with `flag: 'wx'` so it never lands over somebody's file; no behavioural test can reach it — the write is a call inside electron/main.ts.
  */
 
 import { readFileSync } from 'node:fs';

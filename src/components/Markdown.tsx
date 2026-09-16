@@ -1,6 +1,9 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useRef, type ReactNode } from 'react';
 import CodeBlock from './CodeBlock';
-import MermaidBlock from './MermaidBlock';
+
+/* A diagram is rare in a reply and the block that draws one is not small, so it
+   is fetched the first time a fence actually asks for one. */
+const MermaidBlock = lazy(() => import('./MermaidBlock'));
 import {
   decodeEntities,
   isMermaid,
@@ -170,7 +173,23 @@ function renderBlock(token: Token, key: string, tail?: ReactNode): ReactNode {
       /* A fence that asks for a diagram belongs to the diagram engine, not the
          highlighter — see MermaidBlock. */
       if (isMermaid(token.lang)) {
-        return <MermaidBlock key={key} code={String(token.text ?? '')} tail={tail} />;
+        // The fence stands in for itself while the block arrives: this is what
+        // MermaidBlock draws anyway until the engine answers.
+        return (
+          <Suspense
+            key={key}
+            fallback={
+              <CodeBlock
+                code={String(token.text ?? '')}
+                language={languageOf(token.lang)}
+                label={languageLabel(token.lang)}
+                tail={tail}
+              />
+            }
+          >
+            <MermaidBlock code={String(token.text ?? '')} tail={tail} />
+          </Suspense>
+        );
       }
       const language = languageOf(token.lang);
       return (

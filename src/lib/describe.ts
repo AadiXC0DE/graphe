@@ -130,19 +130,11 @@ export function describeCall(call: ToolCall): Described {
         detail: short(textField(input, ['pattern', 'query', 'regex'])),
       };
 
-    case 'lsp':
+    case 'search_symbols_text':
       return {
         label: 'Looking through your code',
-        detail: short(textField(input, ['symbol', 'operation', 'query', 'path'])),
+        detail: short(textField(input, ['symbol', 'word', 'operation', 'path'])),
       };
-
-    case 'lsp_rename': {
-      const symbol = textField(input, ['symbol', 'word', 'name']);
-      return {
-        label: symbol === null ? 'Renaming across your project' : `Renaming ${symbol} across your project`,
-        detail: short(textField(input, ['newName', 'to'])),
-      };
-    }
 
     case 'bash':
     case 'shell':
@@ -242,10 +234,10 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Ticking one off the list', detail: short(textField(input, ['note'])) };
     case 'cancel_build':
       return { label: 'Taking the checklist off the screen' };
-    case 'score_candidates':
-      return { label: 'Choosing between the answers' };
     case 'read_map':
       return { label: 'Reading the shape of the project' };
+    case 'read_tokens':
+      return { label: 'Reading the project’s own values' };
     case 'read_diff':
       return { label: 'Reading the changes so far' };
     case 'read_document':
@@ -260,10 +252,6 @@ export function describeCall(call: ToolCall): Described {
       return { label: 'Checking what is running' };
     case 'stop_running':
       return { label: 'Stopping what was running' };
-    case 'set_going':
-      return { label: 'Setting work going in the background', detail: short(textField(input, ['doing'])) };
-    case 'try_ways':
-      return { label: 'Making a few versions to compare', detail: short(textField(input, ['doing'])) };
     case 'mcp':
       return { label: 'Using a tool you connected', detail: short(textField(input, ['tool', 'server'])) };
     case 'connect_tool':

@@ -507,6 +507,7 @@ export default function Annotate({ source, name, onDone, onClose }: AnnotateProp
                         onBlur={keepNote}
                         onKeyDown={(event) => {
                           event.stopPropagation();
+                          if (event.nativeEvent.isComposing) return;
                           if (event.key === 'Enter' && !event.shiftKey) {
                             event.preventDefault();
                             keepNote();

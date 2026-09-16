@@ -5,6 +5,8 @@
  *  say where it stands. These read the wiring out of the source the way the
  *  other wired tests do: they are the tripwire that catches somebody removing
  *  the guard while renaming things.
+ *
+ *  Source text, not behaviour: how a several-project folder is wired across the shell, the window and the bridge; electron/main.ts sits behind IPC and App.tsx needs the whole window, so neither join has anything a test can call.
  */
 
 import { readFileSync } from 'node:fs';
@@ -12,9 +14,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
-const CHILDREN = readFileSync(new URL('../electron/childRepos.ts', import.meta.url), 'utf8');
 const IPC = readFileSync(new URL('../src/lib/ipc.ts', import.meta.url), 'utf8');
 const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+const INSPECTOR = readFileSync(new URL('../src/hooks/useInspector.ts', import.meta.url), 'utf8');
 const OVERVIEW = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
 const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
 const PRELOAD = readFileSync(new URL('../electron/preload.ts', import.meta.url), 'utf8');
@@ -56,7 +58,7 @@ describe('the parent never becomes a repository', () => {
     expect(notes).toContain('git -C backend status');
     expect(ADAPTER).toContain('appendSystemPrompt');
     expect(ADAPTER).toContain('options.contextNotes');
-    expect(ADAPTER).toContain('agentsMdNote');
+    expect(ADAPTER).toContain('piecesOf(');
   });
 });
 
@@ -69,10 +71,13 @@ describe('what reads and what refuses', () => {
   });
 
   it('marks changed files under their project name', () => {
-    const start = MAIN.indexOf('handle<readonly FileEntry[]>(CHANNEL.projectFiles');
-    const block = MAIN.slice(start, MAIN.indexOf("handle<{ looks: readonly Look[]"));
+    // The handler's own block, up to the next one: the neighbours in `register`
+    // move around, and the claim is about this handler's body.
+    const start = MAIN.indexOf('CHANNEL.projectFiles');
+    expect(start).toBeGreaterThan(-1);
+    const next = MAIN.indexOf('\n  handle<', start + 1);
+    const block = MAIN.slice(start, next === -1 ? undefined : next);
     expect(block).toContain('changedAcross(');
-    expect(CHILDREN).toContain('${one.rel}/${file.path}');
   });
 
   it('resolves the folder a call means, without any path arithmetic to get wrong', () => {
@@ -80,9 +85,9 @@ describe('what reads and what refuses', () => {
     expect(at).toBeGreaterThan(-1);
     const block = MAIN.slice(at, MAIN.indexOf('async function timelineFor'));
     // Matched against what was found on disk. A name off the wire can only ever
-    // be one of the projects already there.
+    // be one of the projects already there. (The order `folderFor` tries those
+    // folders in is run for real in tests/overview-roots.test.ts.)
     expect(block).toContain('childNamed(open.held.childRepos, where.repo)');
-    expect(block).toContain('checkoutEntryFor(open, where)?.folder ?? childRepoFor(open, where)?.path ?? open.path');
   });
 
   it('keeps each project’s saved work its own, opened once and remembered', () => {
@@ -96,7 +101,7 @@ describe('what reads and what refuses', () => {
   });
 
   it('answers each verb for the project the call names', () => {
-    for (const channel of ['CHANNEL.putBack', 'CHANNEL.nameVersion', 'CHANNEL.saveVersion', 'CHANNEL.designCommit']) {
+    for (const channel of ['CHANNEL.putBack', 'CHANNEL.nameVersion', 'CHANNEL.saveVersion']) {
       const at = MAIN.indexOf(`handle<`, MAIN.indexOf(channel) - 200);
       const block = MAIN.slice(MAIN.indexOf(channel), MAIN.indexOf(channel) + 1500);
       expect(at, channel).toBeGreaterThan(-1);
@@ -107,21 +112,9 @@ describe('what reads and what refuses', () => {
       expect(block, channel).toContain('folderFor(open, where)');
       expect(block, channel).toContain('timelineFor(open, where)');
     }
-    for (const marker of ['handle<ShowOutcome>(CHANNEL.show', 'handle<HandedOver>(CHANNEL.handToDeveloper', 'handle<WentOnline>(CHANNEL.putOnline']) {
-      const block = MAIN.slice(MAIN.indexOf(marker), MAIN.indexOf(marker) + 1200);
-      expect(block, marker).toContain('folderFor(open, where)');
-    }
-  });
-
-  /** The timeline was per project and the folder was not, so saving the design
-   *  view read one project's stylesheets and wrote into the folder above it. */
-  it('saves the design view into the project it is saving, not the folder above', () => {
-    const at = MAIN.indexOf('handle<readonly SavedVersion[]>(CHANNEL.designCommit');
-    expect(at).toBeGreaterThan(-1);
-    const block = MAIN.slice(at, MAIN.indexOf('handle<PutBack>(CHANNEL.putBack'));
-    expect(block).toContain('const folder = folderFor(open, where)');
-    expect(block).toContain('styleTokens(folder)');
-    expect(block).not.toContain('open.path');
+    const marker = 'handle<ShowOutcome>(CHANNEL.show';
+    const block = MAIN.slice(MAIN.indexOf(marker), MAIN.indexOf(marker) + 1200);
+    expect(block, marker).toContain('folderFor(open, where)');
   });
 
   /** The panel names the project on every one of these; the window has to pass
@@ -141,15 +134,11 @@ describe('what reads and what refuses', () => {
 
   it('refuses the verbs that need one repository, in the same words everywhere', () => {
     const refusals = [
-      'CHANNEL.designCommit',
       'CHANNEL.putBack',
       'CHANNEL.nameVersion',
       'CHANNEL.saveVersion',
-      'CHANNEL.handToDeveloper',
-      'CHANNEL.putOnline',
       'CHANNEL.branchSwitch',
       'CHANNEL.branchCreate',
-      'CHANNEL.worktreeLand',
       'CHANNEL.show',
     ];
     for (const channel of refusals) {
@@ -160,6 +149,13 @@ describe('what reads and what refuses', () => {
         'return fail(SEVERAL_PROJECTS)',
       );
     }
+    // The land press hands the copy on, so its refusal lives in `landTheCopy`
+    // rather than in the handler.
+    const landing = MAIN.indexOf('async function landTheCopy');
+    expect(landing, 'CHANNEL.worktreeLand').toBeGreaterThan(-1);
+    expect(MAIN.slice(landing, landing + 3500), 'CHANNEL.worktreeLand').toContain(
+      'return fail(SEVERAL_PROJECTS)',
+    );
   });
 });
 
@@ -194,7 +190,10 @@ describe('the window hears about the projects', () => {
   });
 
   it('asks each project for its own timeline', () => {
-    expect(APP).toContain("bridge.versions({ project: path, repo: one.name })");
+    // The ask and the field it lands on both live with the panel queries now —
+    // see src/hooks/useInspector.ts, which owns what each of these reads.
+    expect(INSPECTOR).toContain("bridge.versions({ project: path, repo: one.name, ...(address === null ? {} : { conversation: address }) })");
+    expect(INSPECTOR).toContain('repoVersions: perRepo }');
     expect(APP).toContain('repoVersions: desk.repoVersions,');
   });
 
@@ -204,7 +203,6 @@ describe('the window hears about the projects', () => {
   it('leaves the pill a way back to what is already served', () => {
     expect(APP).toContain('severalProjects');
     expect(APP).toContain("else movePane('split');");
-    expect(OVERVIEW).not.toContain('onSeeProject');
   });
 });
 
@@ -213,10 +211,6 @@ describe('the window hears about the projects', () => {
  *  a pill that could only ever reveal a page nobody had served is no way in. */
 describe('starting a preview in a folder holding several projects', () => {
   const app = APP;
-
-  it('has no press left on the project rows', () => {
-    expect(app).not.toContain('onSeeProject');
-  });
 
   it('starts one for whichever project the panel is showing', () => {
     expect(app).toContain(
@@ -227,9 +221,5 @@ describe('starting a preview in a folder holding several projects', () => {
       app.match(/if \(pane === 'off'\) void seeIt\(undefined, undefined, panelRepoNow\.current \?\? undefined\);/g)
         ?.length,
     ).toBe(2);
-  });
-
-  it('and still only reveals a page that is already being served', () => {
-    expect(app).toContain("else movePane('split');");
   });
 });

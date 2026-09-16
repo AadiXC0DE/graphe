@@ -22,60 +22,58 @@
 
 import { readAppearance, type Appearance } from '../design/appearance';
 import type { AgentEvent, RunningPiece } from '../agent/types';
-import {
-  findMoved,
-  nameOfDesign,
-  saysInStep,
-  NOTHING_FOLLOWED,
-  type Design,
-} from '../design/moved';
-import { howMuchBy } from '../design/gate';
 import { themeFrom } from './theme';
 import { pagesIn, type Page } from '../preview/pages';
 import type { Said } from '../preview/tabs';
-import { holdsBack } from '../projects/heldback';
-import { readFlows, withFlow, withoutFlow, type Flow } from '../work/canvas';
-import { keepsLogins } from '../projects/logins';
 import { keeping } from '../projects/kept';
 import { asComputerUse, defaultComputerUse, type ComputerUse } from '../work/computeruse';
+import {
+  LANE_0,
+  isGate,
+  latestRun,
+  nextUp,
+  readFlows,
+  withFlow,
+  withRun,
+  withoutFlow,
+  type BlockRun,
+} from '../work/canvas';
+import { newRunId } from '../domain/identity';
 import { Ledger } from '../cost/ledger';
 import { createLimit } from '../cost/limits';
 import { daysFromUsage, type TokenUsageView } from '../lib/token-days';
 import { money } from '../cost/money';
-import { nextRun, saysNext, saysRepeat, type Repeat } from '../work/schedule';
 import {
   showWords,
   modelKey,
   type AgentNotice,
   type Away,
-  type AwayNotice,
   type Connected,
   type ConnectedHealth,
   type ConnectedState,
   type AwayPiece,
-  type EveryKind,
   type PullCheck,
   type PullComment,
-  type Repeating,
   type ConnectOutcome,
   type ConnectStep,
   type ComputerStatus,
   type Conversation,
+  type AppNotice,
   type ConnectionState,
-  type Decided,
   type Decision,
   type Fetched,
   type FileEntry,
-  type HandedOver,
-  type Landing,
-  type WentOnline,
+  type FilesRead,
+  type TextRead,
   type FoundAccount,
   type GrapheApi,
   type Hatches,
-  type InStep,
   type ModelChoice,
   type OpenedProject,
-  type Look,
+  type TerminalSession,
+  type SetupHere,
+  type SetupState,
+  type WorktreePlan,
   type Overview,
   type Pack,
   type PlainPreference,
@@ -86,10 +84,13 @@ import {
   type RepoLook,
   type RecentProject,
   type AddonReport,
+  type AttachmentCopy,
+  type KeptAttachments,
+  type TrashView,
+  type StoppedAddition,
   type CarriedExtension,
   type Result,
   type Room,
-  type SideOfWork,
   type WorkspaceFacts,
   type Skill,
   type AlwaysDoes,
@@ -98,23 +99,23 @@ import {
   type BuildAdvance,
   type SavedVersion,
   type ShowOutcome,
-  type VariationsOutcome,
+  type StyleToken,
+  type Flow,
+  type Run,
   type HowFar,
   type Money,
-  type Recording,
   type ShowProgress,
   type Where,
+  type ViewShown,
   type SpendLimit,
   type SpendSummary,
   type ThinkingLevel,
-  type VisualChange,
-  type VisualFrames,
-  type VisualNotice,
   type ReviewClash,
   type ReviewDecided,
   type ReviewEntry,
   type ReviewOpened,
   type StorageNow,
+  type MigrationNow,
 } from './ipc';
 
 declare global {
@@ -133,11 +134,18 @@ function done<T>(value: T): Result<T> {
   return { ok: true, value };
 }
 
-/** Whether this project is set to hold work back for a look first. The same
- *  reader the shell uses, so absent means the same thing in both. */
-function heldBackOf(preferred: { heldBack: Readonly<Record<string, boolean>> }, project: string | null): boolean {
-  return holdsBack(preferred.heldBack, project);
-}
+/** Nothing to say: no move has ever run against this window. */
+const nothingMoved: MigrationNow = {
+  completedAt: null,
+  sources: 0,
+  verdicts: { verified: 0, missing: 0, gone: 0, foreign: 0 },
+  connected: 0,
+  unlinked: 0,
+  unreadable: 0,
+  backups: null,
+  backupFolder: '',
+  newer: false,
+};
 
 /** A browser tab cannot make a checkout; say so the way every real reading does. */
 function previewFail<T>(): Result<T> {
@@ -263,6 +271,20 @@ const PREVIEW_REVIEW: readonly ReviewEntry[] = [
     ],
   },
 ] as unknown as readonly ReviewEntry[];
+
+/** What a browser tab says a project carries, so the New worktree flow has
+ *  something honest to draw: a candidate, a tick, and an install. */
+const PREVIEW_SETUP: SetupHere = {
+  candidates: [
+    { path: '.env.local', chosen: true },
+    { path: '.env', chosen: false },
+  ],
+  plan: { manager: 'npm', command: 'npm', args: ['install'] },
+};
+
+/** The panes a browser tab is showing. In memory only: a tab has no profile to
+ *  write a view record into, and this is what the split press reads. */
+const previewViews: ViewShown[] = [];
 
 const PREVIEW_DIFF = [
   'diff --git a/src/agent/guard/policy.ts b/src/agent/guard/policy.ts',
@@ -432,20 +454,6 @@ function previewVersions(path: string): SavedVersion[] {
   }));
 }
 
-/**
- * Which of the made-up versions have a picture, and which do not.
- *
- * Deliberately not all of them. The rail's two most interesting states only
- * exist when the pictures are uneven: a version with none falls back to its own
- * title, and two in a row that look identical are what "only when it changed"
- * is for. Indexes not listed here have no picture, which is the honest answer
- * rather than a stand-in.
- */
-const PREVIEW_PICTURES: Readonly<Record<string, Readonly<Record<number, boolean>>>> = {
-  '/Users/you/Sites/paper-street': { 0: true, 1: false, 3: false, 4: true },
-  '/Users/you/Sites/atlas-studio': { 0: true },
-};
-
 /* -------------------------------------------------------------------------- */
 /* A project's own files, for a tab with no project behind it                  */
 /* -------------------------------------------------------------------------- */
@@ -593,19 +601,6 @@ function samplePage(moved: boolean): string {
   return `data:image/svg+xml;base64,${globalThis.btoa(page)}`;
 }
 
-const PREVIEW_CHANGE: VisualChange = {
-  id: 'preview-change',
-  at: started,
-  headline: 'Moved the button down and used your brand blue',
-  inDesignWords: 'Spacing on three cards, from 16 to 24.',
-  where: 'One area changed, near the top on the left.',
-  areas: [{ x: 0.045, y: 0.305, width: 0.155, height: 0.08 }],
-  beforeThumb: samplePage(false),
-  afterThumb: samplePage(true),
-  width: 1180,
-  height: 820,
-};
-
 /**
  * Work carrying on without anybody, for a tab where nothing carries on at all.
  *
@@ -691,59 +686,52 @@ function previewAway(): Away {
       },
     },
   ];
-  const repeats: readonly Repeating[] = [
-    {
-      id: 'every-1',
-      doing: 'Check the site still builds and tell me if it doesn’t',
-      says: 'Every day at 7:00am',
-      next: 'Tomorrow at 7:00am',
-      on: true,
-      lastSaid: 'It builds.',
-    },
-  ];
   return {
     pieces,
-    repeats,
     atOnce: 4,
     spent: money(37, PREVIEW_CURRENCY),
     sinceYouWere: 'One thing waiting on you, one thing ready to look at, one thing still going.',
   };
 }
 
-/** The preview's own canvases. One key per project, so switching folders in a
- *  browser tab behaves the way it does in the app. */
-function flowsKey(project: string | null): string {
-  return `graphe:flows:${project ?? ''}`;
+/** What a mock turn says when it is done. One sentence for every block, because
+ *  a card with nothing in it reads as broken rather than as unfinished. */
+const PREVIEW_SAID = 'Done. Nothing actually ran: this is a browser tab.';
+
+/** How long one step of a mock run takes. Long enough to watch a card change
+ *  state, short enough that nobody waits for a flow to finish. */
+const PREVIEW_STEP_MS = 320;
+
+/** A project's canvases, kept where its goal is kept and for the same reason:
+ *  a browser tab has no profile to write a file into. Guarded on the way in
+ *  because a test can import this module with no window at all, and guarded on
+ *  the way out because storage is refused in a private tab. */
+function previewFlowsIn(project: string): readonly Flow[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`graphe:flows:${project}`);
+    return raw === null ? [] : readFlows(JSON.parse(raw) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function previewFlowsOut(project: string, flows: readonly Flow[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(`graphe:flows:${project}`, JSON.stringify(flows));
+  } catch { /* quota or private mode: nothing else is keeping them either */ }
 }
 
 function previewBridge(): Bridge {
   const listeners = new Set<(notice: AgentNotice) => void>();
   const watching = new Set<(progress: ShowProgress) => void>();
-  const looking = new Set<(notice: VisualNotice) => void>();
   const connecting = new Set<(step: ConnectStep) => void>();
+  const flowWatch = new Set<(notice: { project: string; flow: Flow }) => void>();
 
   /** What is going on without anybody. Real state, for as long as the tab is
    *  open, so the band can be pressed rather than only looked at. */
   let atWork: Away = previewAway();
-
-  const heldFlows = (): readonly Flow[] => {
-    try {
-      const raw = localStorage.getItem(flowsKey(openPath));
-      return raw === null ? [] : readFlows(JSON.parse(raw) as unknown);
-    } catch {
-      return [];
-    }
-  };
-
-  const keepFlows = (flows: readonly Flow[]): void => {
-    try {
-      localStorage.setItem(flowsKey(openPath), JSON.stringify(flows));
-    } catch { /* quota or private mode: the shell's own store is the real one */ }
-  };
-
-  /** What the tab is keeping in step with. Nothing, until somebody pastes
-   *  something into the band. */
-  let figmaHere: InStep = NOT_FOLLOWING;
 
   /** Whatever project the tab has open. Every event is stamped with it, the way
    *  the shell stamps its own — the window's routing is then exercised here
@@ -807,6 +795,9 @@ let previewHowFar: HowFar = 'asking';
 let previewPlanMode = false;
   let previewCeiling: SpendLimit | null = null;
   let previewMade = 0;
+  /** Which press made which conversation, so a retry answers the same way the
+   *  shell does rather than looking like a second press. */
+  const previewPresses = new Map<string, string>();
   let previewCarried: readonly CarriedExtension[] = [
     {
       id: 'storybook-tools@1a2b3c4d5e6f7a8b',
@@ -843,9 +834,7 @@ let previewPlanMode = false;
     thinking: {},
     kept: {},
     showFiles: true,
-    heldBack: {},
     keptLogins: {},
-    howMuch: null,
     ceiling: null,
     // There is no preferences file in a browser tab, so the choice lives where
     // it always did — local storage. Seeding from it here means the first
@@ -853,7 +842,6 @@ let previewPlanMode = false;
     // the choice back on every reload.
     theme: themeFrom(typeof localStorage === 'undefined' ? null : localStorage.getItem('graphe:theme')),
     nameConversations: true,
-    askBeforeClosing: true,
     snapBeforeApply: true,
     replyLanguage: '',
     whenRunFinishes: 'system',
@@ -913,6 +901,111 @@ let previewPlanMode = false;
     send({ type: 'spend-summary', summary: split });
   };
 
+  /* A canvas somebody can press Start on. The shell's runner is not here and no
+     model is either, so this walks the blocks itself — each one running, then
+     done a beat later — which is enough to draw every state a card has. A gate
+     is honoured rather than skipped, because a Continue with nothing under it
+     would be a dead button. Each flow walks on its own timer, so two canvases
+     started in one tab do not stop each other. */
+  const flowTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** The block whose turn it is, so the second half of a step knows which card
+   *  it is finishing. A flow mid-step has an entry here. */
+  const flowGoing = new Map<string, string>();
+
+  const projectOf = (where?: Where): string => where?.project ?? '';
+
+  const halt = (id: string): void => {
+    clearTimeout(flowTimers.get(id));
+    flowTimers.delete(id);
+    flowGoing.delete(id);
+  };
+
+  const later = (id: string, where: Where | undefined): void => {
+    flowTimers.set(id, setTimeout(() => walk(id, where), PREVIEW_STEP_MS));
+  };
+
+  /** Store the change and push it. Every step of a mock run goes through here,
+   *  which is what makes the window hear about all of them. */
+  const written = (project: string, flow: Flow): void => {
+    const kept: Flow = { ...flow, updatedAt: Date.now() };
+    previewFlowsOut(project, withFlow(previewFlowsIn(project), kept));
+    for (const listener of flowWatch) listener({ project, flow: kept });
+  };
+
+  /** One step: the block whose turn it is, or the next one, marked. A gate stops
+   *  the walk where a real run stops it, and Continue sets it going again. */
+  const walk = (id: string, where: Where | undefined): void => {
+    flowTimers.delete(id);
+    const project = projectOf(where);
+    const flow = previewFlowsIn(project).find((one) => one.id === id);
+    const run = flow === undefined ? null : latestRun(flow);
+    if (flow === undefined || run === null || run.state !== 'running') return halt(id);
+
+    const held = flowGoing.get(id);
+    if (held !== undefined) {
+      const block = flow.blocks.find((one) => one.id === held);
+      const was = run.blocks[held];
+      if (block === undefined || was === undefined) return halt(id);
+      if (isGate(block)) {
+        // Nothing goes on behind a gate: the run waits for the person, which is
+        // the one thing a gate is for.
+        flowGoing.delete(id);
+        return written(project, withRun(flow, {
+          ...run,
+          state: 'needs-you',
+          blocks: { ...run.blocks, [held]: { ...was, state: 'needs-you' } },
+        }));
+      }
+      flowGoing.delete(id);
+      written(project, withRun(flow, {
+        ...run,
+        blocks: {
+          ...run.blocks,
+          [held]: { ...was, state: 'done', endedAt: Date.now(), said: PREVIEW_SAID },
+        },
+      }));
+      return later(id, where);
+    }
+
+    const block = nextUp(flow);
+    if (block === null) {
+      written(project, withRun(flow, { ...run, state: 'done', endedAt: Date.now() }));
+      return halt(id);
+    }
+    flowGoing.set(id, block.id);
+    written(project, withRun(flow, {
+      ...run,
+      blocks: {
+        ...run.blocks,
+        [block.id]: {
+          state: 'running',
+          lane: run.lanes[0]?.id ?? LANE_0,
+          startedAt: Date.now(),
+          endedAt: null,
+          said: null,
+          turns: 1,
+          spent: null,
+          rounds: 0,
+          result: null,
+          failure: null,
+        },
+      },
+    }));
+    later(id, where);
+  };
+
+  /** The run a fake Start puts on the flow: the flow's own lane, and no folders
+   *  under it, because a browser tab has none. */
+  const minted = (): Run => ({
+    id: newRunId(),
+    state: 'running',
+    startedAt: Date.now(),
+    endedAt: null,
+    lanes: [{ id: LANE_0, workspaceId: 'preview', conversationId: null, branch: null }],
+    blocks: {},
+    spent: null,
+  });
+
   return {
     desktop: false,
 
@@ -923,13 +1016,6 @@ let previewPlanMode = false;
       const known = PREVIEW_PROJECTS.find((one) => one.path === path);
       const name = known?.name ?? path.split('/').filter(Boolean).pop() ?? path;
       openPath = path;
-      // A beat after the folder is open, so the strip lands in a conversation
-      // that exists. In the app this arrives when a turn has finished and the
-      // pictures have been taken; here it is on a timer, because there is no
-      // folder to photograph.
-      setTimeout(() => {
-        for (const one of looking) one({ project: path, change: PREVIEW_CHANGE });
-      }, 500);
       // No saved conversation in a browser tab — there is no disk. The window
       // therefore greets the folder the way it greets a new one (B1.1).
       return Promise.resolve(
@@ -1134,19 +1220,6 @@ let previewPlanMode = false;
       return Promise.resolve(done(named));
     },
 
-    /** Drawn rather than photographed, like the before-and-after above: a
-     *  browser tab has no folder to point a camera at, and a rail with no
-     *  pictures in it is the one state nobody could review. */
-    versionPictures(): Promise<Result<Readonly<Record<string, string>>>> {
-      if (openPath === null) return Promise.resolve(done({}));
-      const which = PREVIEW_PICTURES[openPath] ?? {};
-      const pictures: Record<string, string> = {};
-      for (const [index, moved] of Object.entries(which)) {
-        pictures[`${openPath}#${index}`] = samplePage(moved);
-      }
-      return Promise.resolve(done(pictures));
-    },
-
     /** Remembered for as long as the tab is open, and no longer. A browser tab
      *  has nowhere of its own to keep a preference, and writing one into
      *  somebody's browser storage from a preview would be a surprise. */
@@ -1179,18 +1252,151 @@ let previewPlanMode = false;
       return Promise.resolve(done({ css: '', file: '' }));
     },
 
+    /** A browser tab has no project folder, so no sheet of its own is read and
+     *  the band is absent rather than empty. */
+    tokensRead(): Promise<Result<{ tokens: StyleToken[]; sheets: number } | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /* Kept in memory for the life of the tab. A browser tab has no profile to
+       write a view record into, and the split press is what a person is looking
+       at when they want it back. */
+    viewsLook(): Promise<Result<readonly ViewShown[]>> {
+      return Promise.resolve(done([...previewViews]));
+    },
+    viewsNote(shown: readonly ViewShown[]): Promise<Result<null>> {
+      previewViews.length = 0;
+      previewViews.push(...shown);
+      return Promise.resolve(done(null));
+    },
+
+    /* A canvas in a browser tab: whole enough to draw every state a card has,
+       and honest about it — nothing underneath is running. */
+    flowList(where?: Where): Promise<Result<readonly Flow[]>> {
+      const held = [...previewFlowsIn(projectOf(where))].sort((one, other) => other.updatedAt - one.updatedAt);
+      return Promise.resolve(done(held));
+    },
+
+    flowSave(flow: Flow, where?: Where): Promise<Result<Flow>> {
+      const project = projectOf(where);
+      // Nothing here owns a run: what the window hands over is the whole of
+      // what this project has drawn and what it has run.
+      previewFlowsOut(project, withFlow(previewFlowsIn(project), flow));
+      return Promise.resolve(done(flow));
+    },
+
+    flowDelete(id: string, where?: Where): Promise<Result<null>> {
+      const project = projectOf(where);
+      const held = previewFlowsIn(project);
+      if (!held.some((one) => one.id === id)) return Promise.resolve(previewFail<null>());
+      halt(id);
+      previewFlowsOut(project, withoutFlow(held, id));
+      return Promise.resolve(done(null));
+    },
+
+    flowStart(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      if (flow === undefined) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const run = minted();
+      written(project, withRun(flow, run));
+      later(id, where);
+      return Promise.resolve(done(run));
+    },
+
+    flowStop(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      const run = flow === undefined ? null : latestRun(flow);
+      if (flow === undefined || run === null) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const at = Date.now();
+      const blocks: Record<string, BlockRun> = {};
+      for (const [was, one] of Object.entries(run.blocks)) {
+        // What finished stays finished, the way a real Stop leaves it: stopping
+        // is to keep the work, not to lose the report of it.
+        blocks[was] =
+          one.state === 'running' || one.state === 'needs-you'
+            ? { ...one, state: 'stopped', endedAt: at }
+            : one;
+      }
+      const over: Run = { ...run, state: 'stopped', endedAt: at, blocks };
+      written(project, withRun(flow, over));
+      return Promise.resolve(done(over));
+    },
+
+    flowContinue(id: string, block: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      const run = flow === undefined ? null : latestRun(flow);
+      const gate = flow?.blocks.find((one) => one.id === block);
+      const was = run?.blocks[block];
+      if (flow === undefined || run === null || gate === undefined || !isGate(gate) || was === undefined) {
+        return Promise.resolve(previewFail<Run>());
+      }
+      const over: Run = {
+        ...run,
+        state: 'running',
+        endedAt: null,
+        blocks: { ...run.blocks, [block]: { ...was, state: 'done', endedAt: Date.now(), said: PREVIEW_SAID } },
+      };
+      halt(id);
+      written(project, withRun(flow, over));
+      later(id, where);
+      return Promise.resolve(done(over));
+    },
+
+    /* The mock carries an interrupted run on the same way the shell does: the
+       blocks that finished stay finished and everything else runs again. */
+    flowResume(id: string, where?: Where): Promise<Result<Run>> {
+      const project = projectOf(where);
+      const flow = previewFlowsIn(project).find((one) => one.id === id);
+      if (flow === undefined) return Promise.resolve(previewFail<Run>());
+      halt(id);
+      const run = latestRun(flow);
+      if (run === null) {
+        const fresh = minted();
+        written(project, withRun(flow, fresh));
+        later(id, where);
+        return Promise.resolve(done(fresh));
+      }
+      const blocks: Record<string, BlockRun> = {};
+      for (const [was, one] of Object.entries(run.blocks)) {
+        if (one.state === 'done') blocks[was] = one;
+      }
+      const again: Run = { ...run, state: 'running', endedAt: null, blocks };
+      written(project, withRun(flow, again));
+      later(id, where);
+      return Promise.resolve(done(again));
+    },
+
+    onFlow(listener: (notice: { project: string; flow: Flow }) => void): () => void {
+      flowWatch.add(listener);
+      return () => {
+        flowWatch.delete(listener);
+      };
+    },
+
     /** A whole project, made up, so the panel can be opened and reviewed in a
      *  browser tab — folders inside folders, and the same files the overview
      *  says have moved. */
-    projectFiles(): Promise<Result<readonly FileEntry[]>> {
-      return Promise.resolve(done(PREVIEW_FILES));
+    projectFiles(): Promise<Result<FilesRead>> {
+      // One revision for the whole made-up folder: nothing in a browser tab
+      // changes underneath it, so nothing there is ever stale.
+      return Promise.resolve(done({ files: PREVIEW_FILES, revision: 'browser-preview' }));
     },
 
     /** Three of them are written out; the rest say so rather than inventing a
      *  file somebody might believe. */
-    fileText(path: string): Promise<Result<string>> {
+    fileText(path: string): Promise<Result<TextRead>> {
       const text = PREVIEW_TEXT[path];
-      if (text !== undefined) return Promise.resolve(done(text));
+      if (text !== undefined) {
+        return Promise.resolve({
+          ok: true,
+          value: { path, text, revision: `browser-preview:${String(text.length)}`, changed: false },
+        });
+      }
       return Promise.resolve({
         ok: false,
         trouble: {
@@ -1225,11 +1431,6 @@ let previewPlanMode = false;
           'This is Graphe running in a browser tab, so there is no folder underneath and nothing to open. In the app this opens your project in your own editor.',
       });
       return Promise.resolve(done(null));
-    },
-
-    designCommit(): Promise<Result<readonly SavedVersion[]>> {
-      const path = openPath ?? PREVIEW_PROJECTS[0]?.path ?? '';
-      return Promise.resolve(done(previewVersions(path)));
     },
 
 
@@ -1367,7 +1568,9 @@ let previewPlanMode = false;
     },
 
     reviewOpen(): Promise<Result<ReviewOpened>> {
-      return Promise.resolve(done({ entries: PREVIEW_REVIEW, diff: PREVIEW_DIFF }));
+      return Promise.resolve(
+        done({ entries: PREVIEW_REVIEW, diff: PREVIEW_DIFF, revision: 'browser-preview', changed: false }),
+      );
     },
 
     reviewChoose(): Promise<Result<readonly ReviewEntry[]>> {
@@ -1384,10 +1587,6 @@ let previewPlanMode = false;
 
     reviewPr(): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>> {
       return Promise.resolve(previewFail<{ url: string; entries: readonly ReviewEntry[] }>());
-    },
-
-    reviewMirror(): Promise<Result<readonly ReviewEntry[]>> {
-      return Promise.resolve(done([]));
     },
 
     conflictLook(): Promise<Result<ReviewClash>> {
@@ -1419,20 +1618,6 @@ let previewPlanMode = false;
     },
 
     buildCancel(): Promise<Result<null>> {
-      return Promise.resolve(done(null));
-    },
-
-    flowLoad(): Promise<Result<readonly Flow[]>> {
-      return Promise.resolve(done(heldFlows()));
-    },
-
-    flowSave(flow: Flow): Promise<Result<null>> {
-      keepFlows(withFlow(heldFlows(), flow));
-      return Promise.resolve(done(null));
-    },
-
-    flowForget(id: string): Promise<Result<null>> {
-      keepFlows(withoutFlow(heldFlows(), id));
       return Promise.resolve(done(null));
     },
 
@@ -1572,18 +1757,6 @@ let previewPlanMode = false;
       });
     },
 
-    /** Same honest answer as “See it”: no folder behind a browser tab, so there
-     *  is nowhere for variations to come from. */
-    variationsServe(): Promise<Result<VariationsOutcome>> {
-      return Promise.resolve(
-        done({
-          kind: 'unsure',
-          question:
-            'This is Graphe running in a browser tab, so there is no folder underneath and nothing for me to get ready. Open the desktop app and it can make you a few designs.',
-        }),
-      );
-    },
-
     /** A folder somebody made up, with the shape of a real one, so the rail's
      *  Pages band can be seen and reviewed in a browser tab. */
     pages(): Promise<Result<readonly Page[]>> {
@@ -1613,31 +1786,6 @@ let previewPlanMode = false;
       return () => {};
     },
 
-    shareReview(): Promise<Result<string | null>> {
-      send({
-        type: 'error',
-        message:
-          'This is Graphe running in a browser tab, so there is nothing on disk to make a page out of. In the app this writes a page you can send to somebody.',
-      });
-      return Promise.resolve(done(null));
-    },
-
-    checkWidths(): Promise<Result<{ looks: readonly Look[]; says: string }>> {
-      return Promise.resolve(
-        done({
-          // The sizes a project like this one designs at rather than three
-          // stock ones, which is what the app finds in its stylesheets.
-          looks: [
-            { id: 'phone', name: 'Phone', width: 390, shot: null, trouble: null },
-            { id: 'tablet', name: 'Tablet', width: 768, shot: null, trouble: null },
-            { id: 'laptop', name: 'Laptop', width: 1024, shot: null, trouble: null },
-            { id: 'desktop', name: 'Desktop', width: 1440, shot: null, trouble: null },
-          ],
-          says: 'There is no folder underneath a browser tab, so there is nothing to photograph.',
-        }),
-      );
-    },
-
     conversations(): Promise<Result<readonly Conversation[]>> {
       return Promise.resolve(
         done([
@@ -1651,22 +1799,143 @@ let previewPlanMode = false;
     /** Whichever project is in front, never the first one in the list: a
      *  conversation opened onto another project's desk is the bug this whole
      *  path exists to avoid. */
-    openConversation(path: string | null): Promise<Result<OpenedProject>> {
+    openConversation(
+      path: string | null,
+      workspace?: string | null,
+      key?: string | null,
+    ): Promise<Result<OpenedProject>> {
       const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
       // A name of its own even before anything has been written down, which is
-      // what lets a brand new conversation have a tab.
-      previewMade += 1;
+      // what lets a brand new conversation have a tab. A press that arrives
+      // twice is the same press, so it gets the address the first one made.
+      const pressed = typeof key === 'string' && key.trim() !== '' ? key : null;
+      const known = pressed === null ? undefined : previewPresses.get(pressed);
+      if (known === undefined) {
+        previewMade += 1;
+        if (pressed !== null) previewPresses.set(pressed, path ?? `new-${String(previewMade)}`);
+      }
       return Promise.resolve(
         done({
           path: here?.path ?? '',
           name: here?.name ?? '',
           history: [],
           conversation: path,
-          address: path ?? `new-${String(previewMade)}`,
-          // The first conversation of a project works in the folder itself and
-          // every one after it on a copy, so the preview shows the offer the
-          // real shell makes rather than hiding half the shelf.
-          ownCopy: previewMade > 1,
+          address: known ?? path ?? `new-${String(previewMade)}`,
+          // A chat works in the project's own folder unless somebody asked for
+          // a copy, which is what the real shell does now.
+          ownCopy: typeof workspace === 'string' && workspace !== '',
+        }),
+      );
+    },
+
+    /** A browser tab has no folders at all, so there is nothing to point a
+     *  conversation at. The refusal says so rather than pretending to. */
+    relinkConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
+    terminalOpen(): Promise<Result<TerminalSession>> {
+      return Promise.resolve(previewFail<TerminalSession>());
+    },
+
+    terminalScrollback(): Promise<Result<{ data: string; sequence: number }>> {
+      return Promise.resolve(previewFail<{ data: string; sequence: number }>());
+    },
+
+    terminalWrite(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalResize(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalClose(): Promise<Result<null>> {
+      return Promise.resolve(previewFail<null>());
+    },
+
+    terminalList(): Promise<Result<readonly TerminalSession[]>> {
+      return Promise.resolve(done<readonly TerminalSession[]>([]));
+    },
+
+    onTerminalData(): () => void {
+      // A browser tab has no shell to attach to.
+      return () => undefined;
+    },
+
+    onTerminalExit(): () => void {
+      return () => undefined;
+    },
+
+    continueConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
+    forkConversation(): Promise<Result<OpenedProject>> {
+      return Promise.resolve(previewFail<OpenedProject>());
+    },
+
+    archiveConversation(): Promise<Result<readonly Conversation[]>> {
+      return Promise.resolve(previewFail<readonly Conversation[]>());
+    },
+
+    onExtensionAsk(): () => void {
+      // A browser tab has nothing to ask on behalf of: no extensions load here.
+      return () => undefined;
+    },
+
+    answerExtension(): Promise<Result<null>> {
+      return Promise.resolve({
+        ok: false,
+        trouble: {
+          what: 'There is nothing here to answer.',
+          because: 'This is Graphe in a browser tab, and a browser tab loads no add-ons.',
+          actionLabel: 'Got it',
+        },
+      });
+    },
+
+    worktreePlan(): Promise<Result<WorktreePlan>> {
+      const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      return Promise.resolve(
+        done({
+          possible: true,
+          because: null,
+          folder: `${here?.path ?? ''}/.graphe/worktrees/one`,
+          baseBranch: 'main',
+          baseSha: 'a1b2c3d',
+          leftBehind: [],
+          setup: { candidates: [], plan: { manager: 'npm', command: 'npm', args: ['install'] } },
+        }),
+      );
+    },
+
+    setupFiles(): Promise<Result<SetupHere>> {
+      return Promise.resolve(done(PREVIEW_SETUP));
+    },
+
+    setupChoose(): Promise<Result<SetupHere>> {
+      return Promise.resolve(done(PREVIEW_SETUP));
+    },
+
+    setupInstall(): Promise<Result<SetupState>> {
+      return Promise.resolve(done({ state: { how: 'done' }, plan: PREVIEW_SETUP.plan }));
+    },
+
+    setupState(): Promise<Result<SetupState>> {
+      return Promise.resolve(done({ state: { how: 'not-started' }, plan: PREVIEW_SETUP.plan }));
+    },
+
+    worktreeNew(): Promise<Result<OpenedProject>> {
+      const here = PREVIEW_PROJECTS.find((one) => one.path === openPath) ?? PREVIEW_PROJECTS[0];
+      return Promise.resolve(
+        done({
+          path: here?.path ?? '',
+          name: here?.name ?? '',
+          history: [],
+          conversation: null,
+          address: 'new-copy',
+          ownCopy: true,
         }),
       );
     },
@@ -1679,6 +1948,53 @@ let previewPlanMode = false;
           { id: 'c3', path: 'c', title: 'Yesterday afternoon', at: Date.now() - 26 * 3_600_000, messages: 6 },
         ].filter((one) => one.path !== path)),
       );
+    },
+
+    /* A preview has no profile to write into, but the identity of an
+       attachment is worth keeping honest even here: the same bytes get the
+       same id, so a chip that is dropped twice behaves in the browser exactly
+       the way it behaves on the desktop. Nothing is stored. */
+    async keepAttachments(files: readonly PromptAttachment[]): Promise<Result<KeptAttachments>> {
+      const kept = await Promise.all(
+        files.map(async (one) => {
+          const raw = Uint8Array.from(atob(one.bytes), (letter) => letter.charCodeAt(0));
+          const digest = await crypto.subtle.digest('SHA-256', raw);
+          return {
+            id: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(''),
+            name: one.name,
+            kind: one.kind,
+            mimeType: one.mimeType,
+            byteSize: raw.length,
+            thumb: null,
+            twice: false,
+          };
+        }),
+      );
+      return Promise.resolve(done({ kept, refused: [], because: null }));
+    },
+
+    attachmentCopy(): Promise<Result<AttachmentCopy | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    /* No profile, so no trash: an empty list and the rule it would be kept
+       under. Inventing rows here would put conversations nobody deleted on a
+       screen about deleting them. */
+    trashList(): Promise<Result<TrashView>> {
+      return Promise.resolve(
+        done({
+          items: [],
+          rule: 'Nothing in the trash is deleted on its own. It stays until you empty it.',
+        }),
+      );
+    },
+
+    trashRestore(): Promise<Result<string | null>> {
+      return Promise.resolve(done(null));
+    },
+
+    trashEmpty(): Promise<Result<readonly string[]>> {
+      return Promise.resolve(done([]));
     },
 
     packages(): Promise<Result<readonly Pack[]>> {
@@ -1697,6 +2013,12 @@ let previewPlanMode = false;
       );
     },
 
+    stopPackage(): Promise<Result<StoppedAddition>> {
+      return Promise.resolve(
+        done({ stopped: false, says: 'Nothing is being changed just now.' }),
+      );
+    },
+
     onShowProgress(listener: (progress: ShowProgress) => void): () => void {
       watching.add(listener);
       return () => {
@@ -1712,22 +2034,6 @@ let previewPlanMode = false;
       setTimeout(announceSpend, 60);
       return () => {
         listeners.delete(listener);
-      };
-    },
-
-    /** The same two pictures every time. They are drawn rather than
-     *  photographed — see `samplePage` — but everything the component does with
-     *  them is the real thing. */
-    visualFrames(): Promise<Result<VisualFrames>> {
-      return Promise.resolve(
-        done({ before: PREVIEW_CHANGE.beforeThumb, after: PREVIEW_CHANGE.afterThumb }),
-      );
-    },
-
-    onVisualChange(listener: (notice: VisualNotice) => void): () => void {
-      looking.add(listener);
-      return () => {
-        looking.delete(listener);
       };
     },
 
@@ -1880,16 +2186,6 @@ let previewPlanMode = false;
       return Promise.resolve(done([]));
     },
 
-    /** A browser tab has no page of ours to watch, and says so rather than
-     *  handing back an empty run that would read as "nothing happened". */
-    watchStart(): Promise<Result<null>> {
-      return Promise.resolve(done(null));
-    },
-
-    watchStop(): Promise<Result<Recording | null>> {
-      return Promise.resolve(done(null));
-    },
-
     spendLimit(): Promise<Result<SpendLimit | null>> {
       return Promise.resolve(done(previewCeiling));
     },
@@ -1920,31 +2216,6 @@ let previewPlanMode = false;
       return Promise.resolve(done(null));
     },
 
-    /* Landing work somewhere needs a folder, a computer and somebody's account.
-       A browser tab has none of the three, so the band draws itself and says
-       exactly why each thing is out of reach rather than pretending. */
-    landing(_where?: Where): Promise<Result<Landing>> {
-      return Promise.resolve(
-        done({
-          waiting: null,
-          holdBack: heldBackOf(preferred, openPath),
-          keepLogins: keepsLogins(preferred.keptLogins, openPath),
-          canHandOver: false,
-          handOverSays: PREVIEW_LANDING,
-          canPutOnline: false,
-          onlineSays: PREVIEW_LANDING,
-          held: null,
-        }),
-      );
-    },
-
-    setHoldBack(on: boolean, _where?: Where): Promise<Result<Preferences>> {
-      if (openPath !== null) {
-        preferred = { ...preferred, heldBack: { ...preferred.heldBack, [openPath]: on } };
-      }
-      return Promise.resolve(done({ ...preferred }));
-    },
-
     setKeepLogins(on: boolean, _where?: Where): Promise<Result<Preferences>> {
       if (openPath !== null) {
         preferred = { ...preferred, keptLogins: { ...preferred.keptLogins, [openPath]: on } };
@@ -1963,41 +2234,6 @@ let previewPlanMode = false;
 
     openComputerSettings(): Promise<Result<null>> {
       return Promise.resolve(done(null));
-    },
-
-    setHowMuch(id: string): Promise<Result<Preferences>> {
-      preferred = { ...preferred, howMuch: howMuchBy(id).id };
-      return Promise.resolve(done({ ...preferred }));
-    },
-
-    decideOnWork(letIn: boolean, _observed: boolean, _where?: Where): Promise<Result<Decided>> {
-      return Promise.resolve(
-        done({
-          landing: {
-            waiting: null,
-            holdBack: heldBackOf(preferred, openPath),
-            keepLogins: keepsLogins(preferred.keptLogins, openPath),
-            canHandOver: false,
-            handOverSays: PREVIEW_LANDING,
-            canPutOnline: false,
-            onlineSays: PREVIEW_LANDING,
-            held: null,
-          },
-          versions: [],
-          letIn,
-          undoTo: null,
-        }),
-      );
-    },
-
-    handToDeveloper(_confirmed: boolean): Promise<Result<HandedOver>> {
-      return Promise.resolve(
-        done({ sent: false, name: '', address: null, says: PREVIEW_LANDING, steps: [] }),
-      );
-    },
-
-    putOnline(_confirmed: boolean): Promise<Result<WentOnline>> {
-      return Promise.resolve(done({ address: null, pages: 0, says: PREVIEW_LANDING, steps: [] }));
     },
 
     /* Real state for as long as the tab is open: pressing the buttons moves the
@@ -2035,46 +2271,6 @@ let previewPlanMode = false;
     },
     connectedSave(tools: readonly Connected[]): Promise<Result<ConnectedState>> {
       return Promise.resolve(done({ tools, file: '/work/this-project/.pi/mcp.json', trouble: null, skipped: [] }));
-    },
-
-
-    awayEverywhere(): Promise<Result<readonly AwayNotice[]>> {
-      return Promise.resolve(done([{ project: '/work/this-project', away: atWork }]));
-    },
-
-    startAfter(text: string, after: string, _where?: Where): Promise<Result<Away>> {
-      const waited = atWork.pieces.find((one) => one.id === after);
-      return this.keepGoing(text).then((answer) => {
-        if (!answer.ok || waited === undefined) return answer;
-        const last = answer.value.pieces[0];
-        if (last === undefined) return answer;
-        atWork = {
-          ...atWork,
-          pieces: atWork.pieces.map((one) =>
-            one.id === last.id
-              ? {
-                  ...one,
-                  state: 'waiting' as const,
-                  after: { id: waited.id, doing: waited.doing, says: `After “${waited.doing}”` },
-                }
-              : one,
-          ),
-        };
-        return done({ ...atWork });
-      });
-    },
-
-    /* Letting one off its wait: the note goes, and it is simply next. */
-    putAfter(id?: unknown, after?: unknown, _where?: Where): Promise<Result<Away>> {
-      if (typeof id === 'string') {
-        atWork = {
-          ...atWork,
-          pieces: atWork.pieces.map((one) =>
-            one.id !== id || after !== null ? one : { ...one, after: null, state: 'waiting' as const },
-          ),
-        };
-      }
-      return Promise.resolve(done({ ...atWork }));
     },
 
     keepGoing(text: string, _untilDone?: boolean, _where?: Where): Promise<Result<Away>> {
@@ -2134,39 +2330,6 @@ let previewPlanMode = false;
       return Promise.resolve(done(atWork));
     },
 
-    /* Taking a set needs real folders, so the tab says so rather than pretending. */
-    keepSet(_ids: readonly string[], _where?: Where): Promise<Result<Away>> {
-      return Promise.resolve(previewFail<Away>());
-    },
-
-    /* Two goes at one job, so the view has something real to line up. */
-    compareWays(_ways: string, _where?: Where): Promise<Result<readonly SideOfWork[]>> {
-      return Promise.resolve(
-        done([
-          {
-            id: 'way-1',
-            name: 'Way 1',
-            state: 'done',
-            diff: MOCK_SIDE_A,
-            picture: null,
-            spent: null,
-            folder: null,
-            base: previewLine,
-          },
-          {
-            id: 'way-2',
-            name: 'Way 2',
-            state: 'done',
-            diff: MOCK_SIDE_B,
-            picture: null,
-            spent: null,
-            folder: null,
-            base: previewLine,
-          },
-        ]),
-      );
-    },
-
     /* Heard between steps: the piece keeps going, it just knows one more thing. */
     sayToAway(id: string, text: string, _where?: Where): Promise<Result<Away>> {
       atWork = {
@@ -2175,49 +2338,6 @@ let previewPlanMode = false;
           one.id !== id ? one : { ...one, says: `Heard you: ${text}` },
         ),
       };
-      return Promise.resolve(done(atWork));
-    },
-
-    addRepeat(
-      doing: string,
-      every: EveryKind,
-      at: { hour: number; minute: number },
-      on?: number,
-      _where?: Where,
-    ): Promise<Result<Away>> {
-      const repeat: Repeat =
-        every === 'week'
-          ? { every, on: ((on ?? 1) % 7) as 0 | 1 | 2 | 3 | 4 | 5 | 6, at }
-          : every === 'month'
-            ? { every, on: on ?? 1, at }
-            : { every, at };
-      atWork = {
-        ...atWork,
-        repeats: [
-          ...atWork.repeats,
-          {
-            id: `every-${String(atWork.repeats.length + 1)}`,
-            doing,
-            says: saysRepeat(repeat),
-            next: saysNext(nextRun(repeat, Date.now()), Date.now()),
-            on: true,
-            lastSaid: null,
-          },
-        ],
-      };
-      return Promise.resolve(done(atWork));
-    },
-
-    switchRepeat(id: string, on: boolean, _where?: Where): Promise<Result<Away>> {
-      atWork = {
-        ...atWork,
-        repeats: atWork.repeats.map((one) => (one.id === id ? { ...one, on } : one)),
-      };
-      return Promise.resolve(done(atWork));
-    },
-
-    forgetRepeat(id: string, _where?: Where): Promise<Result<Away>> {
-      atWork = { ...atWork, repeats: atWork.repeats.filter((one) => one.id !== id) };
       return Promise.resolve(done(atWork));
     },
 
@@ -2232,6 +2352,15 @@ let previewPlanMode = false;
     },
 
     onNewerVersion(): () => void {
+      return () => undefined;
+    },
+
+    appNotices(): Promise<Result<readonly AppNotice[]>> {
+      // A browser tab has no machine to report on: nothing is missing here.
+      return Promise.resolve(done([]));
+    },
+
+    onAppNotice(): () => void {
       return () => undefined;
     },
 
@@ -2272,7 +2401,16 @@ let previewPlanMode = false;
     },
 
     addons(): Promise<Result<AddonReport>> {
-      return Promise.resolve(done({ says: {}, each: [], running: 0 }));
+      return Promise.resolve(
+        done({
+          says: {},
+          each: [],
+          running: 0,
+          here: [],
+          setup: { needed: false, line: '', download: 'https://nodejs.org/en/download', command: null },
+          stopping: { canStop: false, says: '' },
+        }),
+      );
     },
 
     storage(): Promise<Result<StorageNow>> {
@@ -2287,86 +2425,30 @@ let previewPlanMode = false;
       return Promise.resolve(done({ removed: 0, freed: 0, says: 'Nothing to clear.' }));
     },
 
+    /* A browser tab has no profile, so it has never been through a move of
+       older chats and there is nothing to check again or go back to. */
+    migration(): Promise<Result<MigrationNow>> {
+      return Promise.resolve(done(nothingMoved));
+    },
+
+    migrationCheck(): Promise<Result<MigrationNow>> {
+      return Promise.resolve(done(nothingMoved));
+    },
+
+    showBackups(): Promise<Result<null>> {
+      send({
+        type: 'error',
+        message:
+          'This is Graphe running in a browser tab, so there is no folder underneath to show you. In the app this opens the copies of your older files in the Finder.',
+      });
+      return Promise.resolve(done(null));
+    },
+
     onAway(): () => void {
       return () => {};
     },
-
-    inStep(): Promise<Result<InStep>> {
-      return Promise.resolve(done(figmaHere));
-    },
-
-    /* A browser tab has no account to read a real file with, so the invented
-       project follows an invented file. The findings under it are not invented:
-       they are what the comparison makes of the two readings below. */
-    followDesign(address: string): Promise<Result<InStep>> {
-      figmaHere = inStepPreview(address);
-      return Promise.resolve(done(figmaHere));
-    },
-
-    lookAgain(): Promise<Result<InStep>> {
-      return Promise.resolve(done(figmaHere));
-    },
-
-    caughtUp(): Promise<Result<InStep>> {
-      figmaHere = {
-        ...figmaHere,
-        moved: [],
-        says: saysInStep(figmaHere.following?.name ?? 'that file', []),
-      };
-      return Promise.resolve(done(figmaHere));
-    },
-
-    stopFollowing(): Promise<Result<InStep>> {
-      figmaHere = NOT_FOLLOWING;
-      return Promise.resolve(done(figmaHere));
-    },
   };
 }
-
-/* -------------------------------------------------------------------------- */
-/* Staying in step, in a browser tab                                           */
-/* -------------------------------------------------------------------------- */
-
-const NOT_FOLLOWING: InStep = {
-  following: null,
-  moved: [],
-  says: NOTHING_FOLLOWED,
-  trouble: null,
-};
-
-/** The header as it was built, and the header as somebody left it on Tuesday. */
-const PREVIEW_BUILT: Design = {
-  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 96 }],
-  values: {
-    colors: { 'color-brand-primary': '#b8492c', 'color-ink': '#1a1a19' },
-    spacing: { 'space-gutter': '24px' },
-    text: { 'font-family-heading': 'Söhne' },
-  },
-};
-
-const PREVIEW_NOW: Design = {
-  frames: [{ id: '1:23', name: 'Header', width: 1440, height: 128 }],
-  values: {
-    colors: { 'color-brand-primary': '#8f3620', 'color-ink': '#1a1a19' },
-    spacing: { 'space-gutter': '32px' },
-    text: { 'font-family-heading': 'Söhne' },
-  },
-};
-
-function inStepPreview(address: string): InStep {
-  const name = nameOfDesign(address, PREVIEW_NOW.frames);
-  const moved = findMoved(PREVIEW_BUILT, PREVIEW_NOW, { name });
-  return {
-    following: { id: 'preview', name, url: address.trim(), readAt: Date.now() },
-    moved,
-    says: saysInStep(name, moved),
-    trouble: null,
-  };
-}
-
-/** What a browser tab can honestly say about landing work anywhere. */
-const PREVIEW_LANDING =
-  'This is Graphe in a browser tab, so there is no project folder here to send anywhere.';
 
 /** Nothing to go back to. Only reachable in the preview, where a person can
  *  press the button before anything has been opened. */
@@ -2480,7 +2562,6 @@ function connect(): Bridge {
     prComment: (number, body, path, line, where) => api.prComment(number, body, path, line, where),
     putBack: (versionId, where) => api.putBack(versionId, where),
     nameVersion: (versionId, name, where) => api.nameVersion(versionId, name, where),
-    versionPictures: (where) => api.versionPictures(where),
     preferences: () => api.preferences(),
     setShowMe: (on) => api.setShowMe(on),
     keepVersion: (versionId, keep, where) => api.keepVersion(versionId, keep, where),
@@ -2488,8 +2569,18 @@ function connect(): Bridge {
     setTheme: (theme) => api.setTheme(theme),
     setAppearance: (appearance) => api.setAppearance(appearance),
     ownStyles: () => api.ownStyles(),
+    tokensRead: (where) => api.tokensRead(where),
+    viewsLook: (where) => api.viewsLook(where),
+    viewsNote: (shown, where) => api.viewsNote(shown, where),
+    flowList: (where) => api.flowList(where),
+    flowSave: (flow, where) => api.flowSave(flow, where),
+    flowDelete: (id, where) => api.flowDelete(id, where),
+    flowStart: (id, where) => api.flowStart(id, where),
+    flowStop: (id, where) => api.flowStop(id, where),
+    flowContinue: (id, block, where) => api.flowContinue(id, block, where),
+    flowResume: (id, where) => api.flowResume(id, where),
     projectFiles: (where) => api.projectFiles(where),
-    fileText: (path, where) => api.fileText(path, where),
+    fileText: (path, where, expect) => api.fileText(path, where, expect),
     hatches: () => api.hatches(),
     getHelper: (id) => api.getHelper(id),
     openInEditor: (file, where) => api.openInEditor(file, where),
@@ -2523,7 +2614,6 @@ function connect(): Bridge {
     reviewDecide: (id, verdict, where) => api.reviewDecide(id, verdict, where),
     reviewLand: (id, landing, where) => api.reviewLand(id, landing, where),
     reviewPr: (id, summary, where) => api.reviewPr(id, summary, where),
-    reviewMirror: (id, on, where) => api.reviewMirror(id, on, where),
     conflictLook: (address, path, where) => api.conflictLook(address, path, where),
     conflictSettle: (address, path, text, where) => api.conflictSettle(address, path, text, where),
     buildStart: (source, where) => api.buildStart(source, where),
@@ -2532,9 +2622,6 @@ function connect(): Bridge {
     chooseDocument: (where) => api.chooseDocument(where),
     buildSave: (tasks, where) => api.buildSave(tasks, where),
     buildCancel: (where) => api.buildCancel(where),
-    flowLoad: (whereArg) => (api.flowLoad as unknown as (where?: Where) => Promise<Result<readonly Flow[]>>)?.(whereArg) ?? Promise.resolve(done([])),
-    flowSave: (flow, whereArg) => (api.flowSave as unknown as (flow: Flow, where?: Where) => Promise<Result<null>>)?.(flow, whereArg) ?? Promise.resolve(done(null)),
-    flowForget: (id, whereArg) => (api.flowForget as unknown as (id: string, where?: Where) => Promise<Result<null>>)?.(id, whereArg) ?? Promise.resolve(done(null)),
     appsHere: () => api.appsHere(),
     setOpensIn: (which, name) => api.setOpensIn(which, name),
     setPreference: (which, value) => api.setPreference(which, value),
@@ -2557,25 +2644,59 @@ function connect(): Bridge {
     trustCarried: (id, trust, where) => api.trustCarried(id, trust, where),
     revealFolder: (where) => api.revealFolder(where),
     show: (at, point, where) => api.show(at, point, where),
-    variationsServe: (parts, where) => api.variationsServe(parts, where),
     onPointed: (listener) => api.onPointed(listener),
     onPaneKey: (listener) => api.onPaneKey(listener),
     pages: (where) => api.pages(where),
-    shareReview: (where) => api.shareReview(where),
-    checkWidths: (where) => api.checkWidths(where),
     conversations: (where) => api.conversations(where),
-    openConversation: (path, where) => api.openConversation(path, where),
+    openConversation: (path, workspace, key, where) =>
+      api.openConversation(path, workspace, key, where),
+    worktreePlan: (where) => api.worktreePlan(where),
+    setupFiles: (where) => api.setupFiles(where),
+    setupChoose: (files, where) => api.setupChoose(files, where),
+    setupInstall: (where) => api.setupInstall(where),
+    setupState: (where) => api.setupState(where),
+    terminalOpen: (size, where) => api.terminalOpen(size, where),
+    terminalScrollback: (id) => api.terminalScrollback(id),
+    terminalWrite: (id, data) => api.terminalWrite(id, data),
+    terminalResize: (id, cols, rows) => api.terminalResize(id, cols, rows),
+    terminalClose: (id) => api.terminalClose(id),
+    terminalList: (where) => api.terminalList(where),
+    onTerminalData: (listener) => api.onTerminalData(listener),
+    onTerminalExit: (listener) => api.onTerminalExit(listener),
+    continueConversation: (source, where) => api.continueConversation(source, where),
+    forkConversation: (source, said, where) => api.forkConversation(source, said, where),
+    archiveConversation: (id, on, where) => api.archiveConversation(id, on, where),
+    relinkConversation: (path, where) =>
+      api.relinkConversation?.(path, where) ?? Promise.resolve(previewFail<OpenedProject>()),
+    onExtensionAsk: (listener) => api.onExtensionAsk(listener),
+    answerExtension: (requestId, answer, where) => api.answerExtension(requestId, answer, where),
+    worktreeNew: (wanted, where) => api.worktreeNew(wanted, where),
     deleteConversation: (path, where) =>
       api.deleteConversation?.(path, where) ?? Promise.resolve(done([])),
+    // A build whose preload has no store yet keeps the local picture and says
+    // so, rather than reporting an empty row that reads as a lost attachment.
+    keepAttachments: (files, held) =>
+      api.keepAttachments?.(files, held) ??
+      Promise.resolve(
+        done({
+          kept: [],
+          refused: [],
+          because: 'This build cannot keep attachments yet, so nothing was written down.',
+        }),
+      ),
+    attachmentCopy: (id) => api.attachmentCopy?.(id) ?? Promise.resolve(done(null)),
+    trashList: () =>
+      api.trashList?.() ??
+      Promise.resolve(done({ items: [], rule: 'Nothing in the trash is deleted on its own.' })),
+    trashRestore: (name) => api.trashRestore?.(name) ?? Promise.resolve(done(null)),
+    trashEmpty: (names) => api.trashEmpty?.(names) ?? Promise.resolve(done([])),
     packages: (term) => api.packages(term),
-    designCommit: (changes, where) => api.designCommit(changes, where),
     addPackage: (id) => api.addPackage(id),
     removePackage: (id) => api.removePackage(id),
+    stopPackage: () => api.stopPackage(),
     onWindowState: (listener) => api.onWindowState(listener),
     onShowProgress: (listener) => api.onShowProgress(listener),
     onEvent: (listener) => api.onEvent(listener),
-    visualFrames: (changeId) => api.visualFrames(changeId),
-    onVisualChange: (listener) => api.onVisualChange(listener),
     connection: (fresh) => api.connection(fresh),
     connect: (providerId, method) => api.connect(providerId, method),
     connectAnswer: (promptId, value) => api.connectAnswer(promptId, value),
@@ -2588,12 +2709,8 @@ function connect(): Bridge {
     setAddons: (choice, where) => api.setAddons(choice, where),
     setThinking: (choice, level, where) => api.setThinking(choice, level, where),
     closeConversation: (where) => api.closeConversation?.(where) ?? Promise.resolve(done(null)),
-    startAfter: (text, after, where) => api.startAfter(text, after, where),
-    putAfter: (id, after, where) => api.putAfter(id, after, where),
-    pageAt: (address, bounds, again) => api.pageAt(address, bounds, again),
-    pageHidden: (hidden) => api.pageHidden(hidden),
-    watchStart: (says) => api.watchStart(says),
-    watchStop: () => api.watchStop(),
+    pageAt: (address, bounds, again, where) => api.pageAt(address, bounds, again, where),
+    pageHidden: (hidden, where) => api.pageHidden(hidden, where),
     spendSplit: (where) => api.spendSplit(where),
     tokenUsage: () => api.tokenUsage(),
     exportSpend: (csv) => api.exportSpend(csv),
@@ -2603,12 +2720,6 @@ function connect(): Bridge {
     discoveredAccounts: () => api.discoveredAccounts(),
     importAccount: (account) => api.importAccount(account),
     openLink: (url) => api.openLink(url),
-    landing: (where) => api.landing(where),
-    setHoldBack: (on, where) => api.setHoldBack(on, where),
-    setHowMuch: (id) => api.setHowMuch(id),
-    decideOnWork: (letIn, observed, where) => api.decideOnWork(letIn, observed, where),
-    handToDeveloper: (confirmed, where) => api.handToDeveloper(confirmed, where),
-    putOnline: (confirmed, where) => api.putOnline(confirmed, where),
     connectedLook: (where) => api.connectedLook(where),
     connectedCheck: (name, where) => api.connectedCheck(name, where),
     connectedSave: (tools, where) => api.connectedSave(tools, where),
@@ -2617,21 +2728,18 @@ function connect(): Bridge {
     changesDrop: (patch, where) => api.changesDrop(patch, where),
     takeBackQueue: (where) => api.takeBackQueue(where),
     away: (where) => api.away(where),
-    awayEverywhere: () => api.awayEverywhere(),
     keepGoing: (text, untilDone, where) => api.keepGoing(text, untilDone, where),
     stopAway: (id, where) => api.stopAway(id, where),
     keepAway: (id, where) => api.keepAway(id, where),
     answerAway: (id, callId, decision, where) => api.answerAway(id, callId, decision, where),
     sayToAway: (id, text, where) => api.sayToAway(id, text, where),
-    compareWays: (ways, where) => api.compareWays(ways, where),
-    keepSet: (ids, where) => api.keepSet(ids, where),
-    addRepeat: (doing, every, at, on, where) => api.addRepeat(doing, every, at, on, where),
-    switchRepeat: (id, on, where) => api.switchRepeat(id, on, where),
-    forgetRepeat: (id, where) => api.forgetRepeat(id, where),
     onAway: (listener) => api.onAway(listener),
+    onFlow: (listener) => api.onFlow(listener),
     onBuildPlan: (listener) => api.onBuildPlan(listener),
     onContinuation: (listener) => api.onContinuation(listener),
     onNewerVersion: (listener) => api.onNewerVersion?.(listener) ?? (() => undefined),
+    appNotices: () => api.appNotices?.() ?? Promise.resolve(done([])),
+    onAppNotice: (listener) => api.onAppNotice?.(listener) ?? (() => undefined),
     continuationStop: (where) => api.continuationStop(where),
     onMenu: (listener) => api.onMenu(listener),
     onEvents: (listener) => api.onEvents(listener),
@@ -2644,11 +2752,9 @@ function connect(): Bridge {
     storage: () => api.storage(),
     clearFolder: (name) => api.clearFolder(name),
     clearFinishedWork: () => api.clearFinishedWork(),
-    inStep: (where) => api.inStep(where),
-    followDesign: (address, where) => api.followDesign(address, where),
-    lookAgain: (where) => api.lookAgain(where),
-    caughtUp: (where) => api.caughtUp(where),
-    stopFollowing: (where) => api.stopFollowing(where),
+    migration: () => api.migration(),
+    migrationCheck: () => api.migrationCheck(),
+    showBackups: () => api.showBackups(),
   };
 }
 
@@ -2663,44 +2769,3 @@ export const bridge: Bridge = connect();
 if (typeof document !== 'undefined' && bridge.desktop) {
   document.documentElement.dataset['shell'] = 'desktop';
 }
-
-/* Two goes at the same job, as real patches: one file both changed differently,
-   one file only the second touched. Enough for the comparison to be worth
-   opening in a browser tab with no app behind it. */
-const MOCK_SIDE_A = `diff --git a/src/Header.tsx b/src/Header.tsx
-index 1111111..2222222 100644
---- a/src/Header.tsx
-+++ b/src/Header.tsx
-@@ -3,5 +3,6 @@ export function Header() {
-   return (
-     <header className="header">
-+      <span className="header__mark" />
-       <h1>Graphe</h1>
-     </header>
-   );
-`;
-
-const MOCK_SIDE_B = `diff --git a/src/Header.tsx b/src/Header.tsx
-index 1111111..3333333 100644
---- a/src/Header.tsx
-+++ b/src/Header.tsx
-@@ -3,5 +3,7 @@ export function Header() {
-   return (
-     <header className="header header--sticky">
--      <h1>Graphe</h1>
-+      <h1 className="header__name">Graphe</h1>
-+      <p className="header__what">What you are working on</p>
-     </header>
-   );
-diff --git a/src/Header.css b/src/Header.css
-index 4444444..5555555 100644
---- a/src/Header.css
-+++ b/src/Header.css
-@@ -1,3 +1,6 @@
- .header {
-   display: flex;
- }
-+.header--sticky {
-+  position: sticky;
-+}
-`;

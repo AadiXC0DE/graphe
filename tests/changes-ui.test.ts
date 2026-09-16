@@ -10,6 +10,8 @@
  * keeping everything must hand back the change exactly as it arrived. If the
  * rebuilt patch differs by so much as a line number, "keep all" has quietly
  * become "rewrite", and the person who pressed it approved something else.
+ *
+ *  Source text, not behaviour: the wider read's road from window to git, and the press drawn only when one was given; no behavioural test can reach it — IPC wiring.
  */
 
 import { readFileSync } from 'node:fs';

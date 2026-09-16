@@ -123,6 +123,11 @@ function ensureInitialized(): Promise<void> {
       startOnLoad: false,
       securityLevel: 'strict',
       theme: 'base',
+      // 12 bundles ELK and defaults to it, which lays the same diagram out
+      // differently and looks unlike what the tests and people have seen. Pin
+      // the layout and look this app has always drawn.
+      layout: 'dagre',
+      look: 'classic',
       fontFamily:
         "ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif",
       themeVariables: diagramTheme(colors, isDarkBackground(background)),

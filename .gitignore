@@ -34,6 +34,19 @@ site/assets/shots/*
 !site/assets/shots/app-*.png
 !site/assets/shots/crop-*.png
 
+# The dev server `shots.mjs` started, so a run that was killed rather than
+# finished can find it again and take the port back.
+site/.shots-server.pid
+
 # Subagent scratch: what a helper was asked, what it said, its transcript.
 # Runtime state, not project config — .pi/hooks.json and .pi/mcp.json stay.
 .pi/subagents/
+
+# Local architecture audit and implementation plan.
+/docs/graphe-stabilization-plan-2026-09-13.md
+
+# Vitest 5 writes its artifacts here rather than beside the tests.
+.vitest/
+
+# A window's own worktrees and scratch, written at run time.
+.graphe/

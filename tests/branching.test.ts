@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nameOf, namedAs, readConversations } from '../src/agent/pi/conversations';
 import {
+  cutAfter,
   momentToReturnTo,
   momentsFromEntries,
   type Moment,
@@ -229,5 +230,70 @@ describe('momentToReturnTo', () => {
   it('does not answer with something off the prototype', () => {
     expect(momentToReturnTo(moments, 'toString')).toBeNull();
     expect(momentToReturnTo(moments, 'constructor')).toBeNull();
+  });
+});
+
+/** The other way a conversation is branched: a copy of it, made in a file of
+ *  its own, stopping after the exchange somebody pressed on. */
+describe('cutAfter', () => {
+  /** Two exchanges: asked, answered, asked, answered. */
+  const conversation: readonly Record<string, unknown>[] = [
+    said({ id: 'a', message: { role: 'user', content: 'first' } }),
+    replied('b'),
+    said({ id: 'c', message: { role: 'user', content: 'second' } }),
+    replied('d'),
+  ];
+
+  it('stops at the answer to the exchange that was pressed', () => {
+    // Pressing the first question keeps the answer to it and nothing after.
+    expect(cutAfter(conversation, 1)).toBe('b');
+  });
+
+  it('stops at the end when the last exchange is the one pressed', () => {
+    expect(cutAfter(conversation, 2)).toBe('d');
+  });
+
+  it('carries what came between, not only the messages', () => {
+    const withSteps = [
+      said({ id: 'a', message: { role: 'user', content: 'first' } }),
+      replied('b'),
+      { type: 'message', id: 'c', timestamp: AT, message: { role: 'toolResult', toolCallId: 'z' } },
+      { type: 'compaction', id: 'd', parentId: 'c', timestamp: AT, summary: 'tidied' },
+      said({ id: 'e', message: { role: 'user', content: 'second' } }),
+      replied('f'),
+    ];
+    expect(cutAfter(withSteps, 1)).toBe('d');
+  });
+
+  /* A message with no words in it is nothing the person said, which is the same
+     rule the moments are read by — so a picture sent on its own does not shift
+     every boundary after it by one. It still comes with the copy, because the
+     copy stops before the next thing they *said*. */
+  it('counts what was said and not what was merely sent', () => {
+    const withAPicture = [
+      said({ id: 'a', message: { role: 'user', content: 'first' } }),
+      replied('b'),
+      said({ id: 'c', message: { role: 'user', content: [{ type: 'image', data: 'x' }] } }),
+      said({ id: 'd', message: { role: 'user', content: 'second' } }),
+      replied('e'),
+    ];
+    expect(cutAfter(withAPicture, 1)).toBe('c');
+    // And the second boundary is still measured from the two things said.
+    expect(cutAfter(withAPicture, 2)).toBe('e');
+  });
+
+  it('answers no where there is nowhere to cut', () => {
+    // Nothing was said after the last one: there is no exchange above it.
+    expect(cutAfter(conversation, 3)).toBeNull();
+    expect(cutAfter(conversation, 0)).toBeNull();
+    expect(cutAfter(conversation, -1)).toBeNull();
+    expect(cutAfter(conversation, 1.5)).toBeNull();
+    expect(cutAfter([], 1)).toBeNull();
+    // Pressing the first thing said is pressing before the conversation began.
+    expect(cutAfter([said({ id: 'a' }), replied('b')], 1)).toBe('b');
+  });
+
+  it('steps over anything it cannot read', () => {
+    expect(cutAfter([null, 7, 'one', said({ id: 'a' })], 1)).toBe('a');
   });
 });

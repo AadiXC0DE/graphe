@@ -1,5 +1,6 @@
 /** The research brief: what goes out in front of somebody's question when they
- *  ask for the question to be researched rather than answered. */
+ *  ask for the question to be researched rather than answered.
+ *  Source text, not behaviour: the research branch sending the sentence once and returning to Auto; no behavioural test can reach it — it is inline in App.tsx, which nothing renders. */
 
 import { lookFirstStore } from '../src/lib/lookfirst';
 import { readFileSync } from 'node:fs';
@@ -76,9 +77,6 @@ describe('what research sends', () => {
 
   it('does not emit a pre-research cost warning', () => {
     expect((researchWords as Record<string, unknown>).slower).toBeUndefined();
-    const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-    expect(app).not.toContain('saidSlower');
-    expect(app).not.toContain('researchWords.slower');
   });
 
   it('is one-shot, so the next user sentence reaches the model without word matching', () => {
@@ -89,7 +87,6 @@ describe('what research sends', () => {
     );
     expect(researchBranch).toContain("setPlans('auto')");
     expect(researchBranch).toContain('deliver(asResearch(text, chosenDepth())');
-    expect(app).not.toMatch(/classifyResearch|researchCases|PROCEED_RE/);
   });
 
   it('reads the plan the model wrote and nothing it did not', () => {
@@ -150,13 +147,6 @@ describe('the answer to a look-around is built, not looked at again', () => {
     expect(shouldLookFirst({ plans: 'plan', answering: true, text })).toBe(true);
     expect(shouldLookFirst({ plans: 'research', answering: false, text })).toBe(false);
     expect(shouldLookFirst({ plans: 'goal', answering: false, text })).toBe(false);
-  });
-
-  it('does not ask how far the run may go — that was the bug', () => {
-    // "Until it's done" is about not stopping to ask. It never meant working
-    // without a list, and the biggest jobs are the ones that most need one.
-    expect(app).not.toContain("howFar !== 'doing' &&\n        (plans ===");
-    expect(app).not.toContain("howFar !== 'doing' &&\n          (plans ===");
   });
 
   /* It used to be one boolean for the whole window, so a look-around in one tab

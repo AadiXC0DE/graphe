@@ -51,14 +51,12 @@ function open(props: Partial<Parameters<typeof Settings>[0]> = {}): HTMLElement 
         onClose: () => {},
         showMe: false,
         showFiles: false,
-        holdBack: false,
         keepLogins: false,
         always: null,
         theme: 'system',
         onTheme: () => {},
         onToggleShowMe: () => {},
         onToggleShowFiles: () => {},
-        onToggleHoldBack: () => {},
         onToggleKeepLogins: () => {},
         onGo: () => {},
         ...props,
@@ -539,11 +537,10 @@ describe('behaviour', () => {
     expect(strip(host, 'Send with')[1]?.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('has three switches, all on unless somebody turned one off', () => {
+  it('has a switch for each behaviour, on unless somebody turned one off', () => {
     const got: [string, boolean][] = [];
     const host = behaviour({
       nameConversations: true,
-      askBeforeClosing: true,
       snapBeforeApply: false,
       onBehaviour: (which, on) => got.push([which, on]),
     });
@@ -555,8 +552,8 @@ describe('behaviour', () => {
     expect(at('Take a snapshot before work is brought into my folder').getAttribute('aria-checked')).toBe(
       'false',
     );
-    act(() => at('Ask before closing a conversation that is still working').click());
-    expect(got).toEqual([['askBeforeClosing', false]]);
+    act(() => at('Name conversations automatically').click());
+    expect(got).toEqual([['nameConversations', false]]);
   });
 
   /* Written on the way out rather than letter by letter, so a preference is

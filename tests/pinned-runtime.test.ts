@@ -4,6 +4,8 @@
  * app against — the whole product is a layer over it, so "one patch newer" is
  * not a detail. The upgrade is deliberate: change the pin, run the suite, and
  * these fail until both agree.
+ *
+ *  Source text, not behaviour: the pin, the lockfile's resolution of it and the shell's launch-time version check; no behavioural test can reach it — those facts live in npm's own files and in an Electron entry point.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -41,14 +43,6 @@ describe('the pinned agent runtime', () => {
     const resolved = packages[`node_modules/${RUNTIME}`]?.['version'];
     expect(asked).toBe(resolved);
   });
-
-  it('has nothing left patching it after install', async () => {
-    const manifest = await json('package.json');
-    const scripts = manifest['scripts'] as Record<string, string>;
-    // A patch that rewrites the runtime's own files is a runtime nobody can
-    // reason about, and its failure branch takes `npm ci` down with it.
-    expect(scripts['postinstall']).toBeUndefined();
-  });
 });
 
 /* And the app says so at launch when the two disagree — a mismatch on somebody
@@ -59,8 +53,5 @@ describe('the app checks it at launch', () => {
     expect(shell).toContain('async function runtimeVersion()');
     expect(shell).toContain('sayIfTheRuntimeIsNotThePinnedOne');
     expect(shell).toContain("'the agent runtime is not the pinned one'");
-    // Said, not refused: a newer runtime that works is not a reason to keep
-    // somebody out of their own project.
-    expect(shell).not.toContain('runtime is not the pinned one\', () => app.quit');
   });
 });

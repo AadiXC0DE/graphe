@@ -4,6 +4,8 @@
  * few exact numbers rather than a function anybody can call. The one piece with
  * behaviour of its own — the colour a project gets — is a function, and it is
  * tested as one.
+ *
+ *  Source text, not behaviour: the picker's sizes, stylesheet rules and key handling, and the drop handler App owns; no behavioural test can reach it — jsdom computes no rule, and no test mounts App or the shell.
  */
 
 import { readFileSync } from 'node:fs';

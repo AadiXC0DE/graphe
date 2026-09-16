@@ -85,9 +85,11 @@ export const ACTIONS: readonly Action[] = [
   { id: 'files', says: 'Show everything in this project', where: 'in a project', chord: 'mod+shift+f' },
   { id: 'changes', says: 'Review the working diff', where: 'in a project', chord: null },
   { id: 'history', says: 'Look through the history', where: 'in a project', chord: null },
-  { id: 'canvas', says: 'Open the canvas', where: 'in a project', chord: null },
   { id: 'reviews', says: 'Read the pull requests', where: 'in a project', chord: null },
-  { id: 'design', says: 'Open the design view', where: 'in a project', chord: 'mod+d' },
+  /* No key of its own, deliberately: a canvas is somewhere somebody goes, not
+     something to fire off by habit, and this is the one name a person can bind
+     themselves in Settings. */
+  { id: 'canvas', says: 'Open the canvas', where: 'in a project', chord: null },
   { id: 'commands', says: 'Show the commands', where: 'in a project', chord: 'mod+`' },
 
   { id: 'send', says: 'Send', where: 'in a conversation', chord: 'enter', also: ['mod+enter'] },

@@ -1,63 +1,41 @@
 /**
- * The board: what is happening for each project whether or not this window is
- * looking at it.
+ * The board: what background work is happening for the project in front,
+ * whether or not this window is looking at it.
  *
- * Kept per folder, for the same reason the pictures and the files are — a run
- * can land for a project somebody has just switched away from, and it must
- * never be drawn under another folder's name. Every press answers with the
- * whole state, so the window never works out what its own press did.
+ * Kept per folder, for the same reason the files are — a run can land for a
+ * project somebody has just switched away from, and it must never be drawn
+ * under another folder's name. Every press answers with the whole state, so the
+ * window never works out what its own press did.
  *
  * It carries its own clock because the board says how long ago each thing was,
  * and nothing else in the window needs to know the time.
+ *
+ * Nothing here starts work. What can be started from the window is a
+ * conversation; a piece of background work is asked for by the model, through
+ * `task` in its background mode, and what the window does with it is answer it,
+ * say something to it, take it in or let it go.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { bridge } from '../lib/bridge';
-import { folderCalled, type Desks } from '../lib/projects';
-import type {
-  Away as AwayState,
-  Decision,
-  EveryKind,
-  SideOfWork,
-  Trouble,
-} from '../lib/ipc';
-
-/** The several goes at one job, held up against each other. */
-export type Against = {
-  where: string;
-  /** What the goes are goes at, for the strip that stands against them. */
-  subject: string;
-  sides: readonly SideOfWork[];
-};
+import type { Desks } from '../lib/projects';
+import type { Away as AwayState, Decision, Trouble } from '../lib/ipc';
 
 export type Board = {
-  /** The board of the project in front, or null when it has nothing on it. */
+  /** What this project has on it, or null when it has nothing. */
   here: AwayState | null;
-  /** Every other folder that has anything of its own going on. */
-  elsewhere: readonly { where: string; project: string; away: AwayState }[];
   /** Half-minute ticks, so "20 minutes ago" stays true while nobody touches
    *  anything. */
   clock: number;
-  against: Against | null;
-  setAgainst: (next: Against | null) => void;
-  keepGoing(text: string, untilDone?: boolean): void;
-  startAfter(text: string, after: string): void;
+  /** Take one finished piece into the project. */
   keepAway(id: string, where?: string, then?: (ok: boolean) => void): void;
+  /** Stop one, or let its result go. */
   dropAway(id: string, where?: string): void;
+  /** Answer the question one of them stopped on. */
   answerAway(id: string, callId: string, decision: Decision, where?: string): void;
+  /** Say something to a piece that is still going, without stopping it. */
   sayToAway(id: string, text: string, where?: string): Promise<boolean>;
-  compareWays(named: string, where?: string): void;
-  takeAll(ids: readonly string[], where?: string): void;
-  stopWaiting(id: string, where?: string): void;
-  addRepeat(
-    doing: string,
-    every: EveryKind,
-    at: { hour: number; minute: number },
-    on?: number,
-  ): void;
-  switchRepeat(id: string, on: boolean): void;
-  forgetRepeat(id: string): void;
 };
 
 export function useBoard(options: {
@@ -72,10 +50,6 @@ export function useBoard(options: {
   const { desksNow, project, troubleHere, refreshVersions, refreshOverview } = options;
 
   const [away, setAway] = useState<Readonly<Record<string, AwayState>>>({});
-  /* Read while a loop is being put down, so each step is chained behind the id
-     the board actually gave the one before it rather than a stale one. */
-  const awayNow = useRef<Readonly<Record<string, AwayState>>>({});
-  awayNow.current = away;
 
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -109,20 +83,6 @@ export function useBoard(options: {
     // Subscribed once for the life of the window.
   }, []);
 
-  /* Every folder's board, once, on the way in. Notices arrive as things happen;
-     without this first read, work already running in a project nobody has
-     opened yet would be invisible until it next moved. */
-  useEffect(() => {
-    void bridge.awayEverywhere().then((answer) => {
-      if (!answer.ok) return;
-      setAway((current) => {
-        const next = { ...current };
-        for (const notice of answer.value) next[notice.project] = notice.away;
-        return next;
-      });
-    });
-  }, []);
-
   /** Everything the band can do comes back with the whole state, so the window
    *  never has to work out what its own press did. */
   const afterAway = useCallback(
@@ -138,28 +98,8 @@ export function useBoard(options: {
     [troubleHere],
   );
 
-  const keepGoing = useCallback(
-    (text: string, untilDone = false) => {
-      if (project === null) return;
-      void bridge.keepGoing(text, untilDone, { project }).then(afterAway(project));
-    },
-    [project, afterAway],
-  );
-
-  /** The same ask, in order: this one waits until that one has finished. The
-   *  shell refuses a plan that could never run, and says why. */
-  const startAfter = useCallback(
-    (text: string, after: string) => {
-      if (project === null) return;
-      // A plan that could never run comes back refused, with the reason in
-      // plain words — the same door every other failure comes through.
-      void bridge.startAfter(text, after, { project }).then(afterAway(project));
-    },
-    [project, afterAway],
-  );
-
   const keepAway = useCallback(
-    // `then` is how a sheet finds out whether the press worked, so it can stay
+    // `then` is how a card finds out whether the press worked, so it can stay
     // where it is and show the reason when it did not.
     (id: string, where?: string, then?: (ok: boolean) => void) => {
       const path = where ?? project;
@@ -211,114 +151,10 @@ export function useBoard(options: {
     [project, afterAway],
   );
 
-  /** The several goes at one job, held up against each other. Read on the
-   *  press: a go still working has a different answer a minute later. */
-  const [against, setAgainst] = useState<Against | null>(null);
-
-  const compareWays = useCallback(
-    (named: string, where?: string) => {
-      const path = where ?? project;
-      if (path === null) return;
-      void bridge.compareWays(named, { project: path }).then((answer) => {
-        if (!answer.ok) {
-          troubleHere(answer.trouble);
-          return;
-        }
-        // Nothing left of the group to hold up against anything: an empty
-        // sheet would be a screen with nothing on it and no way to read why.
-        if (answer.value.length === 0) return;
-        setAgainst({ where: path, subject: named, sides: answer.value });
-      });
-    },
-    [project, troubleHere],
-  );
-
-  /** Take several finished pieces in, in the order they need to be in.
-   *  Whatever happens, the whole run is one version away from undone. */
-  const takeAll = useCallback(
-    (ids: readonly string[], where?: string) => {
-      const path = where ?? project;
-      if (path === null) return;
-      void bridge.keepSet(ids, { project: path }).then((answer) => {
-        afterAway(path)(answer);
-        // A set landing is a version like any other, and the rail has to say so.
-        void refreshVersions(path);
-        void refreshOverview(path);
-      });
-    },
-    [project, afterAway, refreshVersions, refreshOverview],
-  );
-
-  /** Let a piece off the wait it was given, so it takes the next free slot.
-   *  The wait could be set when work was asked for and never changed after —
-   *  a piece waiting on something abandoned waited for good. */
-  const stopWaiting = useCallback(
-    (id: string, where?: string) => {
-      const path = where ?? project;
-      if (path === null) return;
-      void bridge.putAfter(id, null, { project: path }).then(afterAway(path));
-    },
-    [project, afterAway],
-  );
-
-  const addRepeat = useCallback(
-    (doing: string, every: EveryKind, at: { hour: number; minute: number }, on?: number) => {
-      if (project === null) return;
-      void bridge.addRepeat(doing, every, at, on, { project }).then(afterAway(project));
-    },
-    [project, afterAway],
-  );
-
-  const switchRepeat = useCallback(
-    (id: string, on: boolean) => {
-      if (project === null) return;
-      void bridge.switchRepeat(id, on, { project }).then(afterAway(project));
-    },
-    [project, afterAway],
-  );
-
-  const forgetRepeat = useCallback(
-    (id: string) => {
-      if (project === null) return;
-      void bridge.forgetRepeat(id, { project }).then(afterAway(project));
-    },
-    [project, afterAway],
-  );
-
   const here = project === null ? null : (away[project] ?? null);
 
-  /* Every other folder that has anything of its own going on. Work does not
-     stop because somebody opened another project, and this is the only place
-     that says so. */
-  const elsewhere = useMemo(
-    () =>
-      Object.entries(away)
-        .filter(([path, state]) => path !== project && state.pieces.length > 0)
-        .map(([path, state]) => ({ where: path, project: folderCalled(path), away: state })),
-    [away, project],
+  return useMemo(
+    () => ({ here, clock, keepAway, dropAway, answerAway, sayToAway }),
+    [here, clock, keepAway, dropAway, answerAway, sayToAway],
   );
-
-  return useMemo(() => ({
-    here,
-    elsewhere,
-    clock,
-    against,
-    setAgainst,
-    keepGoing,
-    startAfter,
-    keepAway,
-    dropAway,
-    answerAway,
-    sayToAway,
-    compareWays,
-    takeAll,
-    stopWaiting,
-    addRepeat,
-    switchRepeat,
-    forgetRepeat,
-  }), [
-    here, elsewhere, clock, against, keepGoing, startAfter, keepAway, dropAway,
-    answerAway, sayToAway, compareWays, takeAll, stopWaiting, addRepeat,
-    switchRepeat, forgetRepeat,
-  ]);
 }

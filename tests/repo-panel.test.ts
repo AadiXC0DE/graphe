@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** Nothing there, or nothing read.
  *
  * The panel used to be handed an empty list whichever it was: asking github
@@ -9,32 +10,54 @@
  *
  * The distinction is the whole fix, so it is pinned here: an empty list means
  * there are none only when github actually answered.
+ *
+ *  Source text, not behaviour: the shell's own github reads — no failure becoming an empty list, a reason travelling with the lists, the PATH a Finder-launched app gets; no behavioural test can reach them — electron/main.ts cannot be imported.
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { SAYS } from '../src/components/ReviewsView';
+import ReviewsView, { SAYS } from '../src/components/ReviewsView';
+import type { RepoLook } from '../src/lib/ipc';
 
-const MAIN = readFileSync(
-  fileURLToPath(new URL('../electron/main.ts', import.meta.url)),
-  'utf8',
-);
-const VIEW = readFileSync(
-  fileURLToPath(new URL('../src/components/ReviewsView.tsx', import.meta.url)),
-  'utf8',
-);
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+const roots: Root[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) act(() => root.unmount());
+  document.body.innerHTML = '';
+});
+
+type Props = Parameters<typeof ReviewsView>[0];
+
+/** The panel, drawn, with whatever github said about this folder. */
+function draw(repo: RepoLook): Props {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  roots.push(root);
+  const props: Props = {
+    repo,
+    busy: false,
+    onRefresh: vi.fn(),
+    onClose: vi.fn(),
+    onReview: vi.fn(),
+  };
+  act(() => root.render(createElement(ReviewsView, props)));
+  return props;
+}
+
+// Read from the working directory: this file runs under jsdom, where
+// `import.meta.url` is not a file URL.
+const MAIN = readFileSync(`${process.cwd()}/electron/main.ts`, 'utf8');
 
 describe('a list that could not be read is not an empty list', () => {
-  it('never turns a failed reading into an empty one', () => {
-    // `?? []` on the answer is exactly what made a failure indistinguishable
-    // from a project with nothing in it.
-    expect(MAIN).not.toMatch(/\(issues \?\? \[\]\)/);
-    expect(MAIN).not.toMatch(/\(prs \?\? \[\]\)/);
-  });
-
   it('carries a reason back with the lists', () => {
     expect(MAIN).toContain('trouble');
     expect(MAIN).toMatch(/!prs\.ok \? prs\.because/);
@@ -64,9 +87,30 @@ describe('the panel says which it is', () => {
   });
 
   it('shows the reason and offers the press again, rather than a blank', () => {
-    expect(VIEW).toContain('repo.trouble === null');
-    expect(VIEW).toContain('SAYS.couldNotAsk');
-    expect(VIEW).toContain('SAYS.tryAgain');
+    const trouble = 'github did not answer in time.';
+    const props = draw({
+      full: 'mira/site',
+      owner: 'mira',
+      name: 'site',
+      url: 'https://github.com/mira/site',
+      issues: [],
+      prs: [],
+      here: null,
+      trouble,
+    });
+
+    const panel = document.body.textContent ?? '';
+    expect(panel).toContain(SAYS.couldNotAsk);
+    expect(panel).toContain(trouble);
+    // An empty list that could not be read is not "there are none".
+    expect(panel).not.toContain(SAYS.empty);
+
+    const again = [...document.body.querySelectorAll('button')].find(
+      (one) => one.textContent?.trim() === SAYS.tryAgain,
+    );
+    expect(again, 'no way to ask again').toBeDefined();
+    act(() => again?.click());
+    expect(props.onRefresh).toHaveBeenCalled();
   });
 
   it('does not blame the folder when the reading is what failed', () => {

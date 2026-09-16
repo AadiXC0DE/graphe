@@ -8,9 +8,25 @@
  * `restoreTo`, `currentVersion`, and none of those are git's words.
  *
  * The escape hatch (DIFFERENTIATORS §7) is why the storage is ordinary rather
- * than a private format: a designer who grows into this, or the developer they
- * hand it to, opens the folder and finds normal history with sensible messages.
+ * than a private format: every saved moment is an ordinary commit in the
+ * project's own repository, readable with `git log refs/graphe/checkpoints`.
  * Nothing to migrate off, because nothing was ever trapped.
+ *
+ * ## The branch and the index are not ours
+ *
+ * A checkpoint is not a commit the person chose to publish, so it never lands
+ * on the branch they are working on and never goes through the index their own
+ * commands use. The tree is built in an index of our own, inside the temporary
+ * folder, and written as a commit under `refs/graphe/` with `commit-tree`.
+ * Opening a folder, reading a conversation or letting a turn end therefore
+ * leaves HEAD, the branch and everything staged exactly as they were found, and
+ * a half-staged file stays half-staged. Nothing is ever `git add`ed into their
+ * index, and no hook or signing setting is ever consulted, because no commit is
+ * ever made on their branch.
+ *
+ * A copy made for trying something out gets a ref of its own, under the same
+ * namespace, so work that is tried and thrown away never appears in the
+ * project's timeline.
  *
  * ## Work is never lost, structurally
  *
@@ -35,10 +51,10 @@
  *   also means the very first snapshot succeeds on a machine that has never had
  *   any of this set up — the usual "please tell me who you are" failure.
  * - Global and system configuration are pointed at the null device, so a
- *   teammate's signing requirement, commit template or hook path cannot make an
- *   automatic snapshot fail. A snapshot that can be blocked by configuration is
- *   a snapshot the user cannot rely on.
- * - Hooks are skipped for the same reason.
+ *   teammate's signing requirement or commit template cannot make an automatic
+ *   snapshot fail. A snapshot that can be blocked by configuration is a
+ *   snapshot the user cannot rely on.
+ * - Hooks are not run, because no commit is ever made on their branch.
  *
  * ## Errors
  *
@@ -48,9 +64,10 @@
  * requires nowhere. */
 
 import { writeAtomically } from '../lib/atomic';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { devNull } from 'node:os';
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { devNull, tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -291,6 +308,40 @@ const VERSION_ID = /^[0-9a-f]{4,40}$/;
  *  person or another tool would ever look at. */
 const KEPT_UNDER = 'refs/graphe/kept';
 
+/** Where every saved moment lives. Private to the app on purpose: a checkpoint
+ *  is not a commit the person working here chose to publish, so it is kept off
+ *  every branch and out of every listing they would read by accident. */
+const CHECKPOINTS_REF = 'refs/graphe/checkpoints';
+
+/** Where a copy made to try something out keeps its own. A namespace of its own
+ *  rather than a name under the one above: a ref is either a leaf or a folder
+ *  and never both, and the project's timeline is a leaf. */
+const COPIES_REF = 'refs/graphe/copies';
+
+/** Which ref one working copy saves under.
+ *
+ *  Refs are shared between a repository's copies, so a copy made to try
+ *  something out needs a name of its own: work done in it and thrown away must
+ *  never appear in the project's timeline. The main copy keeps the namespace
+ *  itself. */
+async function checkpointRefFor(root: string): Promise<string> {
+  try {
+    // `.git` is a file in a second copy, pointing at the folder the repository
+    // keeps for it. The short hash keeps two copies with similar names apart.
+    const dot = path.join(root, '.git');
+    if (!(await stat(dot)).isFile()) return CHECKPOINTS_REF;
+    const pointed = (await readFile(dot, 'utf8')).replace(/^gitdir:[ \t]*/, '').trim();
+    const name = path.basename(pointed);
+    if (name === '' || name === '.' || name === '..') return CHECKPOINTS_REF;
+    const readable = name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '');
+    const tag = createHash('sha1').update(pointed).digest('hex').slice(0, 8);
+    return `${COPIES_REF}/${readable === '' ? 'copy' : readable}-${tag}`;
+  } catch {
+    // Nowhere yet: `prepare` has not run, and `ensureReady` will say so.
+    return CHECKPOINTS_REF;
+  }
+}
+
 function keptAt(id: string): string {
   return `${KEPT_UNDER}/${id}`;
 }
@@ -311,6 +362,7 @@ export class ProjectHistory {
   private readonly neverSave: readonly string[] | false;
   private ready = false;
   private saved: readonly string[] = [];
+  private ref: string | undefined;
 
   constructor(root: string, options: ProjectHistoryOptions = {}) {
     if (!root || !path.isAbsolute(root)) {
@@ -364,56 +416,69 @@ export class ProjectHistory {
 
   /* ------------------------------------------------------------ what's here */
 
-  /** True when the project has at least one saved version. */
+  /** True when this project has anything saved to show: one of our checkpoints,
+   *  or the history it already had before we ever opened it. */
   async hasVersions(): Promise<boolean> {
     await this.ensureReady();
-    const found = await this.attempt(['rev-parse', '--quiet', '--verify', 'HEAD']);
-    return found.code === 0 && found.stdout.trim().length > 0;
+    return (await this.baseVersion()) !== null;
   }
 
-  /** Everything changed since the last save, including files never saved before.
-   *  Ignored files are not changes — they are rebuilt, not written. */
+  /**
+   * Everything changed since the last save, including files never saved before.
+   * Ignored files are not changes — they are rebuilt, not written.
+   *
+   * Read against what we last saved, not against whatever the folder's own
+   * commands last pointed at, and read through an index of our own so the one
+   * somebody is staging into is not even consulted.
+   */
   async unsavedChanges(): Promise<UnsavedChange[]> {
     await this.ensureReady();
-    const listed = await this.attempt([
-      'status',
-      '--porcelain=v1',
-      '-z',
-      '--untracked-files=all',
-      '--no-renames',
-    ]);
-    if (listed.code !== 0) throw new HistoryError(historyProblems.listFailed, detailsOf(listed));
+    const from = await this.baseVersion();
+    const scratch = await this.scratch();
+    try {
+      if (from !== null) {
+        const started = await this.attempt(['read-tree', from], { indexFile: scratch.index });
+        if (started.code !== 0) throw new HistoryError(historyProblems.listFailed, detailsOf(started));
+      }
+      const listed = await this.attempt(
+        ['diff', '--name-status', '-z', '--no-renames', from ?? ProjectHistory.EMPTY_TREE],
+        { indexFile: scratch.index },
+      );
+      if (listed.code !== 0) throw new HistoryError(historyProblems.listFailed, detailsOf(listed));
 
-    const changes: UnsavedChange[] = [];
-    for (const record of listed.stdout.split('\u0000')) {
-      if (record.length < 4) continue;
-      const codes = record.slice(0, 2);
-      const file = record.slice(3);
-      if (!file) continue;
-      changes.push({ path: file, kind: kindOfStatus(codes) });
+      const changes = parseNameStatus(listed.stdout);
+      const others = await this.attempt(['ls-files', '--others', '--exclude-standard', '-z'], {
+        indexFile: scratch.index,
+      });
+      if (others.code !== 0) throw new HistoryError(historyProblems.listFailed, detailsOf(others));
+      for (const file of others.stdout.split('\u0000')) {
+        if (file !== '') changes.push({ path: file, kind: 'added' });
+      }
+      return changes;
+    } finally {
+      await scratch.done();
     }
-    return changes;
   }
 
   async hasUnsavedChanges(): Promise<boolean> {
     return (await this.unsavedChanges()).length > 0;
   }
 
-  /** The version the project currently looks like, or null before the first
-   *  save. */
+  /** The version the project currently looks like: our newest checkpoint, or the
+   *  newest commit it already had before we saved anything. Null when there is
+   *  no history at all. */
   async currentVersion(): Promise<string | null> {
     await this.ensureReady();
-    const found = await this.attempt(['rev-parse', '--quiet', '--verify', 'HEAD']);
-    if (found.code !== 0) return null;
-    const id = found.stdout.trim();
-    return id.length > 0 ? id : null;
+    return this.baseVersion();
   }
 
   /** Newest first. An empty project has none, which is not an error. */
   async versions(options: { limit?: number } = {}): Promise<StoredVersion[]> {
     await this.ensureReady();
+    const from = await this.baseVersion();
     const args = ['log', '--notes', `--pretty=format:${LOG_FORMAT}`];
     if (options.limit !== undefined) args.push('-n', String(Math.max(1, options.limit)));
+    if (from !== null) args.push(from);
 
     const listed = await this.attempt(args);
     if (listed.code !== 0) {
@@ -433,6 +498,8 @@ export class ProjectHistory {
    */
   async lastChangeByFile(limit = 300): Promise<Map<string, LastChange>> {
     await this.ensureReady();
+    const from = await this.baseVersion();
+    if (from === null) return new Map();
     const listed = await this.attempt([
       'log',
       '-n',
@@ -440,6 +507,7 @@ export class ProjectHistory {
       '--name-only',
       '--no-renames',
       `--pretty=format:${RECORD}%H${FIELD}%at${FIELD}%s${FIELD}`,
+      from,
     ]);
     if (listed.code !== 0) return new Map();
 
@@ -501,9 +569,15 @@ export class ProjectHistory {
 
   /* --------------------------------------------------------------- writing */
 
-  /** Save everything as it stands right now. Returns the new version's id, or
-   *  null when there was nothing to save — a boundary that changed nothing is
-   *  not worth a line in the timeline. */
+  /**
+   * Save everything as it stands right now. Returns the new version's id, or
+   * null when there was nothing to save — a boundary that changed nothing is
+   * not worth a line in the timeline.
+   *
+   * The folder's own branch, index and configuration are not touched: the tree
+   * is built in an index of our own and the moment is written under our own
+   * namespace, with no commit anywhere near the branch somebody is working on.
+   */
   async snapshot(
     message: string,
     options: { evenIfNothingChanged?: boolean; theirs?: boolean } = {},
@@ -512,33 +586,64 @@ export class ProjectHistory {
     const text = message.trim();
     if (!text) throw new TypeError('A version needs a title.');
 
-    const staged = await this.attempt(['add', '--all', '--', '.', ...excludePathspecs()]);
-    if (staged.code !== 0) throw new HistoryError(historyProblems.saveFailed, detailsOf(staged));
-
-    // A merge stages what it brought with it, so a credential file can reach the
-    // index without ever going through `add`. Anything the project was not
-    // already saving comes straight back out; the file on disk is never touched.
-    await this.unstageNewCredentials();
-    this.saved = await this.trackedCredentials();
-
-    if (!options.evenIfNothingChanged) {
-      const anything = await this.attempt(['diff', '--cached', '--quiet']);
-      if (anything.code === 0) return null;
+    const from = await this.baseVersion();
+    const before = from === null ? ProjectHistory.EMPTY_TREE : await this.treeOf(from);
+    const ref = await this.checkpointRef();
+    const scratch = await this.scratch();
+    let tree: string;
+    try {
+      tree = await this.candidateTree(scratch.index, from, historyProblems.saveFailed);
+    } finally {
+      await scratch.done();
+    }
+    if (tree === before && !options.evenIfNothingChanged) {
+      // Said either way, so the timeline's warning stays true of the folder as
+      // it is now rather than as it was at the last save.
+      this.saved = await this.trackedCredentials();
+      return null;
     }
 
-    // --cleanup=verbatim: the title is already exactly what we want stored, and
-    // the default tidying would eat a title that happens to start with a #.
-    const args = ['commit', '--no-verify', '--cleanup=verbatim', '--message', text];
-    if (options.evenIfNothingChanged) args.push('--allow-empty');
-
-    // A commit somebody pressed is theirs, and carries their name. Only the
-    // ones nobody asked for are attributed to us.
-    const saved = await this.attempt(args, { theirIdentity: options.theirs === true });
-    if (saved.code !== 0) throw new HistoryError(historyProblems.saveFailed, detailsOf(saved));
-
-    const id = await this.currentVersion();
-    if (!id) throw new HistoryError(historyProblems.saveFailed, detailsOf(saved));
-    return id;
+    // Reading the saved state and writing to it are two steps, so two saves
+    // landing at once is a real possibility. The second one takes whatever the
+    // first left as its parent rather than overwriting it.
+    let parent = from;
+    let expected = (await this.checkpointTip()) ?? '';
+    for (let round = 0; round < 3; round += 1) {
+      // A competing save may have moved the checkpoint ref after the tree was
+      // prepared above. Rebuild from that new parent before retrying: keeping
+      // the old tree here would make the retry a correctly-linked commit that
+      // silently drops files the competing save just recorded.
+      if (round > 0) {
+        const retryScratch = await this.scratch();
+        try {
+          tree = await this.candidateTree(retryScratch.index, parent, historyProblems.saveFailed);
+        } finally {
+          await retryScratch.done();
+        }
+      }
+      const args = ['commit-tree', tree];
+      if (parent !== null) args.push('-p', parent);
+      args.push('-m', text);
+      // A save somebody pressed is theirs, and carries their name. Only the
+      // ones nobody asked for are attributed to us.
+      const made = await this.attempt(args, { theirIdentity: options.theirs === true });
+      const id = made.stdout.trim();
+      if (made.code !== 0 || !VERSION_ID.test(id)) {
+        throw new HistoryError(historyProblems.saveFailed, detailsOf(made));
+      }
+      const moved = await this.attempt(['update-ref', ref, id, expected]);
+      if (moved.code === 0) {
+        this.saved = await this.trackedCredentials();
+        return id;
+      }
+      const now = await this.checkpointTip();
+      if (now === null || now === expected) {
+        throw new HistoryError(historyProblems.saveFailed, detailsOf(moved));
+      }
+      parent = now;
+      expected = now;
+    }
+    throw new HistoryError(historyProblems.saveFailed, `saves kept landing on ${ref}`);
   }
 
   /** Credential files this project is already saving, as the last snapshot
@@ -577,6 +682,16 @@ export class ProjectHistory {
       throw new HistoryError(historyProblems.unsavedFirst);
     }
 
+    // What is saved has to be in the index before the index can be told what to
+    // become: git takes away the files it finds there and nowhere else, and a
+    // file added since the version we are going to lives in our saved state,
+    // never in the person's own index.
+    const from = await this.baseVersion();
+    if (from !== null) {
+      const ready = await this.attempt(['read-tree', '--reset', from]);
+      if (ready.code !== 0) throw new HistoryError(historyProblems.goBackFailed, detailsOf(ready));
+    }
+
     // Take the older version's contents, leave the history alone. Files that
     // arrived after it go away here, and are still in the version before this
     // one, which is what makes going back undoable.
@@ -600,6 +715,11 @@ export class ProjectHistory {
    *
    * A file both of them changed is a real disagreement. It is reported and the
    * project is left as it was, rather than one side quietly winning.
+   *
+   * The merge is worked out in an index of our own and only its result is put
+   * on disk. Nothing half-merged is ever left in the folder, and a credential
+   * file the other piece carried is taken back out before it can reach either
+   * the index or the version.
    */
   async carryIn(
     versionId: string,
@@ -611,19 +731,41 @@ export class ProjectHistory {
       throw new HistoryError(historyProblems.unsavedFirst);
     }
 
-    // `--squash` merges into the files and stops there, leaving no half-finished
-    // merge behind for the next save to trip over.
-    const merged = await this.attempt(['merge', '--squash', target]);
-    if (merged.code !== 0) {
-      const clashing = await this.attempt(['diff', '-z', '--name-only', '--diff-filter=U']);
-      const conflicted = clashing.stdout.split('\0').filter((one: string) => one !== '');
-      // Safe because nothing was unsaved: the precondition above is what makes
-      // putting the folder back exactly where it was a true statement. A squash
-      // merge stages what it could apply, so this takes the files it would have
-      // added away with everything else it did.
-      await this.attempt(['reset', '--hard', 'HEAD']);
-      return { ok: false, conflicted };
+    const from = await this.baseVersion();
+    const scratch = await this.scratch();
+    let tree: string;
+    try {
+      // Merged entirely in memory: nothing in the folder is touched until the
+      // result is known, so a disagreement leaves nothing behind — no files git
+      // never saw, no half-applied merge for the next save to trip over.
+      const merged =
+        from === null
+          ? await this.attempt(['rev-parse', '--quiet', '--verify', `${target}^{tree}`])
+          : await this.attempt(['merge-tree', '--write-tree', from, target]);
+      if (merged.code !== 0) {
+        if (merged.code === 1) return { ok: false, conflicted: conflictedIn(merged.stdout) };
+        throw new HistoryError(historyProblems.goBackFailed, detailsOf(merged));
+      }
+      const made = merged.stdout.trim().split('\n')[0] ?? '';
+      if (!VERSION_ID.test(made)) {
+        throw new HistoryError(historyProblems.goBackFailed, detailsOf(merged));
+      }
+
+      const ready = await this.attempt(['read-tree', made], { indexFile: scratch.index });
+      if (ready.code !== 0) throw new HistoryError(historyProblems.goBackFailed, detailsOf(ready));
+      // Only our own index is rewritten; the file on disk keeps whatever the
+      // person has.
+      await this.attempt(
+        ['rm', '--cached', '--force', '--quiet', '--ignore-unmatch', '--', ...credentialPathspecs()],
+        { indexFile: scratch.index },
+      );
+      tree = await this.writeTree(scratch.index, historyProblems.goBackFailed);
+    } finally {
+      await scratch.done();
     }
+
+    const put = await this.attempt(['read-tree', '-u', '--reset', tree]);
+    if (put.code !== 0) throw new HistoryError(historyProblems.goBackFailed, detailsOf(put));
 
     const id = await this.snapshot(message, { evenIfNothingChanged: true });
     if (!id) throw new HistoryError(historyProblems.goBackFailed);
@@ -643,10 +785,8 @@ export class ProjectHistory {
     if (patch.trim() === '') return { ok: true };
     // Through a file rather than a pipe: a patch is arbitrarily long and the
     // runner here does not carry standard input.
-    const { mkdtemp, rm } = await import('node:fs/promises');
-    const { tmpdir } = await import('node:os');
-    const folder = await mkdtemp(path.join(tmpdir(), 'graphe-patch-'));
-    const file = path.join(folder, 'part.patch');
+    const scratch = await this.scratch();
+    const file = path.join(path.dirname(scratch.index), 'part.patch');
     try {
       await writeAtomically(file, patch.endsWith('\n') ? patch : `${patch}\n`);
       const could = await this.attempt(['apply', '--reverse', '--check', file]);
@@ -654,7 +794,7 @@ export class ProjectHistory {
       const done = await this.attempt(['apply', '--reverse', file]);
       return done.code === 0 ? { ok: true } : { ok: false, because: historyProblems.goBackFailed };
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      await scratch.done();
     }
   }
 
@@ -669,10 +809,12 @@ export class ProjectHistory {
    * project, reachable by id, which is what lets a good attempt be adopted with
    * the same call that puts an old version back.
    */
-  async addWorkspace(at: string, from = 'HEAD'): Promise<void> {
+  async addWorkspace(at: string, from?: string): Promise<void> {
     await this.ensureReady();
     if (!path.isAbsolute(at)) throw new TypeError(`Expected an absolute folder, got "${at}"`);
-    const made = await this.attempt(['worktree', 'add', '--detach', at, from]);
+    const based = from ?? (await this.baseVersion());
+    if (based === null) throw new HistoryError(historyProblems.tryFailed);
+    const made = await this.attempt(['worktree', 'add', '--detach', at, based]);
     if (made.code !== 0) throw new HistoryError(historyProblems.tryFailed, detailsOf(made));
   }
 
@@ -697,6 +839,11 @@ export class ProjectHistory {
   /** Let one go, whatever state it was left in. */
   async removeWorkspace(at: string): Promise<void> {
     await this.ensureReady();
+    // The copy's own checkpoints go with it — work that was meant to outlive it
+    // was held aside under its own name. The copy's `.git` has to be read before
+    // it is removed, which is the only reason this comes first.
+    const own = await checkpointRefFor(at);
+    if (own !== CHECKPOINTS_REF) await this.attempt(['update-ref', '-d', own]);
     await this.attempt(['worktree', 'remove', '--force', at]);
     await this.attempt(['worktree', 'prune']);
   }
@@ -788,18 +935,37 @@ export class ProjectHistory {
 
   /** Run one read-only git command and return its stdout, or a plain sentence
    *  when git says no. */
-  private async readOnly(args: readonly string[]): Promise<string> {
-    const done = await this.attempt(['--no-pager', ...args]);
+  private async readOnly(args: readonly string[], indexFile?: string): Promise<string> {
+    const done = await this.attempt(['--no-pager', ...args], { indexFile });
     if (done.code !== 0) throw new HistoryError(historyProblems.notSetUp);
     return done.stdout;
   }
 
   /** The change in front of the person right now: everything not saved yet,
-   *  including files never saved before. */
+   *  including files never saved before.
+   *
+   *  Read through an index of our own, primed with our own saved state: what a
+   *  file the project already saved does not look like is a new file, whatever
+   *  the folder's own index happens to say about it. */
   async diffWorking(): Promise<string> {
     await this.ensureReady();
-    const changed = await this.readOnly(['diff', 'HEAD', '--no-ext-diff']);
-    const untracked = await this.readOnly(['ls-files', '--others', '--exclude-standard']);
+    const from = await this.baseVersion();
+    const scratch = await this.scratch();
+    let changed = '';
+    let untracked = '';
+    try {
+      if (from !== null) {
+        const started = await this.attempt(['read-tree', from], { indexFile: scratch.index });
+        if (started.code !== 0) throw new HistoryError(historyProblems.listFailed, detailsOf(started));
+        changed = await this.readOnly(['diff', from, '--no-ext-diff'], scratch.index);
+      }
+      untracked = await this.readOnly(
+        ['ls-files', '--others', '--exclude-standard'],
+        scratch.index,
+      );
+    } finally {
+      await scratch.done();
+    }
     const neverSaved = untracked
       .split('\n')
       .map((line) => line.trim())
@@ -833,10 +999,12 @@ export class ProjectHistory {
    */
   async diffWider(file: string, context: number): Promise<string> {
     await this.ensureReady();
+    const from = await this.baseVersion();
+    if (from === null) return '';
     const lines = Math.max(3, Math.min(Math.trunc(context), ProjectHistory.MOST_CONTEXT));
     return this.readOnly([
       'diff',
-      'HEAD',
+      from,
       '--no-ext-diff',
       `-U${String(lines)}`,
       '--',
@@ -856,7 +1024,8 @@ export class ProjectHistory {
   /** Everything a named piece of work keeps that where we are now does not. */
   async diffLine(name: string): Promise<string> {
     await this.ensureReady();
-    return this.readOnly(['diff', 'HEAD', name, '--no-ext-diff']);
+    const from = (await this.baseVersion()) ?? 'HEAD';
+    return this.readOnly(['diff', from, name, '--no-ext-diff']);
   }
 
   /** The change a review target points at, as git text. */
@@ -968,23 +1137,85 @@ export class ProjectHistory {
     throw new HistoryError(historyProblems.notSetUp);
   }
 
-  /** Credential paths the index picked up that HEAD does not already carry.
-   *  Reset, not removed — the working tree keeps the file exactly as it is. */
-  private async unstageNewCredentials(): Promise<void> {
-    if (!(await this.hasVersions())) return;
-    const added = await this.attempt([
-      'diff',
-      '--cached',
-      '--name-only',
-      '-z',
-      '--diff-filter=A',
-      '--',
-      ...credentialPathspecs(),
-    ]);
-    if (added.code !== 0) return;
-    const files = added.stdout.split('\u0000').filter((one) => one !== '');
-    if (files.length === 0) return;
-    await this.attempt(['reset', '--quiet', 'HEAD', '--', ...files.map((one) => `:(literal)${one}`)]);
+  /** The ref this copy's checkpoints are kept under. */
+  private async checkpointRef(): Promise<string> {
+    if (this.ref === undefined) this.ref = await checkpointRefFor(this.root);
+    return this.ref;
+  }
+
+  /** The newest checkpoint this copy made, or null before its first one. */
+  private async checkpointTip(): Promise<string | null> {
+    const found = await this.attempt(['rev-parse', '--quiet', '--verify', await this.checkpointRef()]);
+    const id = found.stdout.trim();
+    return found.code === 0 && VERSION_ID.test(id) ? id : null;
+  }
+
+  /**
+   * Where the project's saved state sits.
+   *
+   * Our own newest checkpoint once we have made one, and the newest commit the
+   * project already had before that: a folder somebody has been working in must
+   * read as their history rather than as an empty rail.
+   */
+  private async baseVersion(): Promise<string | null> {
+    const ours = await this.checkpointTip();
+    if (ours !== null) return ours;
+    const theirs = await this.attempt(['rev-parse', '--quiet', '--verify', 'HEAD']);
+    const id = theirs.stdout.trim();
+    return theirs.code === 0 && VERSION_ID.test(id) ? id : null;
+  }
+
+  /** The tree one saved state holds. */
+  private async treeOf(version: string): Promise<string> {
+    const found = await this.attempt(['rev-parse', '--quiet', '--verify', `${version}^{tree}`]);
+    const id = found.stdout.trim();
+    if (found.code !== 0 || !VERSION_ID.test(id)) {
+      throw new HistoryError(historyProblems.listFailed, detailsOf(found));
+    }
+    return id;
+  }
+
+  /** A folder for the work git does on our behalf, outside the project so that
+   *  nothing of ours is ever left inside it. */
+  private async scratch(): Promise<{ index: string; done: () => Promise<void> }> {
+    const folder = await mkdtemp(path.join(tmpdir(), 'graphe-index-'));
+    return {
+      index: path.join(folder, 'index'),
+      done: async (): Promise<void> => {
+        await rm(folder, { recursive: true, force: true });
+      },
+    };
+  }
+
+  /**
+   * The tree a save would record right now.
+   *
+   * Built from what is already saved plus everything the folder holds, in an
+   * index of our own — the one the person is staging into is never read from nor
+   * written to. Credentials are left out wherever they appear, whatever the
+   * project's own ignore rules happen to say.
+   */
+  private async candidateTree(index: string, from: string | null, because: string): Promise<string> {
+    const started = await this.attempt(
+      from === null ? ['read-tree', '--empty'] : ['read-tree', from],
+      { indexFile: index },
+    );
+    if (started.code !== 0) throw new HistoryError(because, detailsOf(started));
+    const gathered = await this.attempt(['add', '--all', '--', '.', ...excludePathspecs()], {
+      indexFile: index,
+    });
+    if (gathered.code !== 0) throw new HistoryError(because, detailsOf(gathered));
+    return this.writeTree(index, because);
+  }
+
+  /** What an index of ours currently describes, as a tree. */
+  private async writeTree(index: string, because: string): Promise<string> {
+    const written = await this.attempt(['write-tree'], { indexFile: index });
+    const tree = written.stdout.trim();
+    if (written.code !== 0 || !VERSION_ID.test(tree)) {
+      throw new HistoryError(because, detailsOf(written));
+    }
+    return tree;
   }
 
   private relative(filePath: string): string {
@@ -1000,7 +1231,7 @@ export class ProjectHistory {
    *  a failure means, and several of them mean "no", not "broken". */
   private async attempt(
     args: readonly string[],
-    options: { theirSettings?: boolean; theirIdentity?: boolean } = {},
+    options: { theirSettings?: boolean; theirIdentity?: boolean; indexFile?: string } = {},
   ): Promise<Attempt> {
     const settings = FORCED_SETTINGS.flatMap((setting) => ['-c', setting]);
     const full = ['-C', this.root, ...settings, ...args];
@@ -1008,7 +1239,7 @@ export class ProjectHistory {
       try {
         const { stdout, stderr } = await run(this.tool, full, {
           cwd: this.root,
-          env: this.environment(options.theirSettings === true, options.theirIdentity === true),
+          env: this.environment(options),
           maxBuffer: 64 * 1024 * 1024,
           windowsHide: true,
         });
@@ -1040,7 +1271,13 @@ export class ProjectHistory {
 
   /** `theirSettings` is only ever true for sending work somewhere shared, where
    *  this computer's own way of proving who you are is the whole point. */
-  private environment(theirSettings = false, theirIdentity = false): NodeJS.ProcessEnv {
+  private environment(options: {
+    theirSettings?: boolean;
+    theirIdentity?: boolean;
+    indexFile?: string;
+  }): NodeJS.ProcessEnv {
+    const theirSettings = options.theirSettings === true;
+    const theirIdentity = options.theirIdentity === true;
     // Their own name needs their own config to read it from, so the two travel
     // together. Automatic saves keep both of ours.
     const loose = theirSettings || theirIdentity;
@@ -1072,7 +1309,9 @@ export class ProjectHistory {
       // folder entirely. This is the one that would be catastrophic.
       GIT_DIR: undefined,
       GIT_WORK_TREE: undefined,
-      GIT_INDEX_FILE: undefined,
+      // Only ever an index of our own, and only where a caller asked for one:
+      // the folder's index is never the one these commands write.
+      GIT_INDEX_FILE: options.indexFile,
       GIT_OBJECT_DIRECTORY: undefined,
       GIT_NAMESPACE: undefined,
       GIT_CEILING_DIRECTORIES: undefined,
@@ -1094,6 +1333,32 @@ function newFileDiff(file: string, contents: string | null, why: string | null):
 
 function detailsOf(attempt: Attempt): string {
   return [attempt.stderr, attempt.stdout].filter((part) => part.trim().length > 0).join('\n');
+}
+
+/** The paths a merge left in disagreement: the file info lines carry the name
+ *  after a tab, and the headings around them do not. */
+function conflictedIn(output: string): readonly string[] {
+  const paths = new Set<string>();
+  for (const line of output.split('\n')) {
+    const tab = line.indexOf('\t');
+    const file = tab === -1 ? '' : line.slice(tab + 1).trim();
+    if (file !== '') paths.add(file);
+  }
+  return [...paths];
+}
+
+/** What git says changed, as the paths and what happened to each. Entries come
+ *  status first with a NUL after each, and an empty tail after the last one. */
+function parseNameStatus(output: string): UnsavedChange[] {
+  const changes: UnsavedChange[] = [];
+  const parts = output.split('\u0000');
+  for (let at = 0; at + 1 < parts.length; at += 2) {
+    const status = (parts[at] ?? '').trim();
+    const file = parts[at + 1] ?? '';
+    if (status === '' || file === '') continue;
+    changes.push({ path: file, kind: kindOfStatus(status) });
+  }
+  return changes;
 }
 
 function kindOfStatus(codes: string): ChangeKind {

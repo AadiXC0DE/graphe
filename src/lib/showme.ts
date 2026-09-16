@@ -280,8 +280,9 @@ export type WhyStopped = {
   promptCharacters: number | null;
   /** What each add-on will do, and what was done about it. */
   addons: readonly { name: string; says: string; policy: string }[];
-  /** Lifecycle handlers that ran past their budget. */
-  overruns: readonly { extension: string; event: string; ms: number }[];
+  /** Lifecycle handlers that ran past their budget, and whether each is known
+   *  to have stopped. */
+  overruns: readonly { extension: string; event: string; ms: number; stopped: boolean }[];
 };
 
 export function saysWhyStopped(one: WhyStopped): string {
@@ -314,7 +315,12 @@ export function saysWhyStopped(one: WhyStopped): string {
   }
   for (const addon of one.addons) lines.push(`  add-on ${addon.name}: ${addon.says} · ${addon.policy}`);
   for (const over of one.overruns) {
-    lines.push(`  ${over.extension} ran past its budget on ${over.event} (${String(over.ms)}ms)`);
+    // Whether it stopped matters: a handler still running is still holding
+    // whatever it was doing.
+    const state = over.stopped ? 'stopped' : 'may still be running';
+    lines.push(
+      `  ${over.extension} ran past its budget on ${over.event} (${String(over.ms)}ms, ${state})`,
+    );
   }
   return lines.join('\n');
 }

@@ -79,6 +79,19 @@ async function tracked(root: string): Promise<string[]> {
   return (await storage(root, ['ls-files'])).split('\n').filter((one) => one !== '');
 }
 
+/** What the newest saved moment holds, read raw. Saved moments are kept under
+ *  the app's own namespace, off the branch the person works on. */
+async function savedFiles(root: string): Promise<string[]> {
+  return (await storage(root, ['ls-tree', '-r', '--name-only', 'refs/graphe/checkpoints']))
+    .split('\n')
+    .filter((one) => one !== '');
+}
+
+/** Everything the saved moments hold, as one history. */
+async function savedLog(root: string, args: string[]): Promise<string> {
+  return storage(root, ['log', ...args, 'refs/graphe/checkpoints']);
+}
+
 /* ========================================================================== */
 /* C-01 an untracked credential file is never saved                            */
 /* ========================================================================== */
@@ -91,11 +104,12 @@ describe('C-01 a repository with no ignore rules', () => {
 
     expect(await history.snapshot('Saved after a turn')).not.toBeNull();
 
-    const everything = await storage(root, ['log', '-p']);
+    const everything = await savedLog(root, ['-p']);
     expect(everything).not.toContain('.env');
     expect(everything).not.toContain('sk_live_do_not_publish');
     expect(everything).toContain('index.html');
-    expect(await tracked(root)).toEqual(['README.md', 'index.html']);
+    // And nothing of ours is staged where the person is working.
+    expect(await tracked(root)).toEqual(['README.md']);
   });
 
   it('leaves the file on disk exactly as it was', async () => {
@@ -130,10 +144,10 @@ describe('C-01 a repository with no ignore rules', () => {
 
     await history.snapshot('Saved after a turn');
 
-    const saving = await tracked(root);
+    const saving = await savedFiles(root);
     for (const secret of secrets) expect(saving).not.toContain(secret);
     expect(saving).toEqual(['README.md', 'index.html']);
-    expect(await storage(root, ['log', '-p'])).not.toContain('do_not_publish');
+    expect(await savedLog(root, ['-p'])).not.toContain('do_not_publish');
   });
 
   it('still saves ordinary files that only look a little like one', async () => {
@@ -144,7 +158,7 @@ describe('C-01 a repository with no ignore rules', () => {
 
     await history.snapshot('Saved after a turn');
 
-    expect(await tracked(root)).toEqual([
+    expect(await savedFiles(root)).toEqual([
       'README.md',
       'docs/keyboard.md',
       'environment.ts',
@@ -179,9 +193,13 @@ describe('C-02 a credential file already in the history', () => {
     expect(history.savedCredentials).toEqual(['.env']);
     expect(await readFile(path.join(root, '.env'), 'utf8')).toBe('KEY=two\n');
     expect(await tracked(root)).toContain('.env');
-    // Untouched means untouched: the change to it is not in the new version.
-    expect(await storage(root, ['show', '--name-only', '--format=', 'HEAD'])).not.toContain('.env');
-    expect((await storage(root, ['status', '--porcelain'])).trim()).toBe('M .env');
+    // Untouched means untouched: the change to it is not in the new version,
+    // and the folder still shows it as the one thing left unsaved.
+    const saved = await storage(root, ['show', '--name-only', '--format=', 'refs/graphe/checkpoints']);
+    expect(saved).not.toContain('.env');
+    expect(saved).toContain('index.html');
+    const listed = (await storage(root, ['status', '--porcelain'])).split('\n');
+    expect(listed.map((one) => one.trim())).toContain('M .env');
   });
 
   it('says so in a sentence naming the file', () => {

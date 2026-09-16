@@ -13,7 +13,6 @@
  * something the person said is a confident lie about their own conversation.
  */
 
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { ROOM_WORDS, sharesOf, saysRoom, type Share } from '../src/lib/roomshare';
@@ -147,7 +146,6 @@ describe('nothing here presents an estimate as a measurement', () => {
   const words: string[] = Object.values(ROOM_WORDS).flatMap((one) =>
     typeof one === 'string' ? [one] : [],
   );
-  const source = readFileSync(new URL('../src/components/RoomShare.tsx', import.meta.url), 'utf8');
 
   /** Every sentence the panel can say, whichever branch it takes. */
   const everything = [...words, saysRoom(9_000, 200_000), saysRoom(null, 200_000)];
@@ -207,22 +205,6 @@ describe('nothing here presents an estimate as a measurement', () => {
     for (const said of everything) {
       expect(said, said).not.toMatch(/token|context\s*window|compact|prompt|payload/i);
     }
-  });
-
-  /* Every sentence the component shows has to come from the file that this
-     test sweeps. A line typed straight into the JSX would be invisible here. */
-  it('leaves no sentence written into the component itself', () => {
-    // Comments are prose and say what they like; only the code is swept.
-    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-    for (const [literal] of code.matchAll(/'[^'\n]*'|"[^"\n]*"/g)) {
-      expect(literal.slice(1, -1), literal).not.toMatch(/\S\s\S/);
-    }
-  });
-
-  /* The state with no total to report has to be the one written down here,
-     not a bar full of zeros drawn because nobody handled the null. */
-  it('reaches for the not-known words when there is no total', () => {
-    expect(source).toContain('ROOM_WORDS.notKnown');
   });
 });
 

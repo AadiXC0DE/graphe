@@ -6,7 +6,6 @@ import './History.css';
 
 type Props = {
   versions: readonly SavedVersion[];
-  pictures?: Readonly<Record<string, string>>;
   kept?: readonly string[];
   putBack: PutBack | null;
   onPutBack: (versionId: string) => void;
@@ -51,7 +50,7 @@ function relation(branch: GitBranch): string | null {
 /**
  * Everything the project has been, in the panel.
  *
- * Two readings of one thing. The pictures are here, where they fit: a card is
+ * Two readings of one thing. The moments are here, where they fit: a card is
  * small and the panel is a column of them. The lines — what came after what,
  * which branch, which id — need the width of the work, so they open over it.
  *
@@ -61,7 +60,6 @@ function relation(branch: GitBranch): string | null {
  */
 export default function History({
   versions,
-  pictures,
   kept,
   putBack,
   onPutBack,
@@ -165,7 +163,6 @@ export default function History({
 
       <Versions
         versions={versions}
-        pictures={pictures}
         kept={kept}
         putBack={putBack}
         onPutBack={onPutBack}

@@ -17,12 +17,14 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: var(--shelf-width);
+  /* The same number the composition pads by. */
+  width: var(--shelf-take);
   display: flex;
   flex-direction: column;
-  padding: var(--space-2) var(--space-2) var(--space-3);
+  /* And a shelf given no room paints no room — see the file panel in App.css. */
+  padding: var(--space-2) min(var(--space-2), var(--shelf-take)) var(--space-3);
   background: var(--bg);
-  border-right: 1px solid var(--border);
+  border-right: min(1px, var(--shelf-take)) solid var(--border);
   /* The shelf itself does not scroll: only the conversations band inside it
      does, so the projects, the pinned work and the foot keep their places
      while a long history ends in one quiet moving strip. */
@@ -33,7 +35,7 @@
    animates — toggling is the definition of the hundred-times-a-day motion the
    frequency rule bans. */
 .shelf--closed {
-  width: var(--shelf-thin);
+  width: var(--shelf-take);
   padding: var(--space-2);
   overflow: visible;
 }
@@ -315,8 +317,11 @@
   min-width: 0;
 }
 
-/* Revealed where the pointer already is, rather than sitting on every row. */
-.shelf__forget {
+/* Revealed where the pointer already is, rather than sitting on every row. Two
+   of them now — the row's own actions and throwing it away — so they are one
+   rule: a third mark on the row must not look like a different kind of thing. */
+.shelf__forget,
+.shelf__rowacts {
   flex: none;
   align-self: center;
   width: 28px;
@@ -333,23 +338,34 @@
 
 .shelf__convo:hover .shelf__forget,
 .shelf__convo:focus-within .shelf__forget,
-.shelf__forget:focus-visible {
+.shelf__forget:focus-visible,
+.shelf__convo:hover .shelf__rowacts,
+.shelf__convo:focus-within .shelf__rowacts,
+.shelf__rowacts:focus-visible,
+/* An open menu's own control stays put: a toggle that fades out from under the
+   band it opened is a control nobody can find to close. */
+.shelf__rowacts[aria-expanded='true'] {
   opacity: 1;
 }
 
 .shelf__forget:hover,
-.shelf__forget:focus-visible {
+.shelf__forget:focus-visible,
+.shelf__rowacts:hover,
+.shelf__rowacts:focus-visible,
+.shelf__rowacts[aria-expanded='true'] {
   color: var(--text);
   background: var(--bg-sunken);
 }
 
-.shelf__forget:focus-visible {
+.shelf__forget:focus-visible,
+.shelf__rowacts:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shelf__forget {
+  .shelf__forget,
+  .shelf__rowacts {
     transition: none;
   }
 }
@@ -365,7 +381,8 @@
 }
 
 .shelf__owncopysays,
-.shelf__owncopysure {
+.shelf__owncopysure,
+.shelf__actswhy {
   margin: 0;
   font-size: var(--text-2xs);
   line-height: 1.45;
@@ -383,9 +400,38 @@
   margin-top: var(--space-2);
 }
 
+/* The row's own menu, in the same place and the same shape as the offer to
+   bring a copy's work back: both are things said about one conversation. */
+.shelf__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-1) var(--space-2) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+}
+
+/* Said under the buttons rather than hidden in a tooltip, because a disabled
+   control is one nobody can hover for the reason. */
+.shelf__actswhy {
+  flex-basis: 100%;
+  margin-top: var(--space-1);
+}
+
+/* The one thing a fork does not do: it branches the conversation, not the
+   files. Said where the two ways to start a second line of work are, because
+   that is the moment somebody is choosing between them. */
+.shelf__actsshare {
+  flex-basis: 100%;
+  margin-top: var(--space-1);
+  color: var(--text-faint);
+}
+
 /* Quiet: the shelf is for navigating, and these are here to be found rather
    than to be pressed. */
-.shelf__owncopydo {
+.shelf__owncopydo,
+.shelf__actsdo {
   min-height: 28px;
   padding: 0 var(--space-2);
   border: 1px solid var(--border-control);
@@ -408,13 +454,22 @@
   color: var(--accent-text);
 }
 
-.shelf__owncopydo:focus-visible {
+.shelf__owncopydo:focus-visible,
+.shelf__actsdo:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
+/* Nothing was done, so nothing changes under the hand: no hover colour on the
+   one that could not have been pressed. */
+.shelf__actsdo:disabled {
+  border-color: transparent;
+  color: var(--text-faint);
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .shelf__owncopydo:hover {
+  .shelf__owncopydo:hover,
+  .shelf__actsdo:not(:disabled):hover {
     color: var(--text);
     border-color: var(--text-faint);
     background: var(--bg);
@@ -428,7 +483,85 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shelf__owncopydo {
+  .shelf__owncopydo,
+  .shelf__actsdo {
+    transition: none;
+  }
+}
+
+/* What somebody put away, one press from being back. The row is a line of its
+   own rather than a day heading: the days are when things were said, and this
+   is a shelf somebody was asked to tidy. */
+.shelf__archivedsays {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--text-muted);
+}
+
+.shelf__archivedcount {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.shelf__archivedmark {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+  transition: transform var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__archivedsays[aria-expanded='true'] .shelf__archivedmark {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf__archivedmark {
+    transition: none;
+  }
+}
+
+/* Back into the list, beside the row rather than on it: the whole row is the
+   way to open it, and this is the one other thing it can be asked for. */
+.shelf__unarchive {
+  flex: none;
+  align-self: center;
+  height: 28px;
+  padding: 0 var(--space-2);
+  margin-right: var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__convo:hover .shelf__unarchive,
+.shelf__convo:focus-within .shelf__unarchive,
+.shelf__unarchive:focus-visible {
+  opacity: 1;
+}
+
+.shelf__unarchive:hover,
+.shelf__unarchive:focus-visible {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.shelf__unarchive:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf__unarchive {
     transition: none;
   }
 }
@@ -476,6 +609,60 @@
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-1) var(--space-3);
+}
+
+/* Which list a thing is in, said once above each. Quieter than the band's own
+   caption: it is a scope, not a section. */
+.shelf__scope {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+/* Handing a thing between this chat and the project. Quiet until the row is
+   looked at, the same as the other row action, because the band is for
+   reading and this is here to be found. */
+.shelf__share {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-hover),
+    color var(--dur-micro) var(--ease-hover),
+    background-color var(--dur-micro) var(--ease-hover);
+}
+
+.shelf__pin:hover .shelf__share,
+.shelf__pin:focus-within .shelf__share,
+.shelf__share:focus-visible {
+  opacity: 1;
+}
+
+.shelf__share:hover,
+.shelf__share:focus-visible {
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+.shelf__share:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shelf__share {
+    transition: none;
+  }
 }
 
 .shelf__thumb {
@@ -602,6 +789,27 @@
 
 .shelf__bandtop .shelf__caption {
   padding: 0;
+}
+
+.shelf__newworktree {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: var(--space-1);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.shelf__newworktree:hover,
+.shelf__newworktree:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 .shelf__new {

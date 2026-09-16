@@ -5,6 +5,8 @@
  * `off` is not a leak anybody notices in a morning: it is a listener list that
  * grows all day, holding every closure it was given, and the conversation it
  * closed over with it. So the pairing is a test rather than a habit.
+ *
+ *  Source text, not behaviour: the preload's on/off pairing and every bridge cleanup in App; no behavioural test can reach them — preload needs Electron's contextBridge and no test renders App.
  */
 
 import { readFileSync } from 'node:fs';

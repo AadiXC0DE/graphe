@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-
-import { bridge } from '../lib/bridge';
 import type { ReviewEntry } from '../lib/ipc';
 import { ago } from '../lib/when';
 import { saysEntry, waiting } from '../work/reviewqueue';
 import './Waiting.css';
 
 type Props = {
+  /** What is waiting for the conversation this panel is about. The owner of
+   *  the query, and of the scope, is whoever asked for this panel: it used to
+   *  fetch the project queue itself, unqualified, and keep the last answer,
+   *  which made a project list read as this chat's state. */
+  entries: readonly ReviewEntry[];
   /** Open the Review screen, at this entry. */
   onOpen?: (id?: string) => void;
   /** The window's clock, so "2m ago" moves without a timer of its own. */
@@ -31,19 +33,7 @@ export const WAITING_WORDS = {
  * once a day. When nothing waits the band is not drawn at all: an empty band
  * teaches people to stop looking.
  */
-export default function Waiting({ onOpen, clock }: Props) {
-  const [entries, setEntries] = useState<readonly ReviewEntry[]>([]);
-
-  const read = useCallback(() => {
-    void bridge.reviewQueue().then((answer) => {
-      if (answer.ok) setEntries(answer.value);
-    });
-  }, []);
-
-  useEffect(() => {
-    read();
-  }, [read, clock]);
-
+export default function Waiting({ entries, onOpen, clock }: Props) {
   // An entry leaves the list the moment it is decided about, so everything
   // still here is still waiting.
   if (entries.length === 0) return null;

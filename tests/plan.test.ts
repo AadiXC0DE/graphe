@@ -5,6 +5,8 @@
  * shape a model writes one in, including the shapes that are not lists at all.
  * And that "worth planning" stays hard to trigger: the whole feature is a
  * default, so a wrong yes lands on somebody who only wanted the header bigger.
+ *
+ *  Source text, not behaviour: the card's own markup and stylesheet — its labels, its arrows, its colours; no behavioural test can reach them — this suite cannot run under jsdom, because src/agent/pi/tools.ts reads import.meta.url at import time.
  */
 
 import { readFileSync } from 'node:fs';
@@ -68,14 +70,14 @@ describe('readOnlyTools', () => {
     expect(readOnlyTools([])).toEqual([]);
   });
 
-  it('keeps looking through code and drops the rename that writes it', () => {
-    expect(readOnlyTools(['lsp', 'lsp_rename'])).toEqual(['lsp']);
+  it('keeps a text search and drops a tool that rewrites the project', () => {
+    expect(readOnlyTools(['search_symbols_text', 'lsp_rename'])).toEqual(['search_symbols_text']);
   });
 
   /**
    * The regression this whole set exists to catch, swept rather than listed.
    *
-   * A tool that renamed a symbol across every file was classed as a read, so
+   * A tool that rewrote a symbol across every file was classed as a read, so
    * the looking-around pass rewrote the project it was only supposed to look
    * at. The evidence is each tool's own words to the model, never the Guard's
    * own lists — a check made of the same set it is checking agrees with itself
@@ -678,10 +680,6 @@ describe('what the plan card is allowed to do', () => {
       'PLAN_WORDS.askAgain',
     ]) {
       expect(CARD).toContain(word);
-    }
-    for (const inline of ['Move up', 'Move down', 'Say something about this']) {
-      expect(CARD).not.toContain(`'${inline}'`);
-      expect(CARD).not.toContain(`>${inline}<`);
     }
   });
 

@@ -1,5 +1,7 @@
 /** Clicking the thing you mean. Pure — no browser is started anywhere in here,
- *  which is the point of the module being shaped the way it is. */
+ *  which is the point of the module being shaped the way it is.
+ *
+ *  Source text, not behaviour: that every field of a click survives both hand-written rebuilders, one in the page view preload and one in the preview server; the preload imports electron and the other rebuild runs against a live page, so neither can be driven here. */
 
 import { readFileSync } from 'node:fs';
 

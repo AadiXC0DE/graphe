@@ -34,6 +34,7 @@ const CARD: CapabilityCard = {
   startsTurns: true,
   rewritesSystemPrompt: false,
   runsBackgroundWork: true,
+  toolsOnly: false,
   toolPromptBytes: 4096,
   orchestrating: true,
 };

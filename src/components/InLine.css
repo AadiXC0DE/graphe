@@ -73,8 +73,55 @@
   outline-offset: 1px;
 }
 
+/* The folder is held by another chat, so nothing here has begun. Solid rather
+   than dashed: a wait that has not started is the firmer of the two promises,
+   and the row is where somebody is offered a way out of it. */
+.inline--folder .inline__item {
+  border-style: solid;
+}
+
+/* Who has the folder, beside the words. Not a second line: the wait is one
+   fact, and it is about the message on the same row. */
+.inline__ahead {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+}
+
+.inline__acts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The same shape as the take-back press beside it, and the one the arm reaches
+   for first: it is the way to work now rather than the way to give up. */
+.inline__copy {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-micro) var(--ease-hover),
+    transform var(--dur-micro) var(--ease-out-quart);
+}
+
+.inline__copy:active {
+  transform: scale(0.97);
+}
+
+.inline__copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .inline__take {
+  .inline__take,
+  .inline__copy {
     transition: none;
   }
 }
@@ -83,5 +130,9 @@
   .inline__take:hover {
     border-color: var(--text-faint);
     color: var(--text);
+  }
+
+  .inline__copy:hover {
+    border-color: var(--text-faint);
   }
 }

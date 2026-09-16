@@ -8,6 +8,8 @@
  * on it already cleared AA; what did not was the structure. A hairline at
  * 1.23:1 against the background is a hairline nobody can see, so cards, rows
  * and boxes had no visible edges while their words read perfectly.
+ *
+ *  Source text, not behaviour: the WCAG contrast of the real tokens; no behavioural test reaches it — those colour pairs live in the stylesheet.
  */
 
 import { readFileSync } from 'node:fs';

@@ -4,6 +4,8 @@
  * of key comparisons beside it, which is the same two-lists-that-disagree bug
  * one press further in: a chord changed in the registry would have moved the
  * palette's label and left the keyboard exactly where it was.
+ *
+ *  Source text, not behaviour: the App key handler and the Settings chord row; neither is reachable from a test — App.tsx needs the whole shell, and the row's key handling is inline in Settings.tsx.
  */
 
 import { readFileSync } from 'node:fs';
@@ -11,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { ACTIONS, actionAt, chordFor, clashesIn, readActions } from '../src/lib/actions';
+import { ACTIONS, actionAt, chordFor, readActions } from '../src/lib/actions';
 
 const app = readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
 const settings = readFileSync(
@@ -32,9 +34,6 @@ describe('the keyboard reads the registry', () => {
   it('asks the registry what a press means, rather than comparing keys', () => {
     expect(app).toContain('const action = actionAt(');
     expect(app).toContain('bindingsNow.current,');
-    // Not one `event.key === "b"` chain left behind it.
-    expect(app).not.toContain('if (event.key === "b" && desk !== null)');
-    expect(app).not.toContain('if (event.key === "j" && desk !== null)');
   });
 
   it('leaves the three keys that belong to somebody else alone', () => {
@@ -93,8 +92,8 @@ describe('changing one', () => {
   });
 
   it('says where two actions have landed on one chord', () => {
-    const both = clashesIn({ shelf: 'mod+j' });
-    expect(both.some((one) => one.ids.includes('shelf') && one.ids.includes('page'))).toBe(true);
+    // The rule itself is run in tests/actions.test.ts; what nothing else covers
+    // is the screen saying it.
     expect(settings).toContain('clashesIn(bindings)');
   });
 

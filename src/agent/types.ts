@@ -217,8 +217,45 @@ export type SittingUsage = {
  */
 export type SettledHow = 'finished' | 'stopped' | 'failed' | 'asked-person' | 'blocked-by-addon';
 
+/**
+ * How a step ended, when it did not end by finishing.
+ *
+ * `stopped` is somebody pressing Stop, `interrupted` is a record that ends
+ * before the result — the app was closed, or it crashed — and `failed` is the
+ * step itself coming back with an error. Only a replay can tell the last two
+ * apart from the record alone, and it has to: a step that never finished is not
+ * a step that failed, and it is certainly not one that succeeded.
+ */
+export type StepEnding = 'failed' | 'stopped' | 'interrupted';
+
+/**
+ * Something a step handed back that a line in the feed cannot draw: a file an
+ * add-on's tool returned, a second picture, the tail of a long output. `what`
+ * is one line for a person and `where` is where the whole of it lives, so
+ * nothing the transcript holds comes back as nothing.
+ */
+export type KeptThing = { what: string; where: string };
+
 /** One press offered under a notice. `id` is what comes back. */
 export type NoticeAction = { id: string; label: string };
+
+/** One send waiting for the folder rather than for Pi.
+ *
+ * Nothing of it has begun, so Pi has no queue to report it from: the shell is
+ * holding it, and the shell is what says when it goes. The id is the run it
+ * becomes, given before anything is sent — two sends of the same sentence are
+ * two waits, and each comes off the line by its own id rather than by reading
+ * like the other. The folder is the one it was queued for, read at send time: a
+ * workspace picked afterwards is a different request, and this one does not
+ * follow it.
+ */
+export type WaitingSend = {
+  id: string;
+  text: string;
+  workspace: string;
+  /** The conversation holding that folder, for "waiting on …". */
+  ahead: string;
+};
 
 export type AgentEvent =
   | { type: 'message-delta'; text: string }
@@ -226,8 +263,28 @@ export type AgentEvent =
   | { type: 'tool-start'; call: ToolCall }
   /** A step that finished. `shown` is a picture the step took — of a page, of
    *  the screen — which the conversation draws under the line, because a
-   *  picture nobody sees is a picture nobody asked for. */
-  | { type: 'tool-end'; id: string; ok: boolean; detail?: string; shown?: ImageCard }
+   *  picture nobody sees is a picture nobody asked for.
+   *
+   *  `detail` is what the step has to say for itself: a note it wrote, or the
+   *  first of what it printed. `ending` is how it did not finish, when it did
+   *  not. `kept` is everything a line has no room for, named. `ms` is how long
+   *  the step took, which Pi's own events do not carry: the host measures it,
+   *  live across the call and in a saved conversation from the two entries.
+   *
+   *  `drawn` is the step as the add-on drew it, headless, at eighty columns and
+   *  with the colour taken out — the lines a terminal add-on wrote for this
+   *  result rather than the generic line this window would otherwise show. */
+  | {
+      type: 'tool-end';
+      id: string;
+      ok: boolean;
+      detail?: string;
+      shown?: ImageCard;
+      ending?: StepEnding;
+      kept?: readonly KeptThing[];
+      ms?: number;
+      drawn?: readonly string[];
+    }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */
   | { type: 'tool-progress'; id: string; text: string }
@@ -317,6 +374,16 @@ export type AgentEvent =
    */
   | { type: 'extension-turn'; from: string; text: string }
   /**
+   * A message an add-on put into the record, in its own name.
+   *
+   * Pi stores these with the extension that wrote them and whether they asked
+   * to be shown at all, and a reopened conversation has to keep both: the words
+   * are not the person's and not ours, and an add-on that asked to be invisible
+   * asked for a reason. A message that asked to be shown and has nothing in it
+   * a line can draw is not sent at all.
+   */
+  | { type: 'extension-said'; from: string; text: string; shown?: ImageCard; kept?: readonly KeptThing[] }
+  /**
    * Something about the app, not about this conversation.
    *
    * A spending ceiling reached, an add-on refusing every step, a folder that
@@ -354,6 +421,13 @@ export type AgentEvent =
   /** What is waiting behind the run. Both lists, because an interrupt and a
    *  follow-up are different promises and are shown as different things. */
   | { type: 'queued'; steering: readonly string[]; followUp: readonly string[] }
+  /** The sends waiting for the folder, whole, every time the line changes.
+   *
+   * A second chat in one workspace asked to send while a run held it. The line
+   * is the shell's, so the shell says all of it at once — as `running` does —
+   * rather than leaving the window to add and remove one at a time and guess
+   * which wait a message belongs to. */
+  | { type: 'queued-for-folder'; waiting: readonly WaitingSend[] }
   /** The words of a person's message the moment the agent begins on it. Pi
    *  reports the line draining by its own bookkeeping too, but that removal is
    *  exact-text and can silently no-op; this says directly that one of the

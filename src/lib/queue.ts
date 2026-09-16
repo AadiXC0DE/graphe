@@ -1,12 +1,18 @@
 /** The waiting line beside the composer, as the window owns it.
  *
- * Pi reports the queue through its own events, but the removal it performs as
- * a message starts is exact-text and can silently no-op — the app must not
- * depend on that bookkeeping to draw the line correctly. The one signal that
- * cannot miss is Pi's `message_start` for the person's message, so the drain
- * here is keyed off that instead: the message the agent has begun on is not
- * waiting any more.
+ * Two waits are drawn there and they come from different places. Pi reports its
+ * own queue through its events, but the removal it performs as a message starts
+ * is exact-text and can silently no-op — the app must not depend on that
+ * bookkeeping to draw the line correctly. The one signal that cannot miss is
+ * Pi's `message_start` for the person's message, so that drain is keyed off it:
+ * the message the agent has begun on is not waiting any more.
+ *
+ * The other wait is the app's own: a send held back because another chat holds
+ * the folder. That one is a record with an id from the moment it is queued, so
+ * it drains by the id (`drainQueued`) rather than by reading like a message.
  */
+
+import type { WaitingSend } from '../agent/types';
 
 /** One message has begun; take it out of the line. Only the first occurrence
  *  is removed (two identical queued messages start in the order they were
@@ -20,6 +26,21 @@ export function drainStarted(
   if (at === -1) return line;
   return line.filter((_, where) => where !== at);
 }
+
+/** The sends waiting for the folder, after the one that has begun or been
+ *  taken back is off it.
+ *
+ *  By id rather than by words: two sends of the same sentence are two waits,
+ *  and one of them starting must not take the other off the screen. An id that
+ *  is not in the line is not a drain — it is a run that was never on it. */
+export function drainQueued(
+  line: readonly WaitingSend[],
+  id: string,
+): readonly WaitingSend[] {
+  const left = line.filter((one) => one.id !== id);
+  return left.length === line.length ? line : left;
+}
+
 /**
  * The line without the app's own nudges in it.
  *

@@ -1,10 +1,11 @@
 # Phase 4 handoff: conversations that are durable, resumable, and independent of tabs
 
 Findings: W04 done (reopening a conversation whose folder has gone — see below),
-W06, S01, S02, S04, S09, S10, S11, S13, S14 done; S12 open, and 4.2's states are
-now all driven or documented (see below). W07's lifecycle half is dispositioned in
-the phase 3 handoff (closing is a view). Numbers here were taken on this tree on
-2026-09-16.
+and W06, S01, S02, S04, S09, S10, S11, S12, S13, S14 are all done. 4.2's states are
+driven or documented, its run note keeps its workspace and survives until it is
+said, and its view records are durable: what is left of this phase is the window's
+`noteView`/`viewInPane` call. W07's lifecycle half is dispositioned in the phase 3
+handoff (closing is a view). Numbers here were taken on this tree on 2026-09-16.
 
 ## Done
 
@@ -173,6 +174,48 @@ The window's half is **not wired yet, and needs no registry work**: `bridge` cal
 `viewInPane(index, 0 | 1)` at launch. The registry owns the durability; the window
 owns when a pane opens and which pane it is.
 
+**Rapid New presses: a retry past the window lands on the chat it asked for
+(S12).** The window names each press and the shell keeps that answer for a minute
+(`src/lib/answered.ts`, `tests/new-press.test.ts`). Past the minute the name was
+forgotten and the press was built again — and because a fresh chat takes the
+press's own name as its address, the second build landed at the address the first
+conversation was already live at, orphaning it: two sessions, one address, two
+writers for one transcript. The carry-on path had guarded against exactly that
+from the start; the fresh path now asks the same question in the same place
+(`electron/main.ts:4948-4960`, above the first thing that can build a session):
+something live at the press's address is resumed and handed back rather than
+rebuilt. Evidence: `tests/new-press-twice.test.ts`, 4 tests — the same press name
+both times, two presses two names, the registry returning `made: false` for the
+second write at one address, one live conversation found and resumed rather than
+replaced, and the guard asserted to sit above the build.
+
+**The interrupted sentence's lifetime: the note stays until it is said (4.2).**
+A launch read the run notes, remembered the facts, recovered the state — and then
+removed the note from disk straight away, in the same pass
+(`readWhatWasRunning`). So a crash before anybody opened the conversation it
+belonged to lost the run's only record, and the launch had answered for somebody
+who had not looked yet. The removal moved to `tookInterruptedNote`
+(`electron/main.ts:1968-1974`), which is the one-shot that says the sentence, and
+it is called from the same place as before — the first time somebody opens that
+conversation. Evidence: `tests/session-states.test.ts`, 21 tests, including "keeps
+the note until somebody has looked at the conversation, not until launch" (read,
+remember, recover, and the note is still on disk for a second launch; removed at
+the moment it is said, twice over, idempotently) and a source assertion that the
+launch does not remove it while `tookInterruptedNote` does.
+
+**`workspaceId` in the run record (4.2).** It was null in every note, because the
+workspace link belongs to the registry and `move` was never told it. The session
+service now remembers it — `Sessions.inWorkspace(conversation, workspaceId)`
+(`src/domain/conversations.ts:294`), told by `noteWhereItWorks`
+(`electron/main.ts:3866`) at the moment the registry record is written — and
+every move after that carries it, so the note a launch reads back names the folder
+the interrupted turn was in. The per-move `workspaceId` option went with it: a
+second door that silently lost to the remembered one, and no caller used it.
+Evidence: `tests/session-states.test.ts`, "names the workspace the run was in,
+once the registry has said" — null before anything says (which is "this layer does
+not know", not "none"), carried by every move after, and read back off the disk
+note.
+
 **Session service states, driven and durable (4.2).** `src/domain/conversations.ts`
 carries the driver beside the vocabulary: `Sessions` holds the runtime state and
 the written facts for every conversation, refuses a move `TRANSITIONS` does not
@@ -192,7 +235,7 @@ note away when it ends, so the file holds exactly the runs still in flight;
 "This conversation was in the middle of a run when Graphe stopped…" is said once,
 over the conversation, the first time somebody opens it (`tookInterruptedNote`,
 `:1951`). Nothing is reissued: a launch marks and reports, it never starts a turn
-again. `tests/session-states.test.ts`, 19 tests.
+again. `tests/session-states.test.ts`, 21 tests.
 
 **Close is a view. Stop is the press that ends a run (4.6).**
 `CHANNEL.closeConversation` (`electron/main.ts:8907`) takes the guard first: a
@@ -263,9 +306,6 @@ all passing: `tests/draft-kept.test.ts` 15,
 | Item | Finding | What is missing |
 | --- | --- | --- |
 | Second view attaches to one runtime | 4.2 | **The registry half is done; the window's half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), one runtime behind two views is structural (`Sessions` is keyed by conversation, `src/domain/conversations.ts:261`, and a pane holds an address rather than a session, so opening the same chat twice asks for the same one), and the view record is now durable: `WorkspaceIndex.views` with `noteView`/`viewInPane`/`dropView`/`dropViewsOf` and schema version 2 (see Done). What is missing is the window calling `noteView` when a pane opens and reading `viewInPane` at launch — no registry work is left for it |
-| Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |
-| The interrupted sentence's lifetime | 4.2 | The note is said once per launch and cleared at launch rather than kept until somebody has looked at the conversation it belongs to |
-| `workspaceId` in the run record | 4.2 | It is null in the recorded facts: the registry owns the workspace link and the runtime does not ask for it |
 
 Exit criteria: still not met, and closer. Resume after close/restart works through
 the existing session path; "history includes main-folder and isolated chats in one

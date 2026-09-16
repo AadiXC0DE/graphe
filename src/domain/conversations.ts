@@ -260,6 +260,10 @@ export function reportedState(state: SessionState, archived: boolean): SessionSt
 export class Sessions {
   readonly #now = new Map<ConversationId, RuntimeState>();
   readonly #written = new Map<ConversationId, DurableFacts>();
+  /** The workspace each conversation works in, as the registry last said. Held
+   *  here so every note carries it: a move is not told which folder it is in,
+   *  and a note that left it null named no workspace at all. */
+  readonly #workspaces = new Map<ConversationId, WorkspaceId>();
   readonly #wrote: (facts: DurableFacts) => void;
 
   /** `wrote` is told about every note as it changes, so the caller can put the
@@ -272,6 +276,23 @@ export class Sessions {
    *  which is a real answer rather than a missing one. */
   stateOf(conversation: ConversationId): SessionState {
     return this.#now.get(conversation)?.state ?? 'unloaded';
+  }
+
+  /** The workspace this conversation works in, or null while nothing has said.
+   *  Null is "this layer does not know", never "none". */
+  workspaceOf(conversation: ConversationId): WorkspaceId | null {
+    return this.#workspaces.get(conversation) ?? null;
+  }
+
+  /**
+   * The workspace a conversation works in, as the registry has it.
+   *
+   * Told rather than guessed: the folder a conversation writes in belongs to the
+   * registry, and the session service is what puts it on the note a launch reads
+   * back. Idempotent, so a caller can say it again on every open.
+   */
+  inWorkspace(conversation: ConversationId, workspaceId: WorkspaceId): void {
+    this.#workspaces.set(conversation, workspaceId);
   }
 
   /** The last state written down for it, or null when nothing was. */
@@ -310,16 +331,16 @@ export class Sessions {
     conversation: ConversationId,
     to: SessionState,
     at: number,
-    options: { ownerId?: OwnerId | null; workspaceId?: WorkspaceId | null } = {},
+    options: { ownerId?: OwnerId | null } = {},
   ): SessionState {
     const from = this.stateOf(conversation);
     if (from === to) return from;
     if (!canTransition(from, to)) return from;
     const facts: DurableFacts = {
       conversationId: conversation,
-      // The workspace a conversation works in belongs to the registry, not to
-      // the runtime; null here means "this layer does not know", not "none".
-      workspaceId: options.workspaceId ?? null,
+      // Told once by `inWorkspace`, and carried by every move after that. Null
+      // only while nothing has said, which is "this layer does not know".
+      workspaceId: this.#workspaces.get(conversation) ?? null,
       status: to,
       ownerId: options.ownerId ?? null,
       runtimeEpoch: this.#now.get(conversation)?.runtimeEpoch ?? null,

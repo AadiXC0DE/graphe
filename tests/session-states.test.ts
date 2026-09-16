@@ -12,6 +12,7 @@
  */
 
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,7 +32,7 @@ import {
 } from '../src/domain/conversations';
 import { translatePiEvent } from '../src/agent/pi/events';
 import { runOwner } from '../src/domain/events';
-import { asConversationId, newConversationId, newRunId } from '../src/domain/identity';
+import { asConversationId, asWorkspaceId, newConversationId, newRunId } from '../src/domain/identity';
 import {
   interruptedWords,
   readRunNotes,
@@ -53,6 +54,10 @@ afterAll(async () => {
 });
 
 const AT = 1_700_000_000_000;
+
+/** Electron's entry point, read as text: the run note's lifetime is wired in
+ *  there and no test can import it. */
+const MAIN = readFileSync(join(process.cwd(), 'electron', 'main.ts'), 'utf8');
 
 describe('the state of a conversation, driven', () => {
   it('moves through the states the shell moves it through, and is read back', () => {
@@ -192,12 +197,68 @@ describe('the launch after a run was cut off', () => {
     expect(said).toContain('a minute ago');
 
     // Nothing was reissued: the recovery produced the state it is in and
-    // nothing else, and the note is taken away so the next launch has nothing
-    // to say about it. A run started again would be `opening` or `running`,
-    // with a note still on disk.
+    // nothing else. A run started again would be `opening` or `running`, with a
+    // note still on disk.
+    expect(states.stateOf(note.conversationId)).toBe('interrupted');
+  });
+
+  /* The note is the only record of a turn nobody finished, so it comes off the
+     disk when the sentence is said over the conversation — never at launch. A
+     launch that cleared it answered for somebody who had not looked yet, and a
+     second crash in between lost the run entirely. */
+  it('keeps the note until somebody has looked at the conversation, not until launch', async () => {
+    const profile = await scratch();
+    const transcript = join(profile, 'sessions', 'chat.jsonl');
+    await wroteRunNote(profile, facts(transcript, 'running'), '/work/atlas');
+
+    // What a launch does: read the notes, remember the facts, recover the
+    // state, and hold the sentence ready to be said. Nothing is removed.
+    const states = new Sessions();
+    const notes = readRunNotes(profile);
+    expect(notes).toHaveLength(1);
+    const note = notes[0]!;
+    states.remembered(note);
+    states.recovered(note.conversationId);
+    expect(states.stateOf(note.conversationId)).toBe('interrupted');
+
+    // Still there for a second launch, which is the whole point: a crash before
+    // anybody looked must not take the run's record with it.
+    expect(readRunNotes(profile).map((one) => one.conversationId)).toEqual([transcript]);
+
+    // And taken away at the moment it is said, which happens the first time
+    // somebody opens that conversation.
     await tookRunNoteAway(profile, note.conversationId);
     expect(readRunNotes(profile)).toEqual([]);
-    expect(states.stateOf(note.conversationId)).toBe('interrupted');
+    // Idempotent: saying it twice, or removing a note that is already gone.
+    await tookRunNoteAway(profile, note.conversationId);
+    expect(readRunNotes(profile)).toEqual([]);
+  });
+
+  /* The run's note names the workspace it was running in, so a launch can say
+     which folder the interrupted turn belonged to. The registry knows the link
+     and the runtime does not, so it is told once and every move after that
+     carries it. */
+  it('names the workspace the run was in, once the registry has said', async () => {
+    const profile = await scratch();
+    const transcript = asConversationId(join(profile, 'sessions', 'chat.jsonl'));
+    const states = new Sessions();
+
+    // Nothing has said yet: null is "this layer does not know", not "none".
+    expect(states.workspaceOf(transcript)).toBeNull();
+    states.move(transcript, 'opening', AT);
+    expect(states.factsOf(transcript)?.workspaceId).toBeNull();
+
+    // The registry writes the link, which is where the shell tells it.
+    states.inWorkspace(transcript, asWorkspaceId('workspace-1'));
+    expect(states.move(transcript, 'idle', AT + 1)).toBe('idle');
+    expect(states.factsOf(transcript)?.workspaceId).toBe('workspace-1');
+    expect(states.workspaceOf(transcript)).toBe('workspace-1');
+
+    // Every move after that carries it, which is what makes the note a launch
+    // reads back name the folder rather than leaving the field null.
+    states.move(transcript, 'running', AT + 2);
+    await wroteRunNote(profile, states.factsOf(transcript)!, '/work/atlas');
+    expect(readRunNotes(profile)[0]?.workspaceId).toBe('workspace-1');
   });
 
   it('keeps what had already ended rather than calling it interrupted', () => {
@@ -237,6 +298,28 @@ describe('the launch after a run was cut off', () => {
     // The file is written as text a person could read, under the profile.
     expect(runNotesFile(profile)).toContain(profile);
     expect(JSON.parse(await readFile(runNotesFile(profile), 'utf8'))).toHaveLength(2);
+  });
+
+  /* Where each half of the lifetime lives. The note is written as the state
+     changes (the `wrote` callback on the session service) and taken away when
+     the sentence is said or when a launch settles the run, never by the launch's
+     read. Asserted on the source because `main.ts` is an Electron entry point no
+     test can import. */
+  it('is cleared when it is said, and not by the launch that read it', () => {
+    const launch = MAIN.slice(MAIN.indexOf('function readWhatWasRunning'), MAIN.indexOf('* The project named, or the one in front'));
+    expect(launch).not.toBe('');
+    expect(launch).toContain('readRunNotes');
+    expect(launch).toContain('interruptedRuns.set');
+    // Not here: a launch that removed the note answered for somebody who had
+    // not looked yet, and lost the run if the app went down again before they did.
+    expect(launch).not.toContain('tookRunNoteAway');
+
+    const said = MAIN.slice(MAIN.indexOf('function tookInterruptedNote'), MAIN.indexOf('function readWhatWasRunning'));
+    expect(said).not.toBe('');
+    expect(said).toContain('tookRunNoteAway');
+    // And it is the one-shot: a second look at the same conversation says
+    // nothing rather than the same sentence again.
+    expect(said).toContain('interruptedRuns.delete(address)');
   });
 });
 

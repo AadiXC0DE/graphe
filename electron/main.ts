@@ -289,7 +289,12 @@ import {
   Readings,
 } from './services/readings';
 import { inFlight, movedByWork, reportedState, Sessions, workEventOf } from '../src/domain/conversations';
-import { asConversationId, newConversationId, type ConversationId } from '../src/domain/identity';
+import {
+  asConversationId,
+  asWorkspaceId,
+  newConversationId,
+  type ConversationId,
+} from '../src/domain/identity';
 import { Answered } from '../src/lib/answered';
 import { handoffMessage } from '../src/work/continuing';
 import {
@@ -1959,11 +1964,17 @@ const interruptedRuns = new Map<string, string>();
  * Once per conversation per launch. What was interrupted is not restarted: the
  * turn was somebody's, they are not waiting for it any more, and picking it up
  * would spend their money on work they have not asked for.
+ *
+ * The note comes off the disk here rather than at launch, so it survives a
+ * second crash: what a launch may not do is answer for somebody who has not
+ * looked yet, and a note taken away before it is said is a run the app will
+ * never account for at all.
  */
 function tookInterruptedNote(address: string): string | null {
   const said = interruptedRuns.get(address);
   if (said === undefined) return null;
   interruptedRuns.delete(address);
+  void tookRunNoteAway(app.getPath('userData'), address);
   return said;
 }
 
@@ -1980,9 +1991,10 @@ function readWhatWasRunning(): void {
     states.remembered(note);
     states.recovered(conversation);
     interruptedRuns.set(conversation, interruptedWords(note));
-    // Answered, so taken away: none of these are in flight any more, and a note
-    // left behind would say the same thing at every launch from here.
-    void tookRunNoteAway(userData, conversation);
+    // The note stays on disk until the sentence is said over the conversation
+    // it belongs to. A run that is written down and never accounted for is one
+    // the next launch has to answer for, and it is the only record of a turn
+    // nobody finished.
   }
   if (notes.length > 0) log.line('info', 'runs interrupted by a stop', { count: notes.length });
 }
@@ -3848,6 +3860,10 @@ async function noteWhereItWorks(
     updatedAt: Date.now(),
     ...(lineage === null ? {} : { lineage }),
   });
+  // The folder is the registry's; the note a run leaves behind names it too, so
+  // a launch can say which workspace the interrupted turn was in rather than
+  // leaving the field null. Told here because this is where the link is written.
+  states.inWorkspace(named(address), asWorkspaceId(home.workspaceId));
   await saveWorkspaceIndex();
 }
 
@@ -4929,6 +4945,19 @@ async function startConversationUnlocked(
   const asked = how.kind === 'carry-on' ? how.path : undefined;
   /** The permission rung the conversation being replaced was on, if one was. */
   let rungBefore: HowFar | null = null;
+  /* A fresh press names the chat it is asking for before the chat exists, so a
+     repeat of that press must not build a second session behind the first: the
+     address is the press's own key, and one conversation lives at it. The window
+     covers a retry inside a minute; this is what covers the rest, and it is the
+     same rule the carry-on path already had. */
+  const pressed = how.kind === 'fresh' ? how.key : undefined;
+  if (asked === undefined && pressed !== undefined) {
+    const already = conversationAt(held, { conversation: pressed });
+    if (already !== null) {
+      held.sessions.resume(already.path);
+      return done({ session: already.held, address: already.path });
+    }
+  }
   if (asked !== undefined) {
     const already = conversationAt(held, { conversation: asked });
     if (already !== null && already.held.activationPending === null) {

@@ -110,9 +110,13 @@ describe('the launch', () => {
       MAIN.indexOf('function projectAt('),
     );
     expect(read).toContain('states.recovered(conversation)');
-    expect(read).toContain('tookRunNoteAway');
+    expect(read).toContain('interruptedRuns.set');
     // The one thing a launch must not do with a run that was cut off.
     expect(read).not.toContain('startConversation');
+    // Nor take the note away: it is the only record of a turn nobody finished,
+    // and a launch that removed it answered for somebody who had not looked
+    // yet. It comes off the disk when the sentence is said instead.
+    expect(read).not.toContain('tookRunNoteAway');
   });
 
   it('says what it found over the conversation it belongs to', () => {

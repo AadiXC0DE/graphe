@@ -21,14 +21,19 @@ import {
   attachConversation,
   canonical,
   conversationsIn,
+  dropView,
+  dropViewsOf,
   emptyIndex,
   ensureProject,
+  INDEX_VERSION,
   markDeleted,
+  noteView,
   parseIndex,
   projectAtPath,
   relinkProject,
   serializeIndex,
   verifyWorkspace,
+  viewInPane,
   workspaceAtPath,
   type WorkspaceRecord,
   workspaceById,
@@ -291,6 +296,100 @@ describe('a conversation', () => {
   });
 });
 
+describe('a view somebody had open', () => {
+  const project = () => {
+    const root = scratch();
+    const ensured = ensureProject(emptyIndex(), root);
+    const added = addWorkspace(ensured.index, {
+      projectId: ensured.project.projectId,
+      path: root,
+      kind: 'local',
+      managed: false,
+      now: NOW,
+    });
+    return { index: added.index, workspaceId: added.workspace.workspaceId };
+  };
+
+  it('is written down against the conversation and the pane it was in', () => {
+    const { index, workspaceId } = project();
+    const chat = addConversation(index, { conversationId: 'chat-a', workspaceId, now: NOW });
+    const one = noteView(chat.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+
+    expect(one.made).toBe(true);
+    expect(one.view).toEqual({ viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+    expect(viewInPane(one.index, 0)?.conversation).toBe('chat-a');
+    // The other pane is empty, which is an ordinary single-pane window.
+    expect(viewInPane(one.index, 1)).toBeNull();
+  });
+
+  /* One pane holds one view. Showing another chat in it moves the view rather
+     than adding a second, which is what makes a pair of panes a window. */
+  it('moves rather than doubles when another chat is shown in the same pane', () => {
+    const { index, workspaceId } = project();
+    const first = addConversation(index, { conversationId: 'chat-a', workspaceId, now: NOW });
+    const second = addConversation(first.index, {
+      conversationId: 'chat-b',
+      workspaceId,
+      now: NOW,
+    });
+    const one = noteView(second.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+    const two = noteView(one.index, { viewId: 'view-2', conversation: 'chat-b', pane: 0 });
+
+    expect(Object.keys(two.index.views)).toEqual(['view-2']);
+    expect(viewInPane(two.index, 0)?.conversation).toBe('chat-b');
+  });
+
+  it('is the same view when the same chat is opened in the same pane again', () => {
+    const { index, workspaceId } = project();
+    const chat = addConversation(index, { conversationId: 'chat-a', workspaceId, now: NOW });
+    const one = noteView(chat.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+    const again = noteView(one.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+
+    expect(again.made).toBe(false);
+    expect(again.index).toBe(one.index);
+  });
+
+  /* A view onto a chat nobody wrote down is a pane that fails on the press, so
+     it is refused rather than stored. */
+  it('is refused for a conversation the registry does not know', () => {
+    const { index } = project();
+    const refused = noteView(index, { viewId: 'view-1', conversation: 'nobody', pane: 0 });
+    expect(refused.made).toBe(false);
+    expect(refused.view).toBeNull();
+    expect(refused.index).toBe(index);
+  });
+
+  it('is taken away with its pane, and the conversation is not', () => {
+    const { index, workspaceId } = project();
+    const chat = addConversation(index, { conversationId: 'chat-a', workspaceId, now: NOW });
+    const two = noteView(
+      noteView(chat.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 }).index,
+      { viewId: 'view-2', conversation: 'chat-a', pane: 1 },
+    ).index;
+
+    // Closing one pane leaves the other view, and one conversation behind both.
+    const left = dropView(two, 'view-1');
+    expect(Object.keys(left.views)).toEqual(['view-2']);
+    expect(conversationById(left, 'chat-a')).not.toBeNull();
+    expect(dropView(left, 'view-1')).toBe(left);
+  });
+
+  it('goes with the conversation when it is deleted, every pane of it', () => {
+    const { index, workspaceId } = project();
+    const chat = addConversation(index, { conversationId: 'chat-a', workspaceId, now: NOW });
+    const kept = addConversation(chat.index, { conversationId: 'chat-b', workspaceId, now: NOW });
+    // Two views of the chat being deleted, and one of another one.
+    const left = noteView(kept.index, { viewId: 'view-1', conversation: 'chat-a', pane: 0 });
+    const right = noteView(left.index, { viewId: 'view-2', conversation: 'chat-a', pane: 1 });
+    const other = noteView(right.index, { viewId: 'view-b', conversation: 'chat-b', pane: 0 });
+
+    const after = dropViewsOf(other.index, 'chat-a');
+    expect(Object.keys(after.views)).toEqual(['view-b']);
+    // Nothing was there: an index with no view of that chat is left alone.
+    expect(dropViewsOf(after, 'chat-a')).toBe(after);
+  });
+});
+
 describe('a stored index', () => {
   it('survives a round trip', () => {
     const root = scratch();
@@ -312,6 +411,88 @@ describe('a stored index', () => {
     const read = parseIndex('{ half a');
     expect(read.problem).not.toBeNull();
     expect(read.index.workspaces).toEqual({});
+  });
+
+  /* The bump that added views. A profile written before them is not an error
+     and not a migration: it opens with the same rows and no views, which reads
+     as the ordinary single-pane window it was. */
+  it('reads a profile written before views existed as one with no views', () => {
+    const read = parseIndex(
+      JSON.stringify({
+        version: 1,
+        projects: { p1: { projectId: 'p1', root: '/here', aliases: [], workspaces: ['w1'] } },
+        byRoot: { '/here': 'p1' },
+        workspaces: {
+          w1: {
+            workspaceId: 'w1',
+            projectId: 'p1',
+            kind: 'local',
+            cwd: '/here',
+            displayPath: '/here',
+            managed: false,
+            state: 'ready',
+            createdAt: NOW,
+          },
+        },
+        conversations: {
+          'chat-a': {
+            conversationId: 'chat-a',
+            workspaceId: 'w1',
+            projectId: 'p1',
+            title: 'the hero',
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    );
+
+    expect(read.problem).toBeNull();
+    expect(read.index.version).toBe(INDEX_VERSION);
+    expect(read.index.views).toEqual({});
+    // And the rows it did have are all still there.
+    expect(conversationById(read.index, 'chat-a')?.title).toBe('the hero');
+    expect(viewInPane(read.index, 0)).toBeNull();
+  });
+
+  it('keeps a view through a round trip, and drops one onto a chat that is gone', () => {
+    const root = scratch();
+    const ensured = ensureProject(emptyIndex(), root);
+    const added = addWorkspace(ensured.index, {
+      projectId: ensured.project.projectId,
+      path: root,
+      kind: 'local',
+      managed: false,
+      now: NOW,
+    });
+    const chat = addConversation(added.index, {
+      conversationId: 'chat-a',
+      workspaceId: added.workspace.workspaceId,
+      now: NOW,
+    });
+    const held = noteView(chat.index, { viewId: 'view-1', conversation: 'chat-a', pane: 1 });
+
+    const read = parseIndex(serializeIndex(held.index));
+    expect(read.problem).toBeNull();
+    expect(viewInPane(read.index, 1)).toEqual({
+      viewId: 'view-1',
+      conversation: 'chat-a',
+      pane: 1,
+    });
+
+    // A view pointing at a conversation this index does not hold is dropped:
+    // there would be nothing to open, and a pane that fails on the press is
+    // worse than a window that comes back with one.
+    const orphan = parseIndex(
+      JSON.stringify({ ...held.index, views: { 'view-1': { conversation: 'nobody', pane: 0 } } }),
+    );
+    expect(orphan.problem).toBeNull();
+    expect(orphan.index.views).toEqual({});
+    // And a pane number that is not one is not a pane.
+    const odd = parseIndex(
+      JSON.stringify({ ...held.index, views: { 'view-1': { conversation: 'chat-a', pane: 7 } } }),
+    );
+    expect(odd.index.views).toEqual({});
   });
 
   it('loses only the rows a partial write damaged', () => {

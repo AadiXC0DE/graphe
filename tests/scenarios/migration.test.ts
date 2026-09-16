@@ -29,6 +29,7 @@ import {
 import {
   canonical,
   emptyIndex,
+  INDEX_VERSION,
   parseIndex,
   serializeIndex,
   type WorkspaceIndex,
@@ -338,7 +339,15 @@ describe('T56: a registry file that will not read', () => {
 
     // A profile from a newer app is not corruption: it reads as empty with the
     // reason, and `future` is what tells a caller to leave the file alone.
-    const future = parseIndex(JSON.stringify({ version: 2, projects: {}, byRoot: {}, workspaces: {}, conversations: {} }));
+    const future = parseIndex(
+      JSON.stringify({
+        version: INDEX_VERSION + 1,
+        projects: {},
+        byRoot: {},
+        workspaces: {},
+        conversations: {},
+      }),
+    );
     expect(future.problem).toContain('newer version');
     expect(future.future).toBe(true);
     expect(future.index).toEqual(emptyIndex());

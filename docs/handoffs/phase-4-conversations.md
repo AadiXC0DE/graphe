@@ -149,6 +149,30 @@ into it, for a conversation that is put away and not in flight. Evidence:
 the silence of every event that says what the run did, and the invariant that the
 four work events reach only live states.
 
+**View records, in the registry (4.2).** A view is a tab or pane showing one
+conversation, and it now has a durable record of its own rather than living only
+in window state: `WorkspaceIndex.views` is `Record<viewId, { conversation, pane }>`
+(`electron/services/workspace-registry.ts:112-132`), written by `noteView` (`:753`)
+and read by `viewInPane` (`:737`). The schema bump is **version 2 with a default of
+no views**: `FIRST_INDEX_VERSION = 1` (`:138`) means a version-1 profile is read
+forward rather than refused — it opens with the same rows and `views: {}`, which is
+the single-pane window it was — and anything above the current version is still a
+newer profile and still left alone. `noteView` refuses a view onto a conversation
+the index does not hold (a pane that fails on the press is worse than one that
+comes back empty), keeps **one view per pane** so showing another chat in a pane
+moves the view rather than adding a second, and is idempotent so re-opening the
+same chat mints nothing. `dropView` (`:784`) is a closed pane — the conversation is
+untouched — and `dropViewsOf` (`:798`) is a deleted chat, every pane of it. Evidence:
+`tests/workspace-registry.test.ts`, 35 tests (7 of them new here: the record, the
+move-not-double, idempotence, the refusal, the closed pane, the deleted chat, a v1
+profile read with no views, and a view dropped when it points at a chat that is
+gone or at a pane that is not 0 or 1).
+
+The window's half is **not wired yet, and needs no registry work**: `bridge` calls
+`noteView` with `{ viewId, conversation, pane }` when a pane opens and reads
+`viewInPane(index, 0 | 1)` at launch. The registry owns the durability; the window
+owns when a pane opens and which pane it is.
+
 **Session service states, driven and durable (4.2).** `src/domain/conversations.ts`
 carries the driver beside the vocabulary: `Sessions` holds the runtime state and
 the written facts for every conversation, refuses a move `TRANSITIONS` does not
@@ -223,7 +247,7 @@ all passing: `tests/draft-kept.test.ts` 15,
 
 | Item | Finding | What is missing |
 | --- | --- | --- |
-| Second view attaches to one runtime | 4.2 | **The UI half is done; this row's runtime half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), and one runtime behind two views is structural: `Sessions` is keyed by conversation (`src/domain/conversations.ts:221`) and a pane holds an address rather than a session, so opening the same chat twice asks for the same one. What is missing is a view record in the registry — `electron/services/workspace-registry.ts` still has no `views` at all, so a view id lives only in window state and is not durable across a restart |
+| Second view attaches to one runtime | 4.2 | **The registry half is done; the window's half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), one runtime behind two views is structural (`Sessions` is keyed by conversation, `src/domain/conversations.ts:261`, and a pane holds an address rather than a session, so opening the same chat twice asks for the same one), and the view record is now durable: `WorkspaceIndex.views` with `noteView`/`viewInPane`/`dropView`/`dropViewsOf` and schema version 2 (see Done). What is missing is the window calling `noteView` when a pane opens and reading `viewInPane` at launch — no registry work is left for it |
 | Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` (`electron/main.ts:3643`) writes both the current address and the durable one, which covers the first-write case, but rebuild, fork and eviction transitions are not all covered |
 | Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |
 | The interrupted sentence's lifetime | 4.2 | The note is said once per launch and cleared at launch rather than kept until somebody has looked at the conversation it belongs to |

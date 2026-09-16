@@ -99,8 +99,24 @@ export type ConversationRecord = {
   version: 1;
 };
 
+/**
+ * A view: a tab or pane showing one conversation, remembered across a restart.
+ *
+ * A conversation is not a view. The same chat shown in two panes is one
+ * conversation with two views, and closing one of them is not closing the chat
+ * — so the view needs a record of its own, and the record has to be durable or
+ * restarting the app silently rearranges somebody's window. `pane` is which of
+ * the two the view sits in, because a view that came back in the other one
+ * would be a different window.
+ */
+export type ViewRecord = {
+  viewId: string;
+  conversation: string;
+  pane: 0 | 1;
+};
+
 export type WorkspaceIndex = {
-  version: 1;
+  version: 2;
   projects: Readonly<Record<string, ProjectRecord>>;
   /** Canonical path to project id. Paths are how a person names a project;
    *  the id is what everything else is keyed by. */
@@ -109,12 +125,27 @@ export type WorkspaceIndex = {
   /** Conversation id to its record. The one line that answers "which files am
    *  I changing" without asking which tab is in front. */
   conversations: Readonly<Record<string, ConversationRecord>>;
+  /** View id to the view. What the window was showing, in which pane. Empty on
+   *  a profile written before views were recorded, which reads as an ordinary
+   *  single-pane window rather than as an error. */
+  views: Readonly<Record<string, ViewRecord>>;
 };
 
-export const INDEX_VERSION = 1;
+export const INDEX_VERSION = 2;
+
+/** The oldest index this build still reads. Version 1 had no views and filed a
+ *  conversation's workspace link as a bare string; both are upgraded on read. */
+export const FIRST_INDEX_VERSION = 1;
 
 export function emptyIndex(): WorkspaceIndex {
-  return { version: INDEX_VERSION, projects: {}, byRoot: {}, workspaces: {}, conversations: {} };
+  return {
+    version: INDEX_VERSION,
+    projects: {},
+    byRoot: {},
+    workspaces: {},
+    conversations: {},
+    views: {},
+  };
 }
 
 /** Follow symlinks when the path is there, and fall back to the plain absolute
@@ -173,7 +204,16 @@ export function parseIndex(text: string): IndexReading {
       future: true,
     };
   }
-  if (one === null || typeof one !== 'object' || one.version !== INDEX_VERSION) {
+  /* Every version this app has written, read forward. An older one is not an
+     error: it is a profile somebody has been using, and the only thing a bump
+     may cost it is the fields that did not exist when it was written. */
+  const written = one === null || typeof one !== 'object' ? null : one.version;
+  if (
+    typeof written !== 'number' ||
+    !Number.isInteger(written) ||
+    written < FIRST_INDEX_VERSION ||
+    written > INDEX_VERSION
+  ) {
     return { index: emptyIndex(), problem: `not a version ${String(INDEX_VERSION)} index`, future: false };
   }
   const asIndex = one as Partial<WorkspaceIndex>;
@@ -220,8 +260,13 @@ export function parseIndex(text: string): IndexReading {
     const record = readConversation(conversation, held, workspaces);
     if (record !== null) conversations[conversation] = record;
   }
+  const views: Record<string, ViewRecord> = {};
+  for (const [viewId, held] of Object.entries(asRecord(asIndex.views))) {
+    const view = readView(viewId, held, conversations);
+    if (view !== null) views[viewId] = view;
+  }
   return {
-    index: { version: INDEX_VERSION, projects, byRoot, workspaces, conversations },
+    index: { version: INDEX_VERSION, projects, byRoot, workspaces, conversations, views },
     problem: null,
     future: false,
   };
@@ -680,6 +725,87 @@ export function conversationsIn(index: WorkspaceIndex, workspaceId: string): rea
 }
 
 /* -------------------------------------------------------------------------- */
+/* Views                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** What a pane is showing, or null when nothing is written down for it.
+ *
+ * Found by the pane's own number rather than by view id, because that is the
+ * question a window asks at launch: "what was in the left one". `noteView`
+ * keeps one view per pane; a hand-edited file that holds two gets the first one
+ * written, since two views in one pane is not a window anybody can draw. */
+export function viewInPane(index: WorkspaceIndex, pane: 0 | 1): ViewRecord | null {
+  for (const view of Object.values(index.views)) {
+    if (view.pane === pane) return view;
+  }
+  return null;
+}
+
+/**
+ * Write down that a view is showing a conversation in a pane.
+ *
+ * The conversation has to be one this index knows: a view onto a chat nobody
+ * has written down is a row the window cannot open, so it is refused rather
+ * than stored and repaired later. Idempotent — a pane already showing this
+ * conversation is left exactly as it was, view id and all, so re-opening the
+ * same chat in the same pane does not mint a second view.
+ */
+export function noteView(
+  index: WorkspaceIndex,
+  wanted: { viewId: string; conversation: string; pane: 0 | 1 },
+): { index: WorkspaceIndex; view: ViewRecord | null; made: boolean } {
+  if (wanted.viewId === '' || wanted.conversation === '') return { index, view: null, made: false };
+  if (index.conversations[wanted.conversation] === undefined) return { index, view: null, made: false };
+  const known = index.views[wanted.viewId];
+  if (
+    known !== undefined &&
+    known.conversation === wanted.conversation &&
+    known.pane === wanted.pane
+  ) {
+    return { index, view: known, made: false };
+  }
+  // One view per pane: showing another chat in it moves the view rather than
+  // adding a second, which is what makes the pair of them the window.
+  const views: Record<string, ViewRecord> = {};
+  for (const [id, view] of Object.entries(index.views)) {
+    if (id !== wanted.viewId && view.pane !== wanted.pane) views[id] = view;
+  }
+  const view: ViewRecord = { ...wanted };
+  views[wanted.viewId] = view;
+  return { index: { ...index, views }, view, made: true };
+}
+
+/**
+ * Take a view away, because the pane was closed.
+ *
+ * The conversation is untouched: closing a view is not closing the chat, and
+ * what is left of a pair is the other one.
+ */
+export function dropView(index: WorkspaceIndex, viewId: string): WorkspaceIndex {
+  if (index.views[viewId] === undefined) return index;
+  const views = { ...index.views };
+  delete views[viewId];
+  return { ...index, views };
+}
+
+/**
+ * Forget every view onto a conversation that is gone.
+ *
+ * Deleting a chat leaves nothing to open, so a view of it is a pane that fails
+ * the moment somebody presses it. Called with the conversation, which is what
+ * the caller has: the views are found rather than named.
+ */
+export function dropViewsOf(index: WorkspaceIndex, conversationId: string): WorkspaceIndex {
+  const views: Record<string, ViewRecord> = {};
+  let dropped = false;
+  for (const [id, view] of Object.entries(index.views)) {
+    if (view.conversation === conversationId) dropped = true;
+    else views[id] = view;
+  }
+  return dropped ? { ...index, views } : index;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Reading a stored index defensively                                          */
 /* -------------------------------------------------------------------------- */
 
@@ -775,4 +901,21 @@ function readProject(value: unknown): ProjectRecord | null {
   const aliases = Array.isArray(one['aliases']) ? one['aliases'].filter(named) : [];
   const workspaces = Array.isArray(one['workspaces']) ? one['workspaces'].filter(named) : [];
   return { projectId, root, aliases, workspaces };
+}
+
+/** One stored view, or null when it is not one.
+ *
+ * A view onto a conversation that is not in this index is dropped rather than
+ * kept: there would be nothing to open at launch, and a pane that fails on the
+ * press is worse than a window that comes back single. */
+function readView(
+  viewId: string,
+  value: unknown,
+  conversations: Readonly<Record<string, ConversationRecord>>,
+): ViewRecord | null {
+  const one = asRecord(value);
+  const conversation = text(one['conversation']);
+  if (conversation === null || conversations[conversation] === undefined) return null;
+  if (one['pane'] !== 0 && one['pane'] !== 1) return null;
+  return { viewId, conversation, pane: one['pane'] };
 }

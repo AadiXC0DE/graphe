@@ -93,7 +93,8 @@ function contextFor(call: DrawContext, invalidate: () => void): unknown {
 /** Everything that is not a colour code, with the line breaks a terminal would
  *  have drawn kept. CSI covers the colours and cursor moves; OSC covers the
  *  window-title and hyperlink forms, which end with BEL or ST rather than a
- *  final byte. */
+ *  final byte. The control characters are the whole point of the pattern. */
+// eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 /** What a terminal add-on wrote, as text a window can draw. */

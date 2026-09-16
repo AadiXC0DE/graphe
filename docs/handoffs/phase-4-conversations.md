@@ -170,6 +170,18 @@ than answering the next press with it. `App.tsx` names each New press
 conversation while a second press, with a key of its own, still makes a second
 draft. `tests/new-press.test.ts`, 8 tests.
 
+**A draft in a chat nobody has sent in is that chat's own, and it is proven
+(4.5, S01).** `newAddress()` (`electron/main.ts:2027`) mints a `ConversationId`
+when the chat is made and `startConversationUnlocked` (`:5130`) takes the press's
+own name as the address, so a fresh chat has an id before Pi has written a word —
+and `Composer.tsx` keeps no draft at all when the conversation is null, rather
+than keeping one under the empty string. Evidence: `tests/draft-new-chat.test.ts`,
+3 tests — two New presses in one project mint two ids and two draft keys, a
+sentence typed in the first is not shown to the second and both come back in their
+own chat, a box with no conversation keeps nothing at all, and after the store is
+read back off disk a third New chat opens empty while both earlier drafts are
+still there.
+
 **Drafts, references and attachments belong to the conversation (4.5, S01).**
 `src/lib/projects.ts` gives `Parked` its own `attachments`, `references`, `draft`
 and `plans`; `conversationIn` reads the one in front off the desk's own fields and
@@ -193,7 +205,6 @@ all passing: `tests/draft-kept.test.ts` 15,
 | --- | --- | --- |
 | Three of the eleven session states | 4.2 | `waiting-input`, `compacting` and `archived` are in `SESSION_STATES` and in the transition table, and nothing drives them: the adapter does not report a waiting turn or a compaction as a state, and archiving a conversation sets a flag on its record rather than a runtime state |
 | Second view attaches to one runtime | 4.2 | **The UI half is done; this row's runtime half is not.** The second pane exists (`src/domain/views.ts`, `src/components/Panes.tsx`, the split press in `src/components/Tabs.tsx`; `tests/panes.test.ts` 23, `tests/panes-render.test.ts`, `tests/tab-strip-split.test.ts` 4), and one runtime behind two views is structural: `Sessions` is keyed by conversation (`src/domain/conversations.ts:221`) and a pane holds an address rather than a session, so opening the same chat twice asks for the same one. What is missing is a view record in the registry — `electron/services/workspace-registry.ts` still has no `views` at all, so a view id lives only in window state and is not durable across a restart |
-| A draft in a chat nobody has sent in | 4.5 / S01 | The unnamed conversation still has no identity of its own, so two things leak: `draftKey` (`src/components/Composer.tsx:161`) writes a null address as `''` and `App.tsx` hands the box `conversation: desk.address` only when it is not null, so two never-sent chats in one project share one key; and the name such a chat is known by is a process-local `new-N` (`addressOf`, `electron/main.ts:1993`), so a draft kept under it can resurface in a later launch's new chat. That last one is the identity 4.1 says a conversation must not have |
 | Temporary address mapping | 4.4 / S11 | `noteWhereItWorks` (`electron/main.ts:3643`) writes both the current address and the durable one, which covers the first-write case, but rebuild, fork and eviction transitions are not all covered |
 | Rapid New presses | S12 | One press twice is one conversation now, but two presses are two drafts by design and nothing coalesces them; a retry landing after the 60 s window also makes a second conversation, and nothing tells the window which of two identical drafts came from which press |
 | The interrupted sentence's lifetime | 4.2 | The note is said once per launch and cleared at launch rather than kept until somebody has looked at the conversation it belongs to |
@@ -207,4 +218,5 @@ switching and A's send completion does not clear B (`T26`,
 holding` block in `tests/draft-kept.test.ts`), and accepted attachments are now
 stored under the profile by content id rather than held as object URLs. A draft
 surviving a restart still rests on the box's own per-project-and-conversation key,
-with no Electron-level test, and the unnamed-conversation leaks above are open.
+with no Electron-level test; the never-sent chat has an id of its own and its
+draft is its own, proven in `tests/draft-new-chat.test.ts`.

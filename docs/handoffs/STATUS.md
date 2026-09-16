@@ -50,9 +50,10 @@ it.
 | --- | --- | --- | --- |
 | 1 | The person-only half of the visual matrix (8.5): what a screen reader *says aloud*, a monitor unplugged, the OS switches changed in System Settings, the native file dialog, overlay stacking over the native page view, a contrast judgement, the loading layout — the machine half is green (`npm run test:visual`: 49 rows, 290 checks, two findings fixed) | 8 | open, needs somebody at the window |
 | 2 | Dependency majors still on their old releases, each with its exact reason and reassessment date 2026-10-16 in `phase-2-upgrade.md`: vitest 5 (needs Node ≥22.12), jsdom 29, eslint 10 + react-hooks 7, TypeScript 7 (three compiler-API consumers unprobed), unpdf 1.8.1, mermaid 12, and electron/builder + `@types/node` (one packaging session on both arches) | 2 | open |
-| 3 | The rest of phase 6: a terminal opened inside a packaged app, custom renderer fidelity, the fixture gaps, and the narrow case where an install through Pi's wrapper route still cannot be cancelled | 6 | open |
+| 3 | The rest of phase 6: custom renderer fidelity, the fixture gaps, and the narrow case where an install through Pi's wrapper route still cannot be cancelled. The terminal inside a packaged app is done (2026-09-16) | 6 | open |
 | 4 | 6.2's full migration and 6.5's terminal compatibility mode: the child-runtime spike landed and proves the seam (Guard judging in the shell, extension UI crossing, kill semantics, transcript replay) with the four gaps named in `phase-6-runtime-spike.md`; wiring it in is the remaining work | 6 | open, spike done |
 | 5 | The rest of phase 9 and 10: a real model provider, and the plan's remaining measurement scenarios on other hardware | 9, 10 | open |
+| 6 | Phase 4 residue, item 6 of `docs/graphe-stabilization-remaining-2026-09-16.md`: the draft in a never-sent chat is done and proven (`tests/draft-new-chat.test.ts`, 3 tests); still open are three session states, view records, and the four small rows | 4 | open, first row done |
 
 
 ## Done

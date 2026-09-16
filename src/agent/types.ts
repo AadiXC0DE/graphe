@@ -267,7 +267,13 @@ export type AgentEvent =
    *
    *  `detail` is what the step has to say for itself: a note it wrote, or the
    *  first of what it printed. `ending` is how it did not finish, when it did
-   *  not. `kept` is everything a line has no room for, named. */
+   *  not. `kept` is everything a line has no room for, named. `ms` is how long
+   *  the step took, which Pi's own events do not carry: the host measures it,
+   *  live across the call and in a saved conversation from the two entries.
+   *
+   *  `drawn` is the step as the add-on drew it, headless, at eighty columns and
+   *  with the colour taken out — the lines a terminal add-on wrote for this
+   *  result rather than the generic line this window would otherwise show. */
   | {
       type: 'tool-end';
       id: string;
@@ -276,6 +282,8 @@ export type AgentEvent =
       shown?: ImageCard;
       ending?: StepEnding;
       kept?: readonly KeptThing[];
+      ms?: number;
+      drawn?: readonly string[];
     }
   /** A tool that is still running has something to say — the helper the `task`
    *  tool spawns, reporting as it reads. Replaces the step's own detail line. */

@@ -40,6 +40,7 @@ import {
   dialogsOver,
   uiContextOver,
   unsupportedTerminal,
+  whoCalled,
   type AskTheWindow,
   type ExtensionAnswer,
   type ExtensionAsk,
@@ -209,6 +210,9 @@ async function hosted(which: string, window: Window = theWindow()): Promise<Harn
       dialogs: dialogsOver(window.ask),
       terminal: unsupportedTerminal((what, method) => refused.push(`${what}:${method}`)),
       notify: (what: string) => said.push(what),
+      // The same binding production uses: the fixture's own file is the only
+      // account of who asked, since Pi's `notify` carries no origin.
+      who: () => whoCalled(new Error().stack, [{ where: at(which), name: which }]),
     }),
     mode: 'rpc',
     hasUI: true,
@@ -468,15 +472,37 @@ describe('a message an add-on sent', () => {
 });
 
 describe('notifications and status', () => {
-  it('says all three severities, with the severity in the words', async () => {
+  it('says all three severities, with the add-on that said them', async () => {
     const addon = await hosted('notices');
     await addon.hand('session_start', { type: 'session_start' });
 
+    // Pi hands the host words and a severity and no origin, so the name comes
+    // off the stack at the moment the add-on called. Without it a notice reads
+    // as something this app decided to say on its own account.
     expect(addon.said).toEqual([
-      'The button row is re-drawn.',
-      'warning: Two pages are missing a heading.',
-      'error: The build file would not parse.',
+      'notices, The button row is re-drawn.',
+      'notices, warning: Two pages are missing a heading.',
+      'notices, error: The build file would not parse.',
     ]);
+  });
+
+  it('names nothing rather than guessing when the call has left the add-on', () => {
+    const known = [{ where: '/tmp/addons/notices/index.mjs', name: 'notices' }];
+    const at = (line: string): string =>
+      `    at whatever (file:///tmp/addons/notices/index.mjs:6:12)\n${line}`;
+
+    expect(whoCalled(at('    at Timeout._onTimeout (node:timers:0:1)'), known)).toBe('notices');
+    // A timer that fired after the add-on handed its work on has no frame in
+    // it, and naming whichever add-on is loaded would be a lie to act on.
+    expect(whoCalled('    at Timeout._onTimeout (node:timers:0:1)', known)).toBeNull();
+    expect(whoCalled(undefined, known)).toBeNull();
+    expect(whoCalled('    at x (file:///a.mjs:1:1)', [])).toBeNull();
+  });
+
+  it('names the add-on from a module beside its entry file', () => {
+    const known = [{ where: '/tmp/addons/notices/index.mjs', name: 'notices' }];
+    const frame = `    at draw (file:///tmp/addons/notices/draw.ts:2:4)`;
+    expect(whoCalled(frame, known)).toBe('notices');
   });
 
   it('does not pretend to have a footer to put a status line in', async () => {
@@ -530,10 +556,10 @@ describe('the four questions', () => {
       { kind: 'editor', title: 'Rewrite the paragraph', prefill: 'The old one.' },
     ]);
     expect(addon.said).toEqual([
-      'chosen nav.css',
-      'overwriting it',
-      'typed the new heading',
-      'edited to A better paragraph.',
+      'asks, chosen nav.css',
+      'asks, overwriting it',
+      'asks, typed the new heading',
+      'asks, edited to A better paragraph.',
     ]);
   });
 
@@ -542,10 +568,10 @@ describe('the four questions', () => {
     await addon.commands[0]?.options.handler('', addon.ctx);
 
     expect(addon.said).toEqual([
-      'the file question went unanswered',
-      'left alone',
-      'nothing was typed',
-      'the editor was closed',
+      'asks, the file question went unanswered',
+      'asks, left alone',
+      'asks, nothing was typed',
+      'asks, the editor was closed',
     ]);
   });
 });
@@ -559,7 +585,7 @@ describe('a question an add-on wants to take back', () => {
     expect(window.asked).toHaveLength(1);
     window.with({ kind: 'input', value: 'prod-a' });
     await asking;
-    expect(addon.said).toEqual(['deploying to prod-a']);
+    expect(addon.said).toEqual(['abortable, deploying to prod-a']);
   });
 
   it('is not settled by the add-on’s own abort today — the signal is not carried', async () => {

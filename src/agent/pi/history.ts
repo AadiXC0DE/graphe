@@ -60,6 +60,14 @@ function momentAt(source: Fields): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/** When an entry was written, off an entry nobody has checked yet. Null means
+ *  the record says nothing about when, which is a missing duration rather than
+ *  a duration of zero. */
+function stampOf(entry: unknown): number | null {
+  const source = fieldsOf(entry);
+  return source === null ? null : momentAt(source);
+}
+
 /* -------------------------------------------------------------------------- */
 /* What a result or a message holds                                            */
 /* -------------------------------------------------------------------------- */
@@ -405,19 +413,38 @@ function askedIn(entry: unknown): StepEnding | null {
  *  result would leave `applyEvent` stuck in `running`, and the conversation
  *  would come back on a spinner that never stops. A call whose result never
  *  came is `interrupted` rather than failed — unless the message that asked for
- *  it says somebody stopped it, or that the model failed outright. */
+ *  it says somebody stopped it, or that the model failed outright.
+ *
+ *  How long each step took is the distance between the two entries that carry
+ *  it — the message that asked for the call and the message holding its result.
+ *  Pi writes a timestamp on every entry and a duration on none, so this is the
+ *  record's own account of it rather than a clock reading taken here. */
 export function eventsFromEntries(entries: readonly unknown[]): readonly AgentEvent[] {
   const events: AgentEvent[] = [];
-  const open = new Map<string, StepEnding>();
+  const open = new Map<string, { ending: StepEnding; at: number | null }>();
   for (const entry of entries) {
     const asked = askedIn(entry);
+    const when = stampOf(entry);
     for (const event of eventsOf(entry)) {
-      if (event.type === 'tool-start') open.set(event.call.id, asked ?? 'interrupted');
-      else if (event.type === 'tool-end') open.delete(event.id);
+      if (event.type === 'tool-start') {
+        open.set(event.call.id, { ending: asked ?? 'interrupted', at: when });
+        events.push(event);
+        continue;
+      }
+      if (event.type === 'tool-end') {
+        const began = open.get(event.id)?.at ?? null;
+        open.delete(event.id);
+        events.push(
+          began === null || when === null
+            ? event
+            : { ...event, ms: Math.max(0, when - began) },
+        );
+        continue;
+      }
       events.push(event);
     }
   }
-  for (const [id, ending] of open) events.push({ type: 'tool-end', id, ok: false, ending });
+  for (const [id, { ending }] of open) events.push({ type: 'tool-end', id, ok: false, ending });
   return events;
 }
 

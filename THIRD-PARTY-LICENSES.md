@@ -9,7 +9,7 @@ what we depend on and why lives in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.
 Graphe is not a fork of any of these projects. We depend on them as published packages and have
 not modified their source. Their names and marks belong to their respective owners.
 
-424 packages, generated 2026-09-16 from package-lock.json da82043c52e28e48.
+424 packages, generated 2026-09-16 from package-lock.json 9a5da129fb0fc5d4.
 
 ## Summary
 
@@ -134,7 +134,7 @@ not modified their source. Their names and marks belong to their respective owne
 | [@types/geojson](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/geojson) | 7946.0.16 | MIT |
 | [@types/hast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast) | 3.0.5 | MIT |
 | [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdast) | 4.0.4 | MIT |
-| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.2 | MIT |
+| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node) | 22.20.3 | MIT |
 | [@types/retry](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.12.0 | MIT |
 | [@types/trusted-types](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types) | 2.0.7 | MIT |
 | [@types/unist](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist) | 3.0.3 | MIT |
@@ -1678,7 +1678,7 @@ Licence: MIT
 [object Object]
 ```
 
-### @types/node 22.20.2
+### @types/node 22.20.3
 
 <https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node>
 

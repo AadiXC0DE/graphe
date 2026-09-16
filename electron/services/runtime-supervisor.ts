@@ -298,6 +298,10 @@ export async function startRuntime(options: StartOptions): Promise<ChildRuntime>
       ...process.env,
       [RUN_AS_NODE]: '1',
       GRAPHE_RUNTIME_NONCE: nonce,
+      // Where Pi keeps credentials, its model list and its sessions. Passed as
+      // the environment rather than a flag because it is the one setting every
+      // entry point of Pi's reads, including the ones no flag reaches.
+      PI_AGENT_DIR_ENV: options.agentDir,
       [PI_ENTRY_ENV]: options.piEntry ?? piEntry(),
       ...options.env,
     },

@@ -190,6 +190,51 @@ export type UiFace = {
   setToolsExpanded(expanded: boolean): void;
 };
 
+/** One add-on that could have made a call: the file that would run, and the
+ *  name a person knows it by. */
+export type KnownAddon = { where: string; name: string };
+
+/**
+ * Which add-on asked, read off the call stack, or null when nothing recognisable
+ * did.
+ *
+ * Pi's `notify` is the one UI method it does not wrap to add an origin — it wraps
+ * `select`, `confirm`, `input`, `editor` and `custom`, and passes this one
+ * through as it arrived (`runner.js:273`) — so an add-on's notice reaches the
+ * host indistinguishable from one the app said itself. The stack at the moment
+ * of the call is the only account of who asked.
+ *
+ * Null rather than a guess: a notice fired from a timer, or from a promise chain
+ * that has already left the add-on, has no frame in any of these files, and
+ * naming whichever add-on happens to be loaded would be a lie a person could act
+ * on.
+ */
+export function whoCalled(
+  stack: string | undefined,
+  known: readonly KnownAddon[],
+): string | null {
+  if (stack === undefined || known.length === 0) return null;
+  for (const line of stack.split('\n')) {
+    const found = /\(?(?:file:\/\/)?([^)\s]+?\.(?:mjs|cjs|js|ts))(?::\d+){0,2}\)?$/.exec(line.trim());
+    if (found === null) continue;
+    let where = found[1] ?? '';
+    try {
+      where = decodeURIComponent(where);
+    } catch {
+      // A percent sign that is not an escape is a path, not a URI. Left as is.
+    }
+    // The entry file, or any module in the same folder: an add-on's own files
+    // still are the add-on. The separator matters — a folder called `notice` is
+    // not the add-on called `notices`.
+    const inside = known.find((one) => {
+      const folder = one.where.slice(0, one.where.lastIndexOf('/') + 1);
+      return folder !== '' && where.startsWith(folder);
+    });
+    if (inside !== undefined) return inside.name;
+  }
+  return null;
+}
+
 /** What the face is built over: the two halves above, and where a notice goes. */
 export type UiFaceHost = {
   dialogs: DialogHost;
@@ -197,18 +242,29 @@ export type UiFaceHost = {
   /** Where a notice goes. The severity travels in the words: a warning nobody
    *  can tell from a note is not a warning. */
   notify: (what: string) => void;
+  /**
+   * What to call the add-on making this call, or null when nothing recognisable
+   * called. Reading the stack is the adapter's job — this file never reaches for
+   * Pi, and the paths belong to the session rather than to the face.
+   */
+  who?: () => string | null;
 };
 
 /** The bound face. Read it as the list of what an add-on may call here. */
 export function uiContextOver(host: UiFaceHost): UiFace {
-  const { dialogs, terminal, notify } = host;
+  const { dialogs, terminal, notify, who } = host;
   const face: UiFace = {
     select: dialogs.select,
     confirm: dialogs.confirm,
     input: dialogs.input,
     editor: dialogs.editor,
     notify: (message, type) => {
-      notify(type === 'error' || type === 'warning' ? `${type}: ${message}` : message);
+      const said = type === 'error' || type === 'warning' ? `${type}: ${message}` : message;
+      // The add-on first, as the one speaking, and the severity after it. A
+      // notice with no name on it reads as something this app decided to say,
+      // and the person has no way to tell whose word it is.
+      const from = who?.() ?? null;
+      notify(from === null || from === '' ? said : `${from}, ${said}`);
     },
     // A status line is a terminal's footer. There is no footer here, so it is
     // recorded and said once rather than invented into some corner of the

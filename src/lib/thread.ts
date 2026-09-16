@@ -56,9 +56,11 @@ export type Turn =
       /** When it began, epoch ms. A helper's card counts up from this; without
        *  it every helper on the board claimed to have started this second. */
       at?: number;
-      /** When it finished, epoch ms. The pair is how long a command took, which
-       *  is the one thing a list of commands cannot work out for itself. */
-      endedAt?: number;
+      /** How long it took, measured by the host and carried on the event. Not
+       *  worked out from `at` and the fold's own clock: a batch of events
+       *  folded in one go gives both readings the same instant, and a command
+       *  that took two minutes then claims to have taken none. */
+      ms?: number;
       label: string;
       detail?: string;
       /** What the step has said for itself while running — a helper's findings
@@ -74,6 +76,12 @@ export type Turn =
       /** A picture the step took. Drawn under the line, because a step that
        *  says it took a picture and shows nothing is a step nobody can check. */
       shown?: ImageCard;
+      /** The step as the add-on drew it, headless at eighty columns and with
+       *  the colour taken out. Drawn under the line in a `<pre>`, because a
+       *  tool that brought its own renderer wrote a layout this window's own
+       *  one line cannot reproduce, and showing the generic line instead is
+       *  showing somebody something their add-on did not write. */
+      drawn?: readonly string[];
     }
   | {
       kind: 'asked';
@@ -249,6 +257,8 @@ function closeInto(
   state: ActivityState,
   detail?: string,
   shown?: ImageCard,
+  ms?: number,
+  drawn?: readonly string[],
 ): boolean {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
@@ -262,7 +272,8 @@ function closeInto(
     turns[index] = {
       ...turn,
       state,
-      endedAt: Date.now(),
+      ...(ms === undefined ? {} : { ms }),
+      ...(drawn === undefined || drawn.length === 0 ? {} : { drawn }),
       ...(answered
         ? { label: ADVISOR_ANSWERED, progress: detail }
         : { detail: detail ?? turn.detail }),
@@ -426,7 +437,7 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
       const state: ActivityState =
         ending === 'interrupted' ? 'interrupted' : event.ok ? 'done' : 'failed';
       const detail = event.detail ?? (ending === 'stopped' ? STEP_WAS_STOPPED : undefined);
-      const closed = closeInto(turns, event.id, state, detail, event.shown);
+      const closed = closeInto(turns, event.id, state, detail, event.shown, event.ms, event.drawn);
       if (event.kept === undefined || event.kept.length === 0) return closed;
       return keptUnder(turns, event.id, event.kept) || closed;
     }

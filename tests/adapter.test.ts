@@ -656,6 +656,25 @@ describe('the stream the app sees', () => {
     expect(events.map((event) => event.type)).toEqual(['tool-start', 'tool-end']);
   });
 
+  /* Pi's own tool events carry no duration, so the number on the record is the
+     host's: the distance between letting the call through and hearing it back.
+     A step that never came back has none, and neither does one never announced,
+     which is why this cannot be a default of zero. */
+  it('says how long a step took, measured across the call', () => {
+    const events: AgentEvent[] = [];
+    const relay = relayInto(events);
+    const at = Date.now();
+    relay.started(call('bash', { command: 'npm test' }));
+    vi.useFakeTimers();
+    vi.setSystemTime(at + 4_000);
+    relay.fromPi({ type: 'tool_execution_end', toolCallId: 'call-1', isError: false });
+    vi.useRealTimers();
+
+    const [ended] = events.filter((event) => event.type === 'tool-end');
+    expect(ended).toMatchObject({ type: 'tool-end', id: 'call-1', ok: true });
+    expect((ended as Extract<AgentEvent, { type: 'tool-end' }>).ms).toBe(4_000);
+  });
+
   it('does not report a blocked call as a failed one as well', () => {
     const events: AgentEvent[] = [];
     const relay = relayInto(events);
@@ -802,7 +821,12 @@ describe('the adapter boundary', () => {
       result: { content: [{ type: 'text', text: 'export default App' }], details: { lines: 12 } },
     });
 
-    expect(events).toEqual([
+    // Pi's own `details: { lines: 12 }` is what must not survive this; the
+    // duration is the host's own measurement, so it is checked apart.
+    const ended = events[1] as Extract<AgentEvent, { type: 'tool-end' }>;
+    const { ms, ...closed } = ended;
+    expect(ms).toBeTypeOf('number');
+    expect([events[0], closed]).toEqual([
       { type: 'tool-start', call: { id: 'call-1', name: 'read', input: { path: 'src/App.tsx' } } },
       { type: 'tool-end', id: 'call-1', ok: true },
     ]);

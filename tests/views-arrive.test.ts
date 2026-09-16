@@ -150,13 +150,30 @@ describe('waiting for a view', () => {
   });
 
   it('draws a sheet-coloured rectangle where the sheet will be', () => {
-    expect(app).toContain('<div className="sheet sheet--arriving" aria-busy="true" />');
+    expect(app).toContain(
+      '<div className="sheet sheet--arriving" role="status" aria-busy="true" aria-label={holding} />',
+    );
     expect(sheet).toMatch(/\.sheet--arriving \{\s*background: var\(--bg\);/);
   });
 
   it('says nothing at all where a screen is closed, so nothing paints at launch', () => {
-    expect(app).toContain('fallback={settingsOpen ? ARRIVING : null}');
-    expect(app).toContain('fallback={clashPath === null ? null : ARRIVING}');
+    expect(app).toContain('fallback={settingsOpen ? arriving(settingsWords.title) : null}');
+    expect(app).toContain("fallback={clashPath === null ? null : arriving('Both sides changed the same lines')}");
+  });
+
+  /* The rectangle is what a screen reader lands on when a press has to wait, so
+     an unnamed one is announced as a blank region rather than as a sheet on its
+     way. Which sheet it names is a fact about the render, not the source — the
+     loading row in the visual matrix reads the label off the real window. */
+  it('names the sheet it is holding', () => {
+    expect(app).toMatch(
+      /function arriving\(holding: string\) \{[\s\S]*role="status"[\s\S]*aria-label=\{holding\}/,
+    );
+    const held = [...app.matchAll(/fallback=\{[^\n]*?arriving\(([^)]*)\)/g)].map((one) =>
+      String(one[1] ?? '').trim(),
+    );
+    expect(held.length).toBe(11);
+    expect(held.filter((one) => one === '' || one === "''")).toEqual([]);
   });
 });
 

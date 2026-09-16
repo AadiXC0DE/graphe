@@ -48,7 +48,7 @@ it.
 
 | # | Item | Phase | State |
 | --- | --- | --- | --- |
-| 1 | The person-only half of the visual matrix (8.5): what a screen reader *says aloud*, a monitor unplugged, the OS switches changed in System Settings, the native file dialog, overlay stacking over the native page view, a contrast judgement, the loading layout — the machine half is green (`npm run test:visual`: 49 rows, 290 checks, two findings fixed) | 8 | open, needs somebody at the window |
+| 1 | The person-only half of the visual matrix (8.5): what a screen reader *says aloud*, a monitor unplugged, the OS switches changed in System Settings, the native file dialog, overlay stacking over the native page view, a contrast judgement, the loading layout — the machine half runs the whole matrix (`npm run test:visual`: 49 rows, 287 checks, 2 failing in the last full run) | 8 | open, needs somebody at the window |
 | 2 | Dependency majors still on their old releases, each with its exact reason and reassessment date 2026-10-16 in `phase-2-upgrade.md`: vitest 5 (needs Node ≥22.12), jsdom 29, eslint 10 + react-hooks 7, TypeScript 7 (three compiler-API consumers unprobed), unpdf 1.8.1, mermaid 12, and electron/builder + `@types/node` (one packaging session on both arches) | 2 | open |
 | 3 | The rest of phase 6: custom renderer fidelity, the fixture gaps, and the narrow case where an install through Pi's wrapper route still cannot be cancelled. The terminal inside a packaged app is done (2026-09-16) | 6 | open |
 | 4 | 6.2's full migration and 6.5's terminal compatibility mode: the child-runtime spike landed and proves the seam (Guard judging in the shell, extension UI crossing, kill semantics, transcript replay) with the four gaps named in `phase-6-runtime-spike.md`; wiring it in is the remaining work | 6 | open, spike done |
@@ -78,14 +78,16 @@ relink, and U03's names are one set. The main-chunk gate is met **392.4 KB** aga
 `phase-10-scenarios.md`.
 
 Verified on this tree, 2026-09-16: `npm run typecheck`, `npm run lint` and
-`npm run copy:check` clean; `npm test` **365 files passed, 1 skipped (366),
-6607 tests passed, 13 skipped**; `npm run test:electron` green (13 tests);
+`npm run copy:check` clean; `npm test` **366 files passed, 1 skipped (367),
+6614 tests passed, 14 skipped**; `npm run test:electron` green (14 tests);
 `npm run test:measure` against the plan's budgets; `npm run budget:compare` reads
 the CI artifact back (449.7 → 392.4 KB); `node scripts/clean-machine.mjs` green on
 arm64 and x64-under-Rosetta;
 `npm run test:packaged` green on arm64; `npm run verify:package` green on both
-bundles; `npm run licenses:check` 471 of 471; `npm run test:visual` green (38 rows,
-225 checks) after nine findings were fixed; `npm run test:measure` measured against
-the plan's budgets; `node scripts/perf-report.mjs --check` **passes at 392.4 KB**,
+bundles; `npm run licenses:check` 424 of 424; `npm run test:visual` runs the whole
+matrix — **49 rows, 287 checks, 2 failing** in the last full run
+(`results/2026-09-16T06-59-42-221Z/`: the long project name coming back with its
+own conversation count, and `.topbar` scrolling sideways at 620×520 zoom 200);
+`node scripts/perf-report.mjs --check` **passes at 392.4 KB**,
 the CI step blocking on it and the assertion in
 `tests/operations/build-budget.test.ts` a plain `it`.

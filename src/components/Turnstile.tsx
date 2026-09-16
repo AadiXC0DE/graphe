@@ -26,9 +26,11 @@ import { type EstimateTurn, type Turn } from '../lib/thread';
 import { threadWords } from '../lib/threadview';
 import { wordsOf } from '../lib/transcript';
 import { continuationWords } from '../work/continuing';
+import { saysHowLong } from '../work/commands-ran';
 import ActivityLine from './ActivityLine';
 import AskFirst from './AskFirst';
 import ConfirmChange from './ConfirmChange';
+import { Drawn } from './Drawn';
 import ErrorCard from './ErrorCard';
 import Message from './Message';
 import PlanCard from './PlanCard';
@@ -132,8 +134,10 @@ export default memo(function Turnstile({
             state={turn.state}
             label={turn.label}
             detail={saying(turn)}
+            meta={turn.ms === undefined ? undefined : saysHowLong(turn.ms)}
             real={showMe ? turn.real : undefined}
           />
+          {turn.drawn === undefined ? null : <Drawn lines={turn.drawn} />}
           {turn.shown === undefined ? null : (
             <Shown picture={turn.shown} label={turn.label} />
           )}

@@ -165,6 +165,12 @@ export function asVerdict(verdict: ShellVerdict, nonce: Nonce): string {
   return asRecord({ ...verdict, nonce });
 }
 
+/** What the shell answers about one call the child is holding. Named here
+ *  rather than beside the supervisor because the Guard produces it: the child
+ *  session hands the Guard over as one of these, and the supervisor consumes
+ *  it. */
+export type VerdictForCall = (call: ToolCall) => Promise<{ block: false } | { block: true; reason: string }>;
+
 /* -------------------------------------------------------------------------- */
 /* Pi's own protocol, as much of it as this side reads                        */
 /* -------------------------------------------------------------------------- */

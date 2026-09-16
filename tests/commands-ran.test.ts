@@ -113,9 +113,7 @@ describe('the conversation as a list of commands', () => {
   });
 
   it('carries how it ended and how long it took', () => {
-    const [row] = commandsRan([
-      did({ real: 'bash · npm test', state: 'done', at: 1_000, endedAt: 3_400 }),
-    ]);
+    const [row] = commandsRan([did({ real: 'bash · npm test', state: 'done', at: 1_000, ms: 2_400 })]);
     expect(row?.ended).toBe('ok');
     expect(row?.ms).toBe(2_400);
     expect(saysEnded(row!)).toBe('ok · 2.4s');

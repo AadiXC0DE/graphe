@@ -41,6 +41,7 @@ import type {
 import {
   asOpenTo,
   asShelfAtLaunch,
+  settingsWords,
   type OpenTo,
   type ShelfAtLaunch,
 } from "./work/settingspages";
@@ -277,8 +278,15 @@ const VIEWS = [
 const WARM_FIRST = 4;
 
 /** A sheet-coloured rectangle where the sheet will be, rather than nothing, for
- *  the frame or two a chunk still on its way costs. */
-const ARRIVING = <div className="sheet sheet--arriving" aria-busy="true" />;
+ *  the frame or two a chunk still on its way costs. It carries the sheet's own
+ *  heading, so a screen reader says what is busy rather than announcing a blank;
+ *  the names are written out here because importing a sheet's module for its
+ *  heading would pull that sheet's chunk into the launch bundle. */
+function arriving(holding: string) {
+  return (
+    <div className="sheet sheet--arriving" role="status" aria-busy="true" aria-label={holding} />
+  );
+}
 
 /** The same rectangle, over the screen being left rather than under the one
  *  arriving. */
@@ -5362,7 +5370,7 @@ function Conversation() {
           it offers already lives here; the list is the same one the keys use. */}
       {/* The change in the folder, hunk by hunk. Keeping a subset takes the
           rest back out, which is a real edit — so it snapshots first. */}
-      <Suspense fallback={changesOpen ? ARRIVING : null}>
+      <Suspense fallback={changesOpen ? arriving('Changes') : null}>
         <Changes
           open={changesOpen}
           diff={changeText}
@@ -5431,7 +5439,7 @@ function Conversation() {
         />
       </Suspense>
 
-      <Suspense fallback={connectedOpen ? ARRIVING : null}>
+      <Suspense fallback={connectedOpen ? arriving('Other tools') : null}>
         <Connected
           open={connectedOpen}
           state={connected}
@@ -5457,7 +5465,7 @@ function Conversation() {
         />
       </Suspense>
 
-      <Suspense fallback={skillsOpen ? ARRIVING : null}>
+      <Suspense fallback={skillsOpen ? arriving('Skills') : null}>
         <Skills
           open={skillsOpen}
           skills={skills}
@@ -5477,7 +5485,7 @@ function Conversation() {
         />
       </Suspense>
 
-      <Suspense fallback={settingsOpen ? ARRIVING : null}>
+      <Suspense fallback={settingsOpen ? arriving(settingsWords.title) : null}>
         <Settings
           open={settingsOpen}
           onClose={() => {
@@ -5577,7 +5585,7 @@ function Conversation() {
         />
       </Suspense>
 
-      <Suspense fallback={usageOpen ? ARRIVING : null}>
+      <Suspense fallback={usageOpen ? arriving('What this cost') : null}>
         <Usage
           open={usageOpen}
           spent={desk?.spent ?? null}
@@ -5622,7 +5630,7 @@ function Conversation() {
       ) : null}
 
       {commandsHere && desk !== null ? (
-        <Suspense fallback={ARRIVING}>
+        <Suspense fallback={arriving('Commands')}>
           <Commands
             open
             onClose={() => setCommandsOpen(false)}
@@ -6276,7 +6284,7 @@ function Conversation() {
       ) : null}
 
       {graphOpen && desk !== null ? (
-        <Suspense fallback={ARRIVING}>
+        <Suspense fallback={arriving('History')}>
           <HistoryView
             versions={historyRepo === null ? desk.versions : (desk.repoVersions[historyRepo] ?? [])}
             git={
@@ -6302,7 +6310,7 @@ function Conversation() {
           so the row of tabs stays above it and switching back is one press on
           something you can see. */}
       {reviewsOpen && desk !== null ? (
-        <Suspense fallback={reviewsOpen ? ARRIVING : null}>
+        <Suspense fallback={reviewsOpen ? arriving('Pull requests') : null}>
           <ReviewsView
             repo={repo}
             busy={reviewsBusy}
@@ -6333,7 +6341,7 @@ function Conversation() {
       ) : null}
 
       {reviewQueueOpen && desk !== null ? (
-        <Suspense fallback={ARRIVING}>
+        <Suspense fallback={arriving(reviewWords.heading)}>
           <ReviewQueue
             entries={reviewQ}
             chosen={reviewAt}
@@ -6364,7 +6372,7 @@ function Conversation() {
         </Suspense>
       ) : null}
 
-      <Suspense fallback={clashPath === null ? null : ARRIVING}>
+      <Suspense fallback={clashPath === null ? null : arriving('Both sides changed the same lines')}>
         <Conflict
           open={clashPath !== null}
           paths={clashes.paths}
@@ -6408,7 +6416,7 @@ function Conversation() {
       ) : null}
 
       {helpersAt !== null ? (
-        <Suspense fallback={ARRIVING}>
+        <Suspense fallback={arriving('Helpers')}>
           <HelpersView helpers={helpers} at={helpersAt.at} onClose={() => setHelpersAt(null)} />
         </Suspense>
       ) : null}

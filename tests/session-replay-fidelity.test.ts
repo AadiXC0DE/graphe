@@ -341,9 +341,11 @@ describe('RF-03 how a step ended', () => {
       spoke(3, [callOn('call-2', 'read', { file: 'a.ts' })]),
       cameBack(4, 'call-2', [WORDS('export {}')]),
     ];
+    // One second apart in the record, so each step says it took one: the
+    // duration comes off the two entry timestamps rather than a clock here.
     expect(eventsFromEntries(entries).filter((one) => one.type === 'tool-end')).toEqual([
-      { type: 'tool-end', id: 'call-1', ok: true, detail: '3 passed' },
-      { type: 'tool-end', id: 'call-2', ok: true, detail: 'export {}' },
+      { type: 'tool-end', id: 'call-1', ok: true, detail: '3 passed', ms: 1_000 },
+      { type: 'tool-end', id: 'call-2', ok: true, detail: 'export {}', ms: 1_000 },
     ]);
   });
 });

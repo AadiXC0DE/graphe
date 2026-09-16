@@ -114,7 +114,11 @@ that are thrown away, and no global `pi`, npm or node. It passed — the window 
 up and was visible, the app reports it is packaged and on the disposable profile,
 the log records `started version=1.0.3 electron=43.4.1 node=24.18.1
 runtime=0.85.1`, the runtime it loaded is the pinned one, and Pi kept everything
-inside the profile. `npm run verify:package` passes on both bundles (x64 and
+inside the profile. Since 2026-09-16 it also opens a project, puts the Commands
+drawer on its terminal and types `printf graphe-pty-ok` at the xterm textarea,
+passing on the marker arriving twice in `.termpane .xterm-rows` — the pty's echo
+plus printf's output — which is node-pty's `spawn-helper` running out of
+`app.asar.unpacked`. `npm run verify:package` passes on both bundles (x64 and
 arm64), each carrying the pinned Pi, its 83-package tree, node-pty with an
 executable helper, and a verifying ad-hoc signature.
 
@@ -184,7 +188,7 @@ app, a second machine with nothing installed, and Windows or Linux packaging.
 | ~~The launch budget being stored and not read~~ | **DONE.** `npm run budget:compare` (`scripts/budget-compare.mjs`) pulls the newest two runs that carry the `launch-budget` artifact and prints the difference for the main chunk, the launch set and the on-demand set, in KB and percent, exiting non-zero when the main chunk is over the limit, grew past the tolerance (`--tolerance=1` percent by default) or something meant to be on demand is in the launch set. Run here against runs 34997397590 and 34984506978: main chunk **449.7 → 392.4 KB (−57.3 KB, −12.75%)**, launch set 639.0 → 581.7 KB, on demand 5221.6 → 5287.1 KB (+1.25%, under the gate), exit 0. With `gh` unavailable or no baseline it says which, and `--json=a.json,b.json` compares two files already downloaded |
 | 9.1's scenario matrix, RSS/CPU/latency measurements, and the p50/p95 method | Not run: it needs the packaged app and a disposable profile. `tests/operations/budgets.test.ts` holds the fixtures at the size 9.1 names |
 | 9.4's lifecycle checks: sleep/wake, network change, a renderer crash, the ordering of the quit sequence | Not run here. What is held: the write that happens in the seconds before the app goes (`tests/operations/app-quit.test.ts`, 4), force-quit recovery (T55 in `tests/scenarios/recovery.test.ts`), a helper whose app went away (`tests/surviving.test.ts`), and the process ledger (`tests/processes.test.ts`, `tests/running-limits.test.ts`). Sleep/wake, a renderer crash and a real quit sequence need a real window |
-| 9.6's clean machine, the parts a machine cannot reach | LaunchServices is asked and the app answers; what is left is a *person's* click in Finder, a notarized build and a Developer ID signature (there is neither — see the quarantine result above), a second machine with nothing installed, both advertised architectures on their own hardware, and the terminal and a real provider inside the packaged app |
+| 9.6's clean machine, the parts a machine cannot reach | LaunchServices is asked and the app answers; what is left is a *person's* click in Finder, a notarized build and a Developer ID signature (there is neither — see the quarantine result above), a second machine with nothing installed, both advertised architectures on their own hardware, and a real provider inside the packaged app |
 
 ## 9.5 operational checks
 

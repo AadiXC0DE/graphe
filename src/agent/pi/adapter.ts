@@ -59,6 +59,7 @@ import type { HowFar } from '../guard/policy';
 import { PLAN_WORDS, parseProposal, withheldWhilePlanning } from '../plan';
 import type { AgentEvent, ImageCard, SettledHow, ToolCall, Verdict } from '../types';
 import type { Timeline } from '../../history/timeline';
+import type { VerdictForCall } from './rpc-protocol';
 import { EventRelay } from './events';
 import { RepairCoordinator, repairPrompt } from './repair';
 import { checksAfterChange, saysFailed, sourceAmong } from './verify';
@@ -95,10 +96,12 @@ import {
 } from './extension-probe';
 
 import { recentOverruns, withHookBudget, type Overrun } from './hook-budget';
+import { drawnResult, type Renderable } from './tool-drawing';
 import {
   dialogsOver,
   uiContextOver,
   unsupportedTerminal,
+  whoCalled,
   type AskTheWindow,
   type ExtensionAnswer,
   type ExtensionAsk,
@@ -641,6 +644,266 @@ export function checksDesk(): ChecksDesk {
         checked = { checks: { ...checked.checks, ...whatWasChecked(verdicts) } };
       };
     },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The Guard, in the shell                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** What the Guard needs from the session it is judging for.
+ *
+ *  Everything else it reads off `CreateSessionOptions`, which is the point: the
+ *  process hosting the agent is free to change, and the facts behind a verdict
+ *  are not. A conversation in a child is judged by the same interceptor, over
+ *  the same policy module, as one hosted in this process. */
+export type GuardHooks = {
+  /** Where the relay says what it has to say. The session's own sink, because
+   *  in process it enriches the stream before the window sees any of it. */
+  deliver: (event: AgentEvent) => void;
+  /** Pi's own running total for the session, consulted at the settle so the
+   *  meter and the account cannot drift apart. */
+  billedSoFar?: () => number | null;
+  /** Told after a call finishes, with the original call when it is still known. */
+  onToolEnd?: (event: { id: string; ok: boolean; detail?: string; call?: ToolCall }) => void;
+  /** What an add-on's own renderer draws for a step, in a terminal. Read off
+   *  the raw event, so it stays off the translated stream. */
+  drawnFor?: (event: unknown) => readonly string[] | undefined;
+  /** A call that passed everything and is about to run. Not the same moment as
+   *  being asked for: a call the Guard refused never happens. */
+  workBegan?: (call: ToolCall) => void;
+};
+
+/** Everything shell-side the Guard is made of, so a caller can hand the whole
+ *  thing to whichever process is hosting the agent. */
+export type Guarded = {
+  relay: EventRelay;
+  /** One call, judged. `undefined` is "let it run". */
+  review: (call: ToolCall) => Promise<Interception>;
+  /** The same verdict, as much of it as a child across the boundary needs. */
+  judge: VerdictForCall;
+  asking: Asking;
+  confirmations: Confirmations;
+  paused: Paused;
+  facts: GuardFacts;
+  /** The project's own rules, read once when the sitting opened. */
+  house: Rules;
+  desk: ChecksDesk;
+  agentDir: string;
+  /** A looking-around pass is running. Read where the turn's own words are
+   *  collected, so a proposal can be read out of them. */
+  planning(): boolean;
+  /** A looking-around pass is starting, or has finished. */
+  setPlanning(on: boolean): void;
+  setPlanMode(on: boolean): void;
+  /**
+   * Whether a question may still stop this turn.
+   *
+   * `open` only at the very top. It closes the moment anything is changed, and
+   * closes for good once one set of questions has been asked — one stop per
+   * turn, at the start, or none. It also never opens where nobody is watching,
+   * because background work answers its own questions by design.
+   */
+  gate(): 'open' | 'started' | 'asked';
+  /**
+   * Put the questions the model asked in front of somebody, and hand back the
+   * sentence it is answered with.
+   *
+   * The gate is the whole safety property: one stop per turn, at the top, or
+   * none. A person told what is about to happen can walk away, and a person
+   * who walked away never comes back to find an hour spent waiting on a form.
+   */
+  askFirst(raw: unknown): Promise<string>;
+  /** A new request: the gate is open again. Only ever for a turn that is
+   *  starting, never for a message landing mid-run. */
+  reopenGate(): void;
+  /**
+   * Work has actually begun, so the asking is over.
+   *
+   * Only for a call that passed everything and is about to run. Reading around
+   * first is fine and does not count as starting; changing something is what a
+   * person cannot be left waiting behind. A call the Guard refused changed
+   * nothing at all, and used to spend the one question a turn is allowed — so
+   * the model was told it was too late to ask before anything had happened.
+   */
+  workBegan(call: ToolCall): void;
+  /**
+   * Every question nobody has answered, let go, and said out loud.
+   *
+   * Three callers need exactly this and they must not drift: the settle at the
+   * end of a turn, Stop, and closing a conversation. A card left waiting reads
+   * as "still working" for the rest of the sitting — an unanswered promise
+   * holds the agent loop, and a form still on screen looks answerable when
+   * nothing is behind it.
+   *
+   * Returns the ids, so a caller that has to name them for its own reasons —
+   * a child's exit — does not have to work them out twice.
+   */
+  releaseEverything(): { callIds: readonly string[]; askedIds: readonly string[] };
+  /** The files moved underneath us, so nothing checked before now describes
+   *  them. Called before a call runs, because afterwards is too late. */
+  forgetChecks(call: ToolCall): void;
+};
+
+/**
+ * Build the Guard for one conversation.
+ *
+ * The questions, the pause, the restore points and the project's own rules all
+ * live here rather than beside Pi, and every one of them needs facts only this
+ * process has: the restore point is a commit in the person's folder, the
+ * confirmation is a card in their window, the rules file is theirs. So this is
+ * built in the shell even when the agent is not.
+ */
+export async function guardFor(options: CreateSessionOptions, hooks: GuardHooks): Promise<Guarded> {
+  const agentDir = options.agentDir ?? (await defaultAgentDir());
+
+  const facts: GuardFacts = {
+    ...options.guard,
+    projectRoot: options.projectRoot,
+    agentFolder: agentDir,
+    // A board piece, a helper and a canvas run have nobody in front of them, so
+    // there is nobody to answer a question about working the computer.
+    unattended:
+      options.unattended === true ||
+      (options.sessionKind !== undefined && options.sessionKind !== 'conversation'),
+  };
+
+  /** True only for the length of a looking-around pass. */
+  let planning = false;
+  /** True while Plan is on. Unlike `planning`, it lasts until somebody leaves it. */
+  let planMode = options.planMode === true;
+  /** Whether a question may still stop this turn — see `Guarded.gate`. */
+  let gate: 'open' | 'started' | 'asked' = 'open';
+  /** How many cards have been put in front of somebody this sitting, so the
+   *  ids `answerAsked` matches against are the session's own. */
+  let askedSoFar = 0;
+
+  /* What this project has agreed, read once when the sitting opens. Re-read on
+     nothing: a rules file that changed mid-turn would judge the first half of a
+     turn by one set of rules and the second half by another. */
+  const house = readRules(
+    await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
+  );
+
+  /* What has actually been checked, filled in when the project's own checks
+     answer. Nothing else fills it: a rule naming a check nobody wrote holds,
+     which is the same deny-by-default the Guard uses. */
+  const desk = checksDesk();
+  const confirmations = new Confirmations();
+  const asking = new Asking();
+  const paused = new Paused();
+
+  const relay = new EventRelay(hooks.deliver, {
+    ...(hooks.billedSoFar === undefined ? {} : { billedSoFar: hooks.billedSoFar }),
+    ...(hooks.onToolEnd === undefined ? {} : { onToolEnd: hooks.onToolEnd }),
+    ...(hooks.drawnFor === undefined ? {} : { drawnFor: hooks.drawnFor }),
+  });
+
+  /** A change to the files makes every earlier check stale. */
+  const forgetChecks = (call: ToolCall): void => {
+    if (changesAnything(call, facts)) desk.forget();
+  };
+
+  const review = createGuardInterceptor({
+    facts,
+    relay,
+    confirmations,
+    paused,
+    timeline: options.timeline,
+    planning: () => planning,
+    planMode: () => planMode,
+    rules: () => house,
+    world: desk.world,
+    filesMayHaveMoved: forgetChecks,
+    workBegan: (call) => workBegan(call),
+  });
+
+  /**
+   * Work has actually begun, so the asking is over.
+   *
+   * Only for a call that passed everything and is about to run. Reading around
+   * first is fine and does not count as starting; changing something is what a
+   * person cannot be left waiting behind. A call the Guard refused changed
+   * nothing at all, and used to spend the one question a turn is allowed — so
+   * the model was told it was too late to ask before anything had happened.
+   */
+  function workBegan(call: ToolCall): void {
+    if (gate === 'open' && changesAnything(call, facts) && !worksAScreen(call)) {
+      gate = 'started';
+    }
+  }
+
+  /**
+   * Every question nobody has answered, let go.
+   *
+   * Shared by the settle at the end of a turn, by Stop and by closing a
+   * conversation, because a card outliving any one of them reads as "still
+   * working" for the rest of the sitting. `asking` resolves null — "decide for
+   * me" — and `confirmations` resolves no, which is the same answer the two
+   * have always given.
+   */
+  function releaseEverything(): { callIds: readonly string[]; askedIds: readonly string[] } {
+    return { callIds: confirmations.abandonAll(), askedIds: asking.abandonAll() };
+  }
+
+  const askFirst = async (raw: unknown): Promise<string> => {
+    if (gate === 'started') return cannotAsk.started;
+    if (gate === 'asked') return cannotAsk.already;
+    const questions = tidyQuestions(raw);
+    // Nothing survived: every "question" had one real answer, so there was
+    // never a decision for anybody to make.
+    if (questions.length === 0) return cannotAsk.nothingWorthAsking;
+
+    gate = 'asked';
+    const id = `ask-${String(++askedSoFar)}`;
+    hooks.deliver({ type: 'asked-first', id, questions });
+    const answers = await asking.ask(id);
+    // Nobody answered, or somebody said to get on with it. Both are the same
+    // instruction to the model, and neither is a reason to stop.
+    if (answers === null) {
+      hooks.deliver({ type: 'asking-withdrawn', ids: [id] });
+      return askWords.skipped;
+    }
+    return saysAnswers(questions, answers);
+  };
+
+  /** The verdict, in the two words a child can hear. Everything the Guard asks,
+   *  parks and withdraws stays on this side of the boundary; the child is told
+   *  only whether the call may run. */
+  const judge: VerdictForCall = async (call) => {
+    const decided = await review(call);
+    return decided === undefined ? { block: false } : { block: true, reason: decided.reason };
+  };
+
+  return {
+    relay,
+    review,
+    judge,
+    asking,
+    confirmations,
+    paused,
+    facts,
+    house,
+    desk,
+    agentDir,
+    planning: (): boolean => planning,
+    setPlanning: (on: boolean): void => {
+      planning = on;
+    },
+    setPlanMode: (on: boolean): void => {
+      planMode = on;
+    },
+    gate: (): 'open' | 'started' | 'asked' => gate,
+    spendAsk: (): void => {
+      gate = 'asked';
+    },
+    askFirst,
+    reopenGate: (): void => {
+      gate = 'open';
+    },
+    workBegan,
+    releaseEverything,
+    forgetChecks,
   };
 }
 
@@ -2126,22 +2389,6 @@ function thatPiLoaded(raw: unknown): PiPromptOptions {
 export async function createSession(options: CreateSessionOptions): Promise<GrapheSession> {
   const pi = await loadPi();
 
-  // Worked out before the Guard's facts rather than beside the runtime, because
-  // the agent has to be able to read the skills and extensions it runs on — a
-  // feature somebody installed failing silently is the bug this prevents.
-  const agentDir = options.agentDir ?? (await defaultAgentDir());
-
-  const facts: GuardFacts = {
-    ...options.guard,
-    projectRoot: options.projectRoot,
-    agentFolder: agentDir,
-    // A board piece, a helper and a canvas run have nobody in front of them, so
-    // there is nobody to answer a question about working the computer.
-    unattended:
-      options.unattended === true ||
-      (options.sessionKind !== undefined && options.sessionKind !== 'conversation'),
-  };
-
   /**
    * Pi's own running total for this session, in whole currency units.
    *
@@ -2176,10 +2423,11 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
     return raw === null ? null : raw - alreadyBilled;
   };
 
-  /** True only for the length of a looking-around pass. */
-  let planning = false;
-  /** True while Plan is on. Unlike `planning`, it lasts until somebody leaves it. */
-  let planMode = options.planMode === true;
+  /* Assigned by `guardFor` below, which is before anything can say a word:
+     `say` and `howItEnded` read the Guard's own lists, and those exist only
+     once it is built. */
+  let guard!: Guarded;
+
   /** Nothing reaches the window while this is on, except what was spent. Used
    *  for the one turn nobody asked for — see `settleUp`. */
   let unwatched = false;
@@ -2236,11 +2484,14 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
   const howItEnded = (): SettledHow => {
     if (endingHow !== null) return endingHow;
     if (addonBlockedRun) return 'blocked-by-addon';
-    if (confirmations.pending.length > 0 || asking.pending.length > 0) return 'asked-person';
+    if (guard.confirmations.pending.length > 0 || guard.asking.pending.length > 0) return 'asked-person';
     if (failedThisRun) return 'failed';
     return 'finished';
   };
-  const say = (raw: AgentEvent): void => {
+  /* A declaration rather than a const, because the Guard is handed this as its
+     relay before it exists: a session built on a child needs the same relay the
+     in-process one uses, or the two streams differ by whoever built them. */
+  function say(raw: AgentEvent): void {
     const event: AgentEvent =
       raw.type === 'settled' && raw.how === undefined
         ? { ...raw, how: howItEnded(), run: `r${String(runNumber)}` }
@@ -2265,7 +2516,7 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       if (event.type === 'spend') options.onEvent(event);
       return;
     }
-    if (planning && event.type === 'message-delta') proposed += event.text;
+    if (guard.planning() && event.type === 'message-delta') proposed += event.text;
     if (event.type === 'message-delta') tape += event.text;
     if (event.type === 'error' && waitsLeft > 0 && isTransientStreamError(event.message)) {
       heldBackTrouble = event.message;
@@ -2281,15 +2532,14 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       // can answer it after that, and the window reads a card still waiting as
       // "this is still working": the composer stayed a spinner and Stop had
       // nothing left to stop, for the rest of the sitting.
-      const stranded = confirmations.abandonAll();
-      if (stranded.length > 0) {
-        options.onEvent({ type: 'questions-withdrawn', callIds: stranded });
+      const let = guard.releaseEverything();
+      if (let.callIds.length > 0) {
+        options.onEvent({ type: 'questions-withdrawn', callIds: let.callIds });
       }
       // The same for a card asked before the work: the turn is over, so
       // nothing it says can reach anything. Left open it would be a form that
       // reads as "still working" for the rest of the sitting.
-      const dropped = asking.abandonAll();
-      if (dropped.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: dropped });
+      if (let.askedIds.length > 0) options.onEvent({ type: 'asking-withdrawn', ids: let.askedIds });
       sayWhatTheRulesHeld();
       // Only at the end of the job, not at the end of every round. With a loop
       // carrying a list on, "always do this at the end" used to run once per
@@ -2302,7 +2552,31 @@ export async function createSession(options: CreateSessionOptions): Promise<Grap
       addonBlockedRun = false;
       blockedStreak = { reason: '', count: 0 };
     }
-  };
+  }
+
+  /* The session Pi hands back, once it exists. The terminal renderer reads the
+     tool definitions off it, and that can only happen after Pi has built it, so
+     the reader is written against a holder rather than a value. */
+  let live: { getToolDefinition(name: string): unknown } | null = null;
+
+  /* The Guard, built here and owned here. Everything it needs is shell-side
+     state: the restore point is a commit in this folder, the question is a card
+     in this window, the rules are this project's. A conversation hosted in a
+     child therefore still gets judged by it — `judge` is the whole of what
+     crosses, and a child never holds a fact that could change a verdict. */
+  guard = await guardFor(options, {
+    deliver: say,
+    billedSoFar,
+    onToolEnd: ({ call, ok }) => {
+      // Post-action rules describe something that actually happened. A failed
+      // tool result changed nothing and must not start a verification cycle.
+      if (ok && call !== undefined) handleAfterCall(call);
+    },
+    drawnFor,
+    workBegan,
+  });
+  const { relay, review, asking, confirmations, paused, facts, house, desk } = guard;
+  const agentDir = guard.agentDir;
 
   /**
    * An add-on refusing every step.
@@ -2350,12 +2624,6 @@ const VERIFY_PATIENCE = 90_000;
 
 const MOST_AFTER_SAYINGS = 3;
 
-  /* What this project has agreed, read once when the sitting opens. Re-read on
-     nothing: a rules file that changed mid-turn would judge the first half of a
-     turn by one set of rules and the second half by another. */
-  const house = readRules(
-    await readFile(rulesFile(options.projectRoot), 'utf8').catch(() => null),
-  );
   /* What this project always does, read at the same moment and for the same
      reason. A file that will not read runs none of them and says so once. */
   const always = alwaysFrom(
@@ -2426,10 +2694,6 @@ const MOST_AFTER_SAYINGS = 3;
     options.onEvent({ type: 'message-delta', text: `\n\n${diagnostics.join('\n')}` });
     options.onEvent({ type: 'message-end' });
   };
-  /** What has actually been checked, filled in when the project's own checks
-   *  answer. Nothing else fills it: a rule naming a check nobody wrote holds,
-   *  which is the same deny-by-default the Guard uses. */
-  const desk = checksDesk();
   /** Host-owned repair budget. The model cannot raise these limits: at most two
    *  after-call verification nudges for one check/file, two in one turn, and
    *  six in the whole sitting. */
@@ -2438,26 +2702,40 @@ const MOST_AFTER_SAYINGS = 3;
   let repairIsListening = (): boolean => false;
   let steerRepair: ((text: string) => Promise<void>) | null = null;
 
-  /** A change to the files makes every earlier check stale. Called on the way
-   *  in, before the call runs, because afterwards is a moment too late. */
-  const forgetChecks = (call: ToolCall): void => {
-    if (changesAnything(call, facts)) desk.forget();
-  };
-
   /**
-   * Work has actually begun, so the asking is over.
+   * What an add-on's own renderer draws for a step, in a terminal.
    *
-   * Only for a call that passed everything and is about to run. Reading around
-   * first is fine and does not count as starting; changing something is what a
-   * person cannot be left waiting behind. A call the Guard refused changed
-   * nothing at all, and used to spend the one question a turn is allowed —
-   * so the model was told it was too late to ask before anything had happened.
+   * Read off the raw event rather than the translated one because the renderer
+   * wants the result object Pi sent, and the translation is deliberately
+   * structural. Nothing drawn for a tool with no renderer, which is almost
+   * every tool.
    */
-  const workBegan = (call: ToolCall): void => {
-    if (asksLeft === 'open' && changesAnything(call, facts) && !worksAScreen(call)) {
-      asksLeft = 'started';
-    }
-  };
+  function drawnFor(event: unknown): readonly string[] | undefined {
+    if (live === null) return undefined;
+    if (event === null || typeof event !== 'object') return undefined;
+    const held = event as Record<string, unknown>;
+    const name = typeof held['toolName'] === 'string' ? held['toolName'] : null;
+    if (name === null) return undefined;
+    const definition = live.getToolDefinition(name) as Renderable | undefined;
+    if (definition === undefined) return undefined;
+    const id = typeof held['toolCallId'] === 'string' ? held['toolCallId'] : '';
+    const result = held['result'];
+    const inner =
+      result !== null && typeof result === 'object' ? (result as Record<string, unknown>) : {};
+    return (
+      drawnResult(
+        definition,
+        {
+          args: relay.callFor(id)?.input,
+          toolCallId: id,
+          isError: held['isError'] === true,
+          expanded: false,
+          isPartial: false,
+        },
+        { content: inner['content'], details: inner['details'] },
+      ) ?? undefined
+    );
+  }
 
   /**
    * What the project's own rules make of the turn that just ended.
@@ -2583,36 +2861,6 @@ const MOST_AFTER_SAYINGS = 3;
     }
   }
 
-  const relay = new EventRelay(say, {
-    billedSoFar,
-    onToolEnd: ({ call, ok }) => {
-      // Post-action rules describe something that actually happened. A failed
-      // tool result changed nothing and must not start a verification cycle.
-      if (ok && call !== undefined) handleAfterCall(call);
-    },
-  });
-  const confirmations = new Confirmations();
-  /** The one set of questions a turn may stop for, and the count that names
-   *  them. Ids are per session, so a card answered in one conversation can
-   *  never resolve a question in another. */
-  const asking = new Asking();
-  let askedSoFar = 0;
-
-  const paused = new Paused();
-
-  const review = createGuardInterceptor({
-    facts,
-    relay,
-    confirmations,
-    paused,
-    timeline: options.timeline,
-    planning: () => planning,
-    planMode: () => planMode,
-    rules: () => house,
-    world: desk.world,
-    filesMayHaveMoved: forgetChecks,
-    workBegan,
-  });
 
   const runtime = await runtimeFor(agentDir, options.authPath);
   /** Filled while the loader runs, which is before anything below can read it. */
@@ -3059,41 +3307,6 @@ const MOST_AFTER_SAYINGS = 3;
   };
   const getHelperThinking = (): HelperPace | undefined => currentThinking;
 
-  /**
-   * Whether a question may still stop this turn.
-   *
-   * `open` only at the very top. It closes the moment anything is changed, and
-   * it closes for good once one set of questions has been asked — one stop per
-   * turn, at the start, or none. This is the whole safety property: a person
-   * told what is about to happen can walk away, and a person who walked away
-   * never comes back to find an hour was spent waiting on a form.
-   *
-   * It also never opens where nobody is watching. Background work answers its
-   * own questions by design, so the tool is not built for it at all.
-   */
-  let asksLeft: 'open' | 'started' | 'asked' = 'open';
-
-  const askFirst = async (raw: unknown): Promise<string> => {
-    if (asksLeft === 'started') return cannotAsk.started;
-    if (asksLeft === 'asked') return cannotAsk.already;
-    const questions = tidyQuestions(raw);
-    // Nothing survived: every "question" had one real answer, so there was
-    // never a decision for anybody to make.
-    if (questions.length === 0) return cannotAsk.nothingWorthAsking;
-
-    asksLeft = 'asked';
-    const id = `ask-${String(++askedSoFar)}`;
-    say({ type: 'asked-first', id, questions });
-    const answers = await asking.ask(id);
-    // Nobody answered, or somebody said to get on with it. Both are the same
-    // instruction to the model, and neither is a reason to stop.
-    if (answers === null) {
-      say({ type: 'asking-withdrawn', ids: [id] });
-      return askWords.skipped;
-    }
-    return saysAnswers(questions, answers);
-  };
-
   const benchmarkToolFloor = options.benchmarkToolFloor === true;
   const customTools = benchmarkToolFloor
     ? []
@@ -3106,7 +3319,7 @@ const MOST_AFTER_SAYINGS = 3;
         options.putOnBoard,
         desk.noting,
         // Nobody to answer means no tool, rather than a tool that always says so.
-        options.unattended === true ? null : askFirst,
+        options.unattended === true ? null : guard.askFirst,
         options.stepMoved,
         options.cancelBuild,
         options.makeChecklist,
@@ -3374,6 +3587,7 @@ const MOST_AFTER_SAYINGS = 3;
     // all we can do is say so without a stack trace.
     throw new AdapterError('I am not set up to work yet.', { cause });
   }
+  live = session;
 
   /* Pi's extension UI, bound before the first prompt.
    *
@@ -3395,6 +3609,7 @@ const MOST_AFTER_SAYINGS = 3;
     options.ask ?? (async (ask: ExtensionAsk) => cancelledLike(ask)),
   );
   const terminal = unsupportedTerminal(sayUnsupported);
+  const addonsKnown = discovered.map((one) => ({ where: one.where, name: whoAt(one.where) }));
   try {
     await session.bindExtensions({
       uiContext: uiContextOver({
@@ -3405,6 +3620,7 @@ const MOST_AFTER_SAYINGS = 3;
           // warning, and the add-on's own words are what is said.
           options.onEvent({ type: 'notice', what });
         },
+        who: () => whoCalled(new Error().stack, addonsKnown),
       }),
       mode: 'rpc',
       // An add-on that falls over is reported rather than swallowed: the
@@ -3588,7 +3804,7 @@ const MOST_AFTER_SAYINGS = 3;
         // Again before every run: an add-on that registered a handler inside
         // `session_start` registered it after the first sweep went past.
         budgetHooks();
-        asksLeft = 'open';
+        guard.reopenGate();
         runNumber += 1;
         // Said rather than inferred. The window used to work out that it was
         // busy from the shape of the turns, so a step left running by a stop
@@ -3607,7 +3823,7 @@ const MOST_AFTER_SAYINGS = 3;
       const asCommand = isACommandHere(text);
       const looking = options?.lookFirst === true && !asCommand;
       if (looking) {
-        planning = true;
+        guard.setPlanning(true);
         proposed = '';
         say({ type: 'planning' });
       }
@@ -3752,7 +3968,7 @@ const MOST_AFTER_SAYINGS = 3;
         throw new AdapterError(message, { cause });
       } finally {
         if (looking) {
-          planning = false;
+          guard.setPlanning(false);
           say({ type: 'planned', ...parseProposal(proposed) });
         }
         // After the reply, never during it: `compact()` aborts whatever is
@@ -3843,10 +4059,9 @@ const MOST_AFTER_SAYINGS = 3;
       // A held turn is let go first: stopping a turn that is waiting must end
       // it, not leave it waiting for a resume nobody is going to press.
       paused.hold(false);
-      const withdrawn = confirmations.abandonAll();
-      if (withdrawn.length > 0) say({ type: 'questions-withdrawn', callIds: withdrawn });
-      const letGo = asking.abandonAll();
-      if (letGo.length > 0) say({ type: 'asking-withdrawn', ids: letGo });
+      const let = guard.releaseEverything();
+      if (let.callIds.length > 0) say({ type: 'questions-withdrawn', callIds: let.callIds });
+      if (let.askedIds.length > 0) say({ type: 'asking-withdrawn', ids: let.askedIds });
       await session.abort();
       // The run is over whatever pi did with the abort. Saying so is what puts
       // the composer back to Send; waiting for an event that may not come is
@@ -3915,8 +4130,7 @@ const MOST_AFTER_SAYINGS = 3;
       // the last one to close.
       advisorFile.release(advisorWho);
       paused.hold(false);
-      confirmations.abandonAll();
-      asking.abandonAll();
+      guard.releaseEverything();
       unsubscribe();
       session.dispose();
       void shell.close();
@@ -3994,7 +4208,7 @@ const MOST_AFTER_SAYINGS = 3;
     },
 
     setPlanMode(on: boolean): void {
-      planMode = on;
+      guard.setPlanMode(on);
     },
 
     get howFar(): HowFar {

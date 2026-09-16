@@ -18,9 +18,11 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 /** One thing the model does when it is asked for a turn: say something, in
- *  pieces, or call a tool. */
+ *  pieces, or call a tool. A reply marked `byHand` waits for `next()` between
+ *  its pieces instead of the clock, so a test can hold it mid-arrival for as
+ *  long as it needs on any machine. */
 export type Step =
-  | { says: readonly string[] }
+  | { says: readonly string[]; byHand?: boolean }
   | { calls: { name: string; arguments: Record<string, unknown> } };
 
 export type ScriptedModel = {
@@ -28,6 +30,10 @@ export type ScriptedModel = {
   url: string;
   /** What the model answers with, one step per turn it is asked for. */
   replies(steps: readonly Step[]): void;
+  /** Release the next piece of a `byHand` reply. Doing nothing when no reply
+   *  is held back is deliberate: a test that releases one piece too many
+   *  should fail on what it sees, not on a thrown error. */
+  next(): void;
   /** Everything the app sent, oldest first, for a test that needs to know what
    *  the model was actually told. */
   asked: readonly unknown[];
@@ -75,6 +81,12 @@ export async function scriptedModel(): Promise<ScriptedModel> {
   const asked: unknown[] = [];
   let turns = 0;
   let cut = false;
+  /** Set by `stop()`, so a `byHand` reply still waiting at a gate lets the
+   *  turn finish instead of arming the next one. */
+  let stopped = false;
+  /** The gate a `byHand` reply is currently held at, or null when the clock is
+   *  pacing it. */
+  let release: (() => void) | null = null;
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -123,10 +135,19 @@ export async function scriptedModel(): Promise<ScriptedModel> {
         send({ type: 'done', reason: 'toolUse', usage: USAGE });
       } else {
         send({ type: 'text_start', contentIndex: 0 });
-        for (const piece of step.says) {
+        for (const [at, piece] of step.says.entries()) {
           send({ type: 'text_delta', contentIndex: 0, delta: piece });
           const between = Promise.withResolvers<void>();
-          setTimeout(between.resolve, BETWEEN_PIECES);
+          if (step.byHand === true) {
+            // Held back between pieces, never after the last: a gate nobody
+            // releases would hang the turn it exists to pace. Armed after the
+            // piece is sent, so the first `next()` releases the one after it
+            // rather than the piece already on screen.
+            if (at === step.says.length - 1 || stopped) break;
+            release = between.resolve;
+          } else {
+            setTimeout(between.resolve, BETWEEN_PIECES);
+          }
           await between.promise;
         }
         send({ type: 'text_end', contentIndex: 0, content: step.says.join('') });
@@ -150,9 +171,18 @@ export async function scriptedModel(): Promise<ScriptedModel> {
     replies: (next) => {
       steps.splice(0, steps.length, ...next);
     },
+    next: () => {
+      release?.();
+      release = null;
+    },
     asked,
     cutOff: () => cut,
     stop: () => {
+      // A reply still held at a gate keeps its connection open, so releasing
+      // it and refusing the next are what let the server close at all.
+      stopped = true;
+      release?.();
+      release = null;
       const closed = Promise.withResolvers<void>();
       server.close(() => closed.resolve());
       return closed.promise;

@@ -512,7 +512,7 @@ suite('the app in a real window, on a profile nothing else uses', () => {
     const files = await serve(BUILT_RENDERER);
     const { app, window } = await launchApp(profile, files.url, model.url);
     const stop = dispose(app, profile, project);
-    model.replies([{ says: ['one ', 'two ', 'three'] }]);
+    model.replies([{ says: ['one ', 'two ', 'three'], byHand: true }]);
 
     const thrown: string[] = [];
     window.on('pageerror', (error) => thrown.push(String(error)));
@@ -525,18 +525,24 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await window.locator('.composer__input').fill('say three words');
       await window.locator('.composer__send').first().click();
 
-      /* Caught mid-arrival. The first piece is on screen on its own while the
-         reply is still being written, and the caret that marks a growing reply
-         is there with it: a reply that appeared whole would never be seen like
-         this, and the assertion after it is what "in order" means. */
-      const arriving = window.locator('.message--graphe .message__body').last();
-      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).not.toBe(''), {
+      /* Caught mid-arrival. Piece one is held on screen for as long as the
+         assertions need, because the reply only moves on when the test says
+         so: a reply that appeared whole would never be seen like this, and
+         what follows is what "in order" means. Read from the paragraph: once
+         the reply settles, the body also carries the fold control's words. */
+      const arriving = window.locator('.message--graphe .message__body .md__p').last();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).toBe('one'), {
         timeout: 60_000,
         interval: 25,
       });
-      expect((await arriving.innerText()).trim()).toBe('one');
       expect(await window.locator('.message__caret').count()).toBe(1);
 
+      model.next();
+      await vi.waitFor(async () => expect((await arriving.innerText()).trim()).toBe('one two'), {
+        timeout: 60_000,
+      });
+
+      model.next();
       // And it finishes as the pieces, in the order they were sent, with the
       // caret that marks a growing reply gone once the reply has stopped
       // growing. The last piece and the end of the turn are two arrivals, so

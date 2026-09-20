@@ -39,6 +39,14 @@ describe('PR #51 data durability wiring', () => {
     expect(source).not.toContain('resolve(where.project)');
   });
 
+  it('refreshes the resumed front session before handing a reloaded renderer its desk', () => {
+    const source = block('async function openTheProject(path: string)', '/** Folders a page never lives in');
+    expect(source).toContain('await front?.held.refreshHistory?.();');
+    expect(source.indexOf('await front?.held.refreshHistory?.();')).toBeLessThan(
+      source.indexOf('history: front?.held.history ?? []'),
+    );
+  });
+
   it('records a new conversation transcript before adopting its address', () => {
     const source = block('async function noteWhereItWorks(', '/**\n * A checkout that exists');
     expect(source).toContain('session: GrapheSession');

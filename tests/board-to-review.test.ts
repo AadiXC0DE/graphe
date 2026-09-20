@@ -67,6 +67,7 @@ describe('what a branchless copy cannot do', () => {
   });
 
   it('carries its files rather than merging a branch that is not there', () => {
-    expect(main).toContain("if (taking.length === entry.files.length && checkout.branch !== '') {");
+    expect(main).toContain("taking.length === entry.files.length && checkout.branch !== '' && sourceChanges.length === 0");
+    expect(main).toContain('if (canMergeBranch)');
   });
 });

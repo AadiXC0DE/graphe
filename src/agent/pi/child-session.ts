@@ -30,8 +30,7 @@
  * rather than reporting an empty queue it has not read yet.
  */
 
-import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, dirname, relative, sep } from 'node:path';
 
 import { AdapterError, createSession, guardFor, isPackagedApp, readTranscript } from './adapter';
 import type {
@@ -49,7 +48,7 @@ import type { HowFar } from '../guard/policy';
 import type { RunningPiece } from '../running';
 import type { Overrun } from './hook-budget';
 import { idFor } from '../../projects/carried';
-import { extensionPathsIn } from './extension-probe';
+import { contentFingerprint, extensionPathsIn, extensionsIn } from './extension-probe';
 import type { AddonCommand } from './commands';
 import type { ExtensionReport } from './extension-states';
 import type { SessionKind } from './extension-policy';
@@ -112,12 +111,11 @@ function childRuntimeAllowed(): boolean {
  * another conversation's, and a third process per helper is not what 6.2 is
  * for.
  *
- * A child that will not start is not a conversation that will not open. The
- * in-process path is right here and is what every other copy of the app is
- * using, so a failed start says so on the stream and the turn runs here
- * instead. That is temporary and on purpose: 6.2's own rule is that the child
- * does not become the default until it has the same evidence, and a fallback is
- * what keeps the rule honest while it does not.
+ * A requested child that will not start is refused. Falling back here would
+ * run project extensions in Electron's main process after the caller had
+ * explicitly selected the isolated runtime; apart from breaking the trust
+ * boundary, a wedged extension would freeze the app. The caller can choose
+ * the in-process runtime explicitly (or use the normal default).
  */
 export async function openSession(options: CreateSessionOptions): Promise<GrapheSession> {
   if (runtimeChoice(options.runtime) === 'in-process' || shallow(options.sessionKind)) {
@@ -138,13 +136,15 @@ export async function openSession(options: CreateSessionOptions): Promise<Graphe
   try {
     return await childSession(options, guard);
   } catch (cause) {
-    // Nothing about the Guard was touched, so it is handed on rather than
-    // rebuilt: a second one would read this project's rules file twice.
+    const reason = cause instanceof Error ? cause.message : String(cause);
     options.onEvent({
-      type: 'notice',
-      what: `A conversation could not be given a process of its own, so it is running in this one as usual: ${cause instanceof Error ? cause.message : String(cause)}`,
+      type: 'error',
+      message: `The separate-process runtime could not start, so I did not run this conversation in the main process: ${reason}`,
     });
-    return createSession(options);
+    throw new AdapterError(
+      `The separate-process runtime could not start, so I did not run this conversation in the main process: ${reason}`,
+      { cause },
+    );
   }
 }
 
@@ -224,12 +224,48 @@ async function trustedExtensions(
       kept.push(where);
       continue;
     }
-    const source = await readFile(where, 'utf8').catch(() => null);
+    const source = await contentFingerprint(where);
     if (source === null) continue;
-    const name = basename(where).replace(/\.[^.]+$/, '');
+    const name = extensionName(options.projectRoot, where);
     if (trusts(idFor(name, source))) kept.push(where);
   }
   return kept;
+}
+
+/** The name used by the in-process adapter for a project extension. */
+function extensionName(projectRoot: string, where: string): string {
+  const root = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
+  const inside = where.startsWith(root) ? where.slice(root.length) : where;
+  const parts = inside.split(sep).filter((part) => part !== '');
+  const last = parts[parts.length - 1] ?? inside;
+  const parent = parts[parts.length - 2];
+  return /^index\./.test(last) && parent !== undefined ? parent : last.replace(/\.[^.]+$/, '');
+}
+
+/** Project add-ons are metadata even while they are untrusted. Listing them
+ *  must not import their code; only the fingerprint and the stored decision
+ *  cross into the host. */
+async function carriedFor(
+  options: CreateSessionOptions,
+  agentDir: string,
+): Promise<readonly Carried[]> {
+  const root = options.projectRoot.endsWith(sep) ? options.projectRoot : `${options.projectRoot}${sep}`;
+  const trusts = options.trusts ?? (() => false);
+  const found = await extensionsIn(agentDir, options.projectRoot).catch(() => []);
+  const carried: Carried[] = [];
+  for (const one of found) {
+    if (!one.where.startsWith(root)) continue;
+    const fingerprint = await contentFingerprint(one.where);
+    if (fingerprint === null) continue;
+    const name = extensionName(options.projectRoot, one.where);
+    carried.push({
+      id: idFor(name, fingerprint),
+      name,
+      where: relative(options.projectRoot, one.where),
+      trusted: trusts(idFor(name, fingerprint)),
+    });
+  }
+  return carried;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -275,6 +311,7 @@ export async function childSession(
 ): Promise<GrapheSession> {
   const agentDir = guard.agentDir;
   const args = await argsFor({ ...options, agentDir }, agentDir);
+  const carried = await carriedFor(options, agentDir);
   const startChild = async (): Promise<ChildRuntime> => {
     // Room for one more child is made before it is started, so a machine at its
     // ceiling takes somebody's quiet conversation rather than refusing this one.
@@ -295,13 +332,14 @@ export async function childSession(
     });
   };
 
-  const hosted = new Hosted(options, guard, await startChild(), startChild);
+  const hosted = new Hosted(options, guard, await startChild(), startChild, carried);
   /* The conversation so far, read off the transcript the child has just opened.
      The window asks for this the moment a project opens and turns it back into
      the thread somebody left, so it has to be in hand before this resolves —
      the same reason the in-process path reads its manager before returning. A
      brand-new conversation has no file yet, which is an empty thread. */
   await hosted.readBack();
+  await hosted.readCommands();
   return hosted;
 }
 
@@ -343,6 +381,7 @@ export class Hosted implements GrapheSession {
   /** How to stop hearing the child that was current when this was set. Named
    *  apart from `listening`, which is the GrapheSession member. */
   private readonly links: (() => void)[] = [];
+  private readonly carriedExtensions: readonly Carried[];
   /** When somebody last asked this conversation for something. Null until they
    *  have, which is the oldest thing there is. */
   private askedAt: number | null = null;
@@ -356,7 +395,9 @@ export class Hosted implements GrapheSession {
     private readonly guard: Guarded,
     private runtime: ChildRuntime,
     private readonly startChild: ChildMaking,
+    carried: readonly Carried[] = [],
   ) {
+    this.carriedExtensions = carried;
     this.token = childRuntimes.register(this);
     this.attend();
     this.firstRead = this.reread();
@@ -445,6 +486,7 @@ export class Hosted implements GrapheSession {
     this.givenBack = false;
     this.attend();
     await this.reread();
+    await this.readCommands();
   }
 
   /** Every event, before the relay burns what it needs. */
@@ -504,6 +546,26 @@ export class Hosted implements GrapheSession {
     }
   }
 
+  /** Keep slash commands in parity with the child after startup and wake. */
+  async readCommands(): Promise<void> {
+    const answer = await this.send({ type: 'get_commands' }).catch(() => null);
+    if (answer === null || answer['success'] !== true) return;
+    const data = answer['data'];
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) return;
+    const rows = (data as { commands?: unknown }).commands;
+    if (!Array.isArray(rows)) return;
+    this.commandsHere = rows.flatMap((row): AddonCommand[] => {
+      if (row === null || typeof row !== 'object' || Array.isArray(row)) return [];
+      const one = row as { name?: unknown; description?: unknown; source?: unknown; sourceInfo?: unknown };
+      if (one.source !== 'extension' || typeof one.name !== 'string') return [];
+      const description = typeof one.description === 'string' ? one.description : '';
+      const info = one.sourceInfo as { path?: unknown } | null;
+      const path = typeof info?.path === 'string' ? info.path : '';
+      const from = path === '' ? 'an add-on' : basename(dirname(path));
+      return [{ name: one.name, description, from }];
+    });
+  }
+
   /** One command, or a refusal. Never a write to a child that has gone. */
   private async send(command: { type: string; [key: string]: unknown }): Promise<Record<string, unknown>> {
     if (this.closed) throw new Error('That project is no longer open.');
@@ -544,6 +606,15 @@ export class Hosted implements GrapheSession {
           typeof answer['error'] === 'string' ? answer['error'] : 'the runtime refused the prompt',
         );
       }
+      // Pi may not flush the user entry until the streamed turn settles. Keep
+      // the accepted prompt in the replay cache so a renderer reloaded while
+      // the answer is arriving can still derive the conversation title.
+      const seenCount = this.wasSaid.filter(
+        (event): event is Extract<AgentEvent, { type: 'user-said' }> =>
+          event.type === 'user-said' && event.text === text,
+      ).length;
+      this.pendingUserSaid = [...this.pendingUserSaid, { text, seenCount }];
+      this.wasSaid = [...this.wasSaid, { type: 'user-said', text }];
       await this.untilItRests();
     } finally {
       this.inFlight = Math.max(0, this.inFlight - 1);
@@ -619,6 +690,7 @@ export class Hosted implements GrapheSession {
     }).catch(() => null);
     if (answer === null || answer['success'] !== true) return false;
     await this.reread();
+    await this.readCommands();
     return true;
   }
 
@@ -809,7 +881,7 @@ export class Hosted implements GrapheSession {
   }
 
   get carried(): readonly Carried[] {
-    return [];
+    return this.carriedExtensions;
   }
 
   commands(): readonly AddonCommand[] {
@@ -867,7 +939,18 @@ export class Hosted implements GrapheSession {
     return this.wasSaid;
   }
 
+  /** Refresh the replay cache when an existing child-hosted session is handed
+   *  to a renderer again (for example after a reload). */
+  async refreshHistory(): Promise<void> {
+    // Re-read Pi's state first: a resumed child may have learned its durable
+    // session file/name since construction, and readBack must use that path.
+    await this.reread();
+    await this.readBack();
+  }
+
   private wasSaid: readonly AgentEvent[] = [];
+  /** User prompts accepted by Pi whose transcript entry is not flushed yet. */
+  private pendingUserSaid: { text: string; seenCount: number }[] = [];
 
   /** The conversation so far, off the file the child is writing to. Called
    *  before this session is handed back, for the reason `history` gives. */
@@ -878,11 +961,27 @@ export class Hosted implements GrapheSession {
        with an empty thread, which is what the window would draw for a
        conversation that has one. */
     await this.firstRead;
-    const file = this.conversation;
+    // The explicit resume path is available before Pi's first get_state reply;
+    // use it as a safe fallback so startup cannot expose an existing transcript
+    // as an empty new conversation during that small handshake window.
+    const file = this.conversation ?? this.options.sessionPath ?? null;
     if (file === null) return;
     const read = await readTranscript(file).catch(() => null);
     if (read === null || !read.ok) return;
-    this.wasSaid = read.value;
+    const persistedCount = new Map<string, number>();
+    for (const event of read.value) {
+      if (event.type !== 'user-said') continue;
+      persistedCount.set(event.text, (persistedCount.get(event.text) ?? 0) + 1);
+    }
+    const stillPending: { text: string; seenCount: number }[] = [];
+    for (const one of this.pendingUserSaid) {
+      if ((persistedCount.get(one.text) ?? 0) <= one.seenCount) stillPending.push(one);
+    }
+    this.pendingUserSaid = stillPending;
+    this.wasSaid = [
+      ...read.value,
+      ...stillPending.map(({ text }) => ({ type: 'user-said' as const, text })),
+    ];
   }
 
   get conversation(): string | null {

@@ -3746,7 +3746,7 @@ async function ownWorkspaceMigrationLock(lock: string, ownerFile: string): Promi
     try {
       await mkdir(lock, { recursive: false });
       try {
-        await writeFile(ownerFile, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`, 'utf8');
+        await writeFile(ownerFile, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`, { encoding: 'utf8', flag: 'wx' });
       } catch {
         await rm(lock, { recursive: true, force: true }).catch(() => undefined);
         return false;
@@ -6081,6 +6081,10 @@ async function startConversationUnlocked(
   if (asked !== undefined) {
     const already = conversationAt(held, { conversation: asked });
     if (already !== null && already.held.activationPending === null) {
+      // A child-hosted session caches its transcript at construction. A
+      // renderer reload reuses that live session, so refresh before returning
+      // it or the new window will draw an empty "New conversation" thread.
+      await already.held.refreshHistory?.();
       held.sessions.resume(already.path);
       return done({ session: already.held, address: already.path });
     }
@@ -6331,6 +6335,11 @@ async function openTheProject(path: string): Promise<Result<OpenedProject>> {
   if (resumed !== null) {
     await (await recents()).remember({ path, name });
     const front = resumed.held.sessions.current;
+    // A renderer reload resumes the workspace directly rather than going
+    // through startConversationUnlocked. Refresh a child-hosted front session
+    // here too, otherwise the new renderer receives its construction-time
+    // replay cache and draws an existing conversation as "New conversation".
+    await front?.held.refreshHistory?.();
     return done({
       path,
       name,

@@ -1279,6 +1279,10 @@ export type GrapheSession = {
    *  made it — an earlier sitting read back so the window can show it again
    *  (BACKLOG B1.1). Empty when this is a brand-new conversation. */
   readonly history: readonly AgentEvent[];
+  /** Refresh a hosted runtime's transcript before handing an already-live
+   *  conversation back to a newly loaded renderer. In-process sessions read
+   *  history live; child sessions keep a replay cache and implement this seam. */
+  refreshHistory?(): Promise<void>;
   /** Where this session is being written, so the window can mark which row in
    *  the shelf is the one on screen. Null when nothing is being kept. */
   readonly conversation: string | null;

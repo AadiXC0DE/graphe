@@ -175,7 +175,7 @@ for (const bundle of bundles) {
   const ptyDir = join(app, 'Contents/Resources/app.asar.unpacked/node_modules/node-pty');
   const helpers = join(ptyDir, 'prebuilds');
   if (await exists(join(ptyDir, 'package.json'))) {
-    const arch = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+    const arch = `darwin-${bundle.arch}`;
     const helper = join(helpers, arch, 'spawn-helper');
     if (!(await exists(helper))) {
       fault(`node-pty is in the bundle but ${arch}/spawn-helper is not`);

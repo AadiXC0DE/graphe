@@ -140,7 +140,7 @@
           <p class="hero__lead reveal" data-reveal style="--i: 2">
             The window pi has been missing. Helpers in parallel, jobs that outlast your attention,
             a review with a verdict before anything lands, a browser it drives itself, and every
-            turn a version you can go back to. Every command sandboxed, nothing in the middle, MIT.
+            turn a version you can go back to. Configurable agent guardrails, nothing in the middle, MIT.
             Any model you already pay for, changed mid-conversation, the meter in plain sight, and
             the chords yours to rebind.
           </p>
@@ -248,13 +248,13 @@
         <div class="pillars">
           <article class="pillar reveal" data-reveal>
             <p class="pillar__no mono">01</p>
-            <h3>Nothing it does is unsafe or unrecoverable</h3>
+            <h3>Guardrails before changes, checkpoints before undo</h3>
             <p>
-              Every command is judged before it runs, by a function with no disk, no clock and no
-              network: allow, ask you, save a commit first, or refuse. What does run, runs inside a
-              macOS sandbox profile that writes only into the folder it was handed. Every turn is a
-              commit, and going back to one saves your work first, so the restore is itself
-              undoable.
+              Every agent command is judged before it runs, by a function with no disk, no clock and no
+              network: allow, ask you, save a checkpoint first, or refuse. Contained shell commands use
+              a macOS sandbox; choosing full access removes that boundary. Private checkpoints leave
+              your branch and staging area alone, and restoring one saves the current work first.
+              The terminal you operate yourself is separate from these agent guardrails.
             </p>
             <img
               class="pillar__shot"
@@ -312,7 +312,7 @@
             <thead>
               <tr>
                 <th scope="col"><span class="vs__off">Product</span></th>
-                <th scope="col">Sandbox on every command</th>
+                <th scope="col">Agent shell sandbox</th>
                 <th scope="col">Review with a verdict</th>
                 <th scope="col">Undoable timeline</th>
                 <th scope="col">Any model, your key</th>
@@ -861,8 +861,8 @@
                 <p class="mono">03 · the boundary</p>
                 <h4>Run inside a Seatbelt profile</h4>
                 <p>
-                  A macOS sandbox profile built for this run: writes only into the folder it was
-                  handed, and reads only the places a command genuinely needs. Everything else
+                  In contained mode, a macOS sandbox profile limits writes to the workspace and
+                  required scratch and cache folders, and restricts reads. Everything else
                   denied outright, so a folder of keys is not there to be read even if something
                   goes looking. What its own commands reach is checked by address, not just by
                   port. The app proves the boundary by trying to escape it, and says so out loud
@@ -897,14 +897,15 @@
               A chat works in the project folder, and only one run writes there at a time, so two
               conversations cannot quietly overwrite each other. Ask for a worktree and that chat
               gets a real <span class="mono">worktree add</span> of your repository, on its own
-              branch, which runs beside the rest. Closing it gives the space back; opening it again
-              makes it from the branch.
+              branch, which runs beside the rest. Closing its tab leaves the worktree intact;
+              opening the conversation again returns to the same files.
             </span>
           </li>
           <li>
             <b>seatbelt</b>
             <span>
-              Commands run under a generated macOS sandbox profile. Where the boundary cannot hold
+              Contained agent commands run under a generated macOS sandbox profile; full access
+              deliberately removes it. Where the boundary cannot hold
               (another platform, a machine without it) the app says only the guard is watching
               rather than implying otherwise.
             </span>

@@ -10,12 +10,16 @@ import type { ChildExit, ChildRuntime } from '../electron/services/runtime-super
 class FakeRuntime implements ChildRuntime {
   readonly nonce = 'test-nonce';
   readonly pid = 123;
+  rejectPrompt = false;
   readonly commands: string[] = [];
   private readonly events = new Set<(event: Record<string, unknown>) => void>();
   private readonly exits = new Set<(exit: ChildExit) => void>();
 
   send(command: { type: string; [key: string]: unknown }): Promise<Record<string, unknown>> {
     this.commands.push(command.type);
+    if (command.type === 'prompt' && this.rejectPrompt) {
+      return Promise.resolve({ success: false, error: 'prompt refused' });
+    }
     return Promise.resolve(command.type === 'get_state'
       ? { success: true, data: {} }
       : { success: true });
@@ -65,6 +69,27 @@ function guard(): Guarded {
 }
 
 describe('a hosted stop', () => {
+  it('keeps an accepted in-flight prompt for reloads but not a rejected one', async () => {
+    const runtime = new FakeRuntime();
+    const hosted = new Hosted({
+      projectRoot: '/workspace/hosted-stop',
+      onEvent: () => undefined,
+    } as CreateSessionOptions, guard(), runtime, async () => runtime);
+
+    const accepted = hosted.prompt('the line still streaming');
+    await vi.waitFor(() => expect(hosted.history).toContainEqual({
+      type: 'user-said',
+      text: 'the line still streaming',
+    }));
+    runtime.emit({ type: 'agent_settled' });
+    await accepted;
+
+    runtime.rejectPrompt = true;
+    await expect(hosted.prompt('the refused line')).rejects.toThrow('prompt refused');
+    expect(hosted.history).not.toContainEqual({ type: 'user-said', text: 'the refused line' });
+    hosted.dispose();
+  });
+
   it('applies the shared steer admission before sending an RPC', async () => {
     const runtime = new FakeRuntime();
     const hosted = new Hosted({

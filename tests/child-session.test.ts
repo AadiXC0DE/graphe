@@ -401,6 +401,11 @@ describe('a conversation in a child, through the same seam', () => {
         .map((one) => one.text)
         .join('');
       expect(said).toContain('hosted reply');
+      // A renderer reload reuses the hosted session rather than constructing
+      // another child. Its replay cache must still refresh from the transcript
+      // so the existing user turn is not drawn as a blank new conversation.
+      await session.refreshHistory?.();
+      expect(JSON.stringify(session.history)).toContain('say something');
 
       const file = session.conversation;
       expect(file).not.toBeNull();

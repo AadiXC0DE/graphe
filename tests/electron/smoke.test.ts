@@ -1440,7 +1440,10 @@ suite('the app in a real window, on a profile nothing else uses', () => {
       await exited;
 
       // A new launch on the same profile, which is what somebody does next.
-      const second = await launchApp(profile, files.url);
+      // The model URL is a test server, not persisted app state. Pass it to
+      // the relaunch so the child runtime can resolve the selected provider
+      // while replaying the durable transcript.
+      const second = await launchApp(profile, files.url, model.url);
       const stopSecond = dispose(second.app, profile, project);
       const thrown: string[] = [];
       second.window.on('pageerror', (error) => thrown.push(String(error)));
@@ -1847,19 +1850,23 @@ suite('the app in a real window, on a profile nothing else uses', () => {
 export default function spins(api) {
   const marker = process.env['GRAPHE_SPINS_MARKER'];
   if (marker !== undefined) writeFileSync(marker, 'started\\n');
-  api.registerTool({ name: 'never_answers', description: 'Registers itself, then holds the thread.' });
   for (;;) {}
 }
 `,
     );
     writeFileSync(
-      join(project, '.pi', 'extensions', 'spins', 'graphe.json'),
-      `${JSON.stringify({ name: 'spins', main: 'index.mjs' })}\n`,
+      join(project, '.pi', 'extensions', 'spins', 'package.json'),
+      `${JSON.stringify({ name: 'spins', version: '1.0.0', type: 'module', pi: { extensions: ['./index.mjs'] } })}\n`,
     );
+    const model = await scriptedModel();
     const files = await serve(BUILT_RENDERER);
-    const { app, window } = await launchApp(profile, files.url, undefined, {
+    const { app, window } = await launchApp(profile, files.url, model.url, {
       GRAPHE_CHILD_RUNTIME: '1',
       GRAPHE_SPINS_MARKER: startedMarker,
+      // The runtime keeps its experimental child path test-only. Vitest's
+      // own process marker is not guaranteed to be inherited by Electron, so
+      // pass the explicit test marker into the launched app as well.
+      VITEST: 'true',
     });
     const stop = dispose(app, profile, project);
 
@@ -1868,14 +1875,33 @@ export default function spins(api) {
 
     try {
       await openTheFolder(window);
+      // A project picker does not create an agent session until the first
+      // prompt. Create that ordinary child-hosted session before inspecting
+      // its carried extensions; otherwise `carried()` truthfully has no owner
+      // and returns an empty list.
+      model.replies([{ says: ['ready'] }]);
+      await window.locator('.composer__input').fill('start the child session');
+      await window.locator('.composer__send').first().click();
+      await vi.waitFor(
+        async () => expect(await window.locator('.message--graphe .message__body').last().innerText()).toContain('ready'),
+        { timeout: 60_000 },
+      );
+      await vi.waitFor(
+        async () => expect(await window.locator('.composer__send').first().getAttribute('aria-label')).toBe('Send'),
+        { timeout: 30_000 },
+      );
       // Trust it the way a person does, so the factory actually runs.
       const trust = await window.evaluate(async (folder) => {
         const api = globalThis.window.graphe;
         if (api === undefined) throw new Error('no bridge in this window');
         const listed = await api.carried({ project: folder });
         if (!listed.ok) throw new Error(`could not list carried extensions: ${listed.trouble.because}`);
-        const one = listed.value.find((extension) => extension.name === 'spins');
-        if (one === undefined) throw new Error('the spins carried extension was not discovered');
+        const one = listed.value.find(
+          (extension) => extension.name === 'spins' || extension.where.includes('/spins/'),
+        );
+        if (one === undefined) {
+          throw new Error(`the spins carried extension was not discovered: ${JSON.stringify(listed.value)}`);
+        }
         // The fixture deliberately never resolves its factory, so the rebuild
         // promise is expected to remain pending. Invocation itself is the
         // trust decision; the window must stay usable while it runs in child.
@@ -1904,6 +1930,7 @@ export default function spins(api) {
       expect(errorsIn(await readWhenWritten(join(profile, 'logs', 'graphe.log')))).toEqual([]);
       expect(thrown).toEqual([]);
     } finally {
+      await model.stop();
       await stop();
     }
   }, 300_000);

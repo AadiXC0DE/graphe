@@ -290,6 +290,11 @@ export async function landWorktree(
   const branch = await branchAt(run, folder);
   if (branch === null) return no(worktreeWords.noWorktree);
   if (!(await sameRepository(run, repo, folder))) return no(worktreeWords.otherRepo);
+  // A branch merge only carries committed work. Never force-remove the source
+  // checkout while it has anything outside that branch: uncommitted files,
+  // ignored notes, or checkpoints would otherwise disappear with the folder.
+  const source = await uncommittedWork(run, folder);
+  if (source.length > 0) return { ok: false, because: worktreeWords.dirtyAbout(source), paths: source };
   const blocked = await blockingChanges(run, repo);
   if (blocked.length > 0) return { ok: false, because: worktreeWords.dirty, paths: blocked };
 
@@ -324,6 +329,29 @@ export async function landWorktree(
   const dropped = await dropWorktree(run, repo, folder);
   if (!dropped.ok) return no(worktreeWords.landedButCleanupFailed);
   return ok();
+}
+
+/** Files in a source checkout which a branch merge cannot carry. Build output
+ * and other known disposable directories are deliberately excluded by
+ * `writingLeftBehind`; every other file makes a force-removal unsafe. */
+export async function uncommittedWork(run: RunGit, folder: string): Promise<readonly string[]> {
+  const status = await run(['status', '--porcelain', '-z', '--untracked-files=all'], { cwd: folder });
+  if (status.code !== 0 || status.out === undefined) return ['(checkout status unavailable)'];
+  const paths: string[] = [];
+  const fields = status.out.split('\0').filter((one) => one !== '');
+  for (let at = 0; at < fields.length; at += 1) {
+    const one = fields[at] ?? '';
+    const state = one.slice(0, 2);
+    const path = one.slice(3).split(' -> ').at(-1) ?? '';
+    if (path !== '' && !paths.includes(path)) paths.push(path);
+    // Porcelain -z puts the old path in the following field for a rename or
+    // copy. It is not a second dirty file and must not be shown as one.
+    if (state.startsWith('R') || state.startsWith('C')) at += 1;
+  }
+  const ignored = await writingLeftBehind(run, folder);
+  if (ignored.tooBig) paths.push('(ignored files too large to rescue)');
+  for (const path of ignored.files) if (!paths.includes(path)) paths.push(path);
+  return paths;
 }
 
 /** Undo a merge that did not finish. `--abort` is the tidy way, and a squash

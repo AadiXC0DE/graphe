@@ -82,6 +82,22 @@ describe('the slice on screen', () => {
 });
 
 describe('the room left for the rows that are not drawn', () => {
+  it('leaves no phantom footer space as measured conversation rows arrive', () => {
+    const sizes = new RowHeights();
+    let total = 0;
+    for (let count = 1; count <= 129; count += 1) {
+      sizes.sync(keys(count));
+      const height = 40 + count * 3;
+      sizes.measure(`row-${String(count - 1)}`, height);
+      total += height;
+      expect(sizes.offsetOf(count)).toBe(total);
+      expect(sizes.total()).toBe(total);
+      const span = windowOf({ sizes, top: Math.max(0, total - 600), height: 600 });
+      expect(span.last).toBe(count);
+      expect(span.after).toBe(0);
+    }
+  });
+
   it('adds up to the whole conversation, so the scrollbar tells the truth', () => {
     const sizes = even(1000, 100);
     const span = windowOf({ sizes, top: 5000, height: 800 });

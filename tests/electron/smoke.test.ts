@@ -1403,6 +1403,22 @@ suite('the app in a real window, on a profile nothing else uses', () => {
         { timeout: 30_000 },
       );
 
+      // Keep both identities before the process is taken away. `address` is
+      // the registry identity; `path` is the durable Pi transcript. The
+      // relaunch assertion below must prove that opening by the former still
+      // reads the latter rather than minting a second row.
+      const persisted = await first.window.evaluate(async (folder) => {
+        const api = globalThis.window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        const listed = await api.conversations({ project: folder });
+        if (!listed.ok) throw new Error(`could not list conversations: ${listed.trouble.because}`);
+        const one = listed.value.find((conversation) => conversation.title === 'a question that gets an answer');
+        if (one === undefined || one.address === undefined || one.address === '') {
+          throw new Error('the answered conversation had no canonical address');
+        }
+        return { address: one.address, path: one.path };
+      }, project);
+
       await first.window.locator('.composer__input').fill('and now something that will be cut short');
       await first.window.locator('.composer__send').first().click();
       const arriving = first.window.locator('.message--graphe .message__body').last();
@@ -1436,6 +1452,27 @@ suite('the app in a real window, on a profile nothing else uses', () => {
         // the first screen's title is not what says the folder is open — the
         // composer is.
         await second.window.locator('.composer__input').waitFor({ timeout: 60_000 });
+
+        const reopened = await second.window.evaluate(async ({ address, path, folder }) => {
+          const api = globalThis.window.graphe;
+          if (api === undefined) throw new Error('no bridge in this window');
+          const opened = await api.openConversation(address, null, null, { project: folder });
+          if (!opened.ok) throw new Error(`could not reopen conversation: ${opened.trouble.because}`);
+          const listed = await api.conversations({ project: folder });
+          if (!listed.ok) throw new Error(`could not list reopened conversations: ${listed.trouble.because}`);
+          return {
+            address: opened.value.address,
+            path: opened.value.conversation,
+            matches: listed.value.filter((conversation) => conversation.address === address).length,
+            history: opened.value.history.map((event) => event.type),
+            expectedPath: path,
+          };
+        }, { ...persisted, folder: project });
+        expect(reopened.address).toBe(persisted.address);
+        expect(reopened.path).toBe(persisted.path);
+        expect(reopened.expectedPath).toBe(persisted.path);
+        expect(reopened.matches).toBe(1);
+        expect(reopened.history.length).toBeGreaterThan(0);
 
         // The conversation is there, read back off the disk rather than
         // remembered: this is a second process on the same profile.
@@ -1802,10 +1839,18 @@ suite('the app in a real window, on a profile nothing else uses', () => {
        the child's thread; in-process it would be the app's, and the window
        would stop answering altogether. */
     const carried = join(project, '.pi', 'extensions', 'spins');
+    const startedMarker = join(profile, 'spins-started');
     mkdirSync(carried, { recursive: true });
-    cpSync(
-      join(here, 'tests', 'fixtures', 'extensions', 'spins', 'index.mjs'),
+    writeFileSync(
       join(carried, 'index.mjs'),
+      `import { writeFileSync } from 'node:fs';
+export default function spins(api) {
+  const marker = process.env['GRAPHE_SPINS_MARKER'];
+  if (marker !== undefined) writeFileSync(marker, 'started\\n');
+  api.registerTool({ name: 'never_answers', description: 'Registers itself, then holds the thread.' });
+  for (;;) {}
+}
+`,
     );
     writeFileSync(
       join(project, '.pi', 'extensions', 'spins', 'graphe.json'),
@@ -1814,6 +1859,7 @@ suite('the app in a real window, on a profile nothing else uses', () => {
     const files = await serve(BUILT_RENDERER);
     const { app, window } = await launchApp(profile, files.url, undefined, {
       GRAPHE_CHILD_RUNTIME: '1',
+      GRAPHE_SPINS_MARKER: startedMarker,
     });
     const stop = dispose(app, profile, project);
 
@@ -1823,9 +1869,24 @@ suite('the app in a real window, on a profile nothing else uses', () => {
     try {
       await openTheFolder(window);
       // Trust it the way a person does, so the factory actually runs.
-      await window.evaluate(() => {
-        void (window as unknown as { graphe: { trustCarried: unknown } });
-      }).catch(() => undefined);
+      const trust = await window.evaluate(async (folder) => {
+        const api = globalThis.window.graphe;
+        if (api === undefined) throw new Error('no bridge in this window');
+        const listed = await api.carried({ project: folder });
+        if (!listed.ok) throw new Error(`could not list carried extensions: ${listed.trouble.because}`);
+        const one = listed.value.find((extension) => extension.name === 'spins');
+        if (one === undefined) throw new Error('the spins carried extension was not discovered');
+        // The fixture deliberately never resolves its factory, so the rebuild
+        // promise is expected to remain pending. Invocation itself is the
+        // trust decision; the window must stay usable while it runs in child.
+        void api.trustCarried(one.id, true, { project: folder }).catch(() => undefined);
+        return one.id;
+      }, project);
+      expect(trust).toContain('spins@');
+      // The trust IPC is intentionally fire-and-forget because this fixture's
+      // factory never resolves. The marker is the positive proof that the
+      // trusted extension really entered the child before the UI assertion.
+      await readWhenWritten(startedMarker, 30_000);
 
       /* The window still answers. This is the whole assertion: a spinner that
          never turns and a click that never lands are what an in-process

@@ -68,6 +68,13 @@ type Turned = { said: string; turns: number; spent: Money | null };
  */
 export type RunnerPort = {
   openLane(lane: Lane): Promise<Lane>;
+  /** Re-acquire a previously opened lane's board slot for a later wave. */
+  acquireLane?(lane: Lane): Promise<Lane>;
+  /** Wait until a board slot may be tried again after a waiting wave. */
+  waitForRoom?(): Promise<void>;
+  /** Release this lane's board slot after its current wave is complete. The
+   * workspace itself remains available for a later dependent block. */
+  releaseLane?(lane: Lane): Promise<void>;
   send(lane: Lane, block: Block, text: string, options: TurnOptions): Promise<Settled>;
   checks(lane: Lane): Promise<{ passed: boolean; report: string }>;
   review(lane: Lane, options?: TurnOptions): Promise<{ verdict: 'ships' | 'needs-work' | 'do-not-land'; line: string; turns?: number; spent?: Money | null }>;
@@ -245,7 +252,14 @@ async function endIt(m: Machine): Promise<void> {
  *  worktree behind it is the one the run was already working in. */
 async function opened(m: Machine, id: string): Promise<Lane> {
   const known = m.run.lanes.find((one) => one.id === id);
-  if (known !== undefined && known.conversationId !== null) return known;
+  if (known !== undefined && known.conversationId !== null) {
+    const lane = (await m.port.acquireLane?.(known)) ?? known;
+    if (lane !== known) {
+      m.run = { ...m.run, lanes: [...m.run.lanes.filter((one) => one.id !== lane.id), lane] };
+      m.port.changed(snapshot(m.run));
+    }
+    return lane;
+  }
   const lane = await m.port.openLane(
     known ?? { id, workspaceId: '', conversationId: null, branch: null },
   );
@@ -421,33 +435,42 @@ async function oneBlock(m: Machine, block: Block, lane: Lane): Promise<void> {
 /** Every block of one lane, one at a time: two turns in one folder would take the
  *  same workspace twice. */
 async function oneLane(m: Machine, id: string, blocks: readonly Block[]): Promise<void> {
-  for (const block of blocks) {
-    if (abandoned(m) || m.gate !== null) return;
-    put(m, block, id, { state: 'running', startedAt: m.port.now(), result: null, failure: null });
-    m.port.changed(snapshot(m.run));
-    let lane: Lane;
-    try {
-      lane = await opened(m, id);
-    } catch (cause) {
+  let openedLane: Lane | null = null;
+  try {
+    for (const block of blocks) {
+      if (abandoned(m) || m.gate !== null) return;
+      put(m, block, id, { state: 'running', startedAt: m.port.now(), result: null, failure: null });
+      m.port.changed(snapshot(m.run));
+      let lane: Lane;
+      try {
+        lane = await opened(m, id);
+        openedLane = lane;
+      } catch (cause) {
+        if (abandoned(m)) return;
+        broke(m, block, id, runnerWords.noLane(cause instanceof Error ? cause.message : String(cause)));
+        await endIt(m);
+        return;
+      }
       if (abandoned(m)) return;
-      broke(m, block, id, runnerWords.noLane(cause instanceof Error ? cause.message : String(cause)));
-      await endIt(m);
-      return;
+      try {
+        await oneBlock(m, block, lane);
+      } catch (cause) {
+        if (abandoned(m)) return;
+        broke(m, block, id, cause instanceof Error ? cause.message : String(cause));
+        await endIt(m);
+        return;
+      }
+      if (abandoned(m) || m.gate !== null) return;
+      if (m.run.blocks[block.id]?.state === 'failed') {
+        await endIt(m);
+        return;
+      }
     }
-    if (abandoned(m)) return;
-    try {
-      await oneBlock(m, block, lane);
-    } catch (cause) {
-      if (abandoned(m)) return;
-      broke(m, block, id, cause instanceof Error ? cause.message : String(cause));
-      await endIt(m);
-      return;
-    }
-    if (abandoned(m) || m.gate !== null) return;
-    if (m.run.blocks[block.id]?.state === 'failed') {
-      await endIt(m);
-      return;
-    }
+  } finally {
+    // A gate, cancellation, lane-open failure, or ordinary completion all
+    // release the machine slot. The persisted lane remains for later waves;
+    // acquireLane re-admits it when another block needs it.
+    if (openedLane !== null) await m.port.releaseLane?.(openedLane);
   }
 }
 
@@ -502,8 +525,15 @@ export async function tick(
 
   const waiting: Block[] = [];
   const starting: { id: string; blocks: Block[] }[] = [];
-  const open = new Set(m.run.lanes.map((one) => one.id));
-  let spare = Math.max(0, room - [...open].filter((one) => one !== LANE_0).length);
+  // `run.lanes` is historical: completed lanes remain there for fan-in and
+  // review. Only lanes with a live block in this wave consume board slots;
+  // completed lanes release their slot through RunnerPort.releaseLane.
+  const occupied = new Set(
+    Object.values(m.run.blocks)
+      .filter((one) => one.state === 'running' || one.state === 'needs-you')
+      .map((one) => one.lane),
+  );
+  let spare = Math.max(0, room - [...occupied].filter((one) => one !== LANE_0).length);
 
   for (const block of readyNow(flow, m.run)) {
     const id = laneFor(flow, block);
@@ -512,7 +542,7 @@ export async function tick(
       held.blocks.push(block);
       continue;
     }
-    if (!open.has(id) && id !== LANE_0) {
+    if (!occupied.has(id) && id !== LANE_0) {
       if (spare <= 0) {
         waiting.push(block);
         continue;
@@ -583,7 +613,13 @@ export async function drive(
 ): Promise<Run> {
   let held = await tick(flow, run, port, room);
   for (;;) {
-    if (held.state !== 'running' || waitingForRoom(held)) return held;
+    if (held.state !== 'running') return held;
+    if (waitingForRoom(held)) {
+      if (port.waitForRoom === undefined) return held;
+      await port.waitForRoom();
+      held = await tick(flow, held, port, room);
+      continue;
+    }
     const next = await tick(flow, held, port, room);
     if (next.state !== 'running') return next;
     if (stateLine(next) === stateLine(held)) return next;

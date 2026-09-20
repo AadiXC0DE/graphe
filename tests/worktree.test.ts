@@ -177,6 +177,47 @@ describe('landWorktree — a conversation returns its work home', () => {
       await rm(repo, { recursive: true, force: true });
     }
   });
+
+  it('refuses to drop a checkout that still has uncommitted work', async () => {
+    const repo = await freshRepo();
+    try {
+      const made = await createWorktree(git(), repo, 'unfinished', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await writeFile(path.join(made.value.folder, 'a.txt'), 'unfinished in the tab\n');
+      const landed = await landWorktree(git(), repo, made.value.folder);
+
+      expect(landed.ok).toBe(false);
+      if (!landed.ok) expect(landed.paths).toContain('a.txt');
+      expect(existsSync(made.value.folder)).toBe(true);
+      expect(readFileSync(path.join(made.value.folder, 'a.txt'), 'utf8')).toBe('unfinished in the tab\n');
+      expect((await raw(repo, 'log', '--oneline')).trim().split('\n')).toHaveLength(1);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to drop ignored user notes from a checkout', async () => {
+    const repo = await freshRepo();
+    try {
+      await writeFile(path.join(repo, '.gitignore'), 'notes/\n');
+      await raw(repo, 'add', '.gitignore');
+      await raw(repo, 'commit', '-m', 'ignore generated notes');
+      const made = await createWorktree(git(), repo, 'ignored-notes', null);
+      expect(made.ok).toBe(true);
+      if (!made.ok || made.value === null) return;
+
+      await mkdir(path.join(made.value.folder, 'notes'), { recursive: true });
+      await writeFile(path.join(made.value.folder, 'notes', 'keep.md'), 'keep this\n');
+      const landed = await landWorktree(git(), repo, made.value.folder);
+
+      expect(landed.ok).toBe(false);
+      expect(existsSync(path.join(made.value.folder, 'notes', 'keep.md'))).toBe(true);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('dropWorktree', () => {

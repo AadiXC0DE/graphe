@@ -38,6 +38,18 @@ export const MIGRATION_VERSION = 1;
 export const MARKER_FILE = 'workspace-migration.json';
 /** Held for the length of a run, so two windows cannot migrate at once. */
 export const LOCK_FILE = 'workspace-migration.lock';
+/** An owner-less lock older than this is recoverable after a process crash.
+ * Active migrations write an owner record, so their age alone never makes them
+ * eligible for removal. */
+export const MIGRATION_LOCK_STALE_MS = 60 * 60 * 1000;
+
+export function staleMigrationLock(
+  modifiedAt: number,
+  now = Date.now(),
+  staleAfter = MIGRATION_LOCK_STALE_MS,
+): boolean {
+  return Number.isFinite(modifiedAt) && now - modifiedAt > staleAfter;
+}
 
 /** Records the migration made, so a later verification knows what it may revise. */
 const MIGRATED_BY = 'migration.3.5';

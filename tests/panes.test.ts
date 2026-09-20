@@ -48,6 +48,14 @@ function two() {
 }
 
 describe("the panes a window is showing", () => {
+  it("deletes tab and pane views by registry address, not transcript filename", () => {
+    expect(APP).toContain('const address = listed?.address');
+    expect(APP).toContain('parkThread(current, project, address)');
+    expect(APP).toContain('withoutConversation(current, address, null)');
+    const views = addPane(onePane('chat-id'), 'chat-id');
+    expect(withoutConversation(views, 'chat-id', null).open.every((pane) => pane.conversation !== 'chat-id')).toBe(true);
+  });
+
   it("is one to start with, and it is the pane the hand is in", () => {
     const only = onePane("chat-a");
     expect(only.open).toHaveLength(1);

@@ -102,7 +102,7 @@
 }
 
 .tokens__table thead th:nth-child(2) {
-  width: auto;
+  width: 64px;
 }
 
 .tokens__usedhead,
@@ -113,7 +113,7 @@
 }
 
 .tokens__table thead th:nth-child(4) {
-  width: 40%;
+  width: auto;
 }
 
 /* Read by a screen reader and not drawn: the column already says what the

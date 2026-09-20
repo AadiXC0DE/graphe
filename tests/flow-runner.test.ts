@@ -127,6 +127,7 @@ class FakePort implements RunnerPort {
   /** The one lane whose worktree cannot be opened, for the test about a lane
    *  failing before its turn. */
   refuseLane: string | null = null;
+  releasedLanes: string[] = [];
   /** Set by a test that needs a turn to stay out, so Stop can be pressed while
    *  one is. */
   hold: Promise<void> | null = null;
@@ -176,6 +177,10 @@ class FakePort implements RunnerPort {
       : { ...one, conversationId: `c-${one.id}`, branch: `flow/${one.id}` };
   }
 
+  async releaseLane(one: Lane): Promise<void> {
+    if (one.id !== 'lane-0') this.releasedLanes.push(one.id);
+  }
+
   async send(one: Lane, block: Block, text: string, options: TurnOptions): Promise<Settled> {
     this.asked.push({ what: 'send', lane: one.id, block: block.id, text, options });
     this.#firstTurn();
@@ -210,6 +215,24 @@ class FakePort implements RunnerPort {
   now(): number {
     this.at += 10;
     return this.at;
+  }
+}
+
+/** A shell-like port whose global board wakes the runner after each completed
+ * lane. The ordinary fake deliberately has no waiter so ceiling tests still
+ * exercise the paused state. */
+class ReleasingPort extends FakePort {
+  async waitForRoom(): Promise<void> {
+    return;
+  }
+}
+
+class ReopeningPort extends FakePort {
+  acquired: string[] = [];
+
+  async acquireLane(one: Lane): Promise<Lane> {
+    this.acquired.push(one.id);
+    return { ...one, conversationId: `reopened-${one.id}` };
   }
 }
 
@@ -539,6 +562,50 @@ describe('a fan-out in turn', () => {
 });
 
 describe('a fan-out with worktrees', () => {
+  it('re-admits a persisted lane before its resumed turn', async () => {
+    let flow = place({ ...newFlow(), name: 'Resume lane' }, 'plan');
+    const head = flow.blocks[0]!.id;
+    flow = place(flow, 'ask', head);
+    flow = place(flow, 'ask', head);
+    flow = { ...flow, lanes: 'worktrees' };
+    const port = new ReopeningPort();
+    const run = begun(flow, [lane('lane-0'), lane('lane-1')]);
+
+    const done = await drive(flow, run, port);
+
+    expect(done.state).toBe('done');
+    expect(port.acquired).toContain('lane-1');
+    expect(port.turns().some((one) => one.lane === 'lane-1')).toBe(true);
+  });
+
+  it('drains three distinct worktree lanes with one board slot', async () => {
+    let flow = place({ ...newFlow(), name: 'Three lanes' }, 'plan');
+    const head = flow.blocks[0]!.id;
+    flow = place(flow, 'ask', head);
+    flow = place(flow, 'ask', head);
+    flow = place(flow, 'ask', head);
+    flow = place(flow, 'ask', head);
+    flow = { ...flow, lanes: 'worktrees' };
+    const port = new ReleasingPort();
+
+    const run = await drive(flow, begun(flow), port, 1);
+
+    expect(run.state).toBe('done');
+    expect(new Set(port.lanesOpened())).toEqual(new Set(['lane-1', 'lane-2', 'lane-3']));
+    expect(port.releasedLanes).toEqual(['lane-1', 'lane-2', 'lane-3']);
+  });
+
+  it('releases a completed worktree wave while keeping its lane record', async () => {
+    const flow = forked('worktrees');
+    const port = new FakePort();
+
+    const run = await drive(flow, begun(flow), port);
+
+    expect(run.state).toBe('done');
+    expect(port.releasedLanes).toContain('lane-1');
+    expect(run.lanes.some((one) => one.id === 'lane-1')).toBe(true);
+  });
+
   it('opens a lane per branch, and the fan-in carries the one that is not its own', async () => {
     const forked0 = forked('worktrees');
     const placed = place(forked0, 'ask', [forked0.blocks[1]!.id, forked0.blocks[2]!.id]);

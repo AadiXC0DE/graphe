@@ -37,6 +37,7 @@ import type { ExtensionAPI, InlineExtension, ToolCallEvent, ToolResultEvent } fr
 import { patchWorkerThreads } from './node-shim';
 import { maskToolResult } from './redact';
 import { NONCE_ENV, PI_ENTRY_ENV, asRecord, records, type ChildSays, type ShellVerdict } from './rpc-protocol';
+import { SCRIPTED_MODEL_ENV, SCRIPTED_PROVIDER, scriptedProviderConfig } from './scripted-provider';
 
 /**
  * Pi, at the file the shell resolved.
@@ -192,6 +193,22 @@ function controlExtension(out: (says: ChildSays) => void, ask: (id: string) => P
   } as InlineExtension;
 }
 
+/**
+ * The scripted model is a test-only provider, but the child has its own Pi
+ * runtime and therefore cannot see the provider registered in Electron's
+ * parent process. Register it in the child as well, using the same declaration
+ * as the in-process adapter. The explicit smoke marker keeps this seam out of
+ * ordinary child sessions even if a developer's shell has a stale URL set.
+ */
+function scriptedProviderExtension(baseUrl: string): InlineExtension {
+  return {
+    name: 'graphe-scripted',
+    factory: (api: ExtensionAPI): void => {
+      api.registerProvider(SCRIPTED_PROVIDER, scriptedProviderConfig(baseUrl));
+    },
+  };
+}
+
 /** Whether this file is the program that was started, rather than a module a
  *  test imported. Both sides resolved, because a temp folder on this machine is
  *  reached by two paths. */
@@ -218,7 +235,13 @@ if (startedHere()) {
 
   const out = controlOut();
   const { main } = await loadPi();
+  const scriptedBaseUrl =
+    process.env['GRAPHE_ELECTRON_SMOKE'] === '1'
+      ? (process.env[SCRIPTED_MODEL_ENV] ?? '').trim()
+      : '';
+  const extensionFactories: InlineExtension[] = [controlExtension(out, judgeLink())];
+  if (scriptedBaseUrl !== '') extensionFactories.push(scriptedProviderExtension(scriptedBaseUrl));
   await main(['--mode', 'rpc', ...process.argv.slice(2)], {
-    extensionFactories: [controlExtension(out, judgeLink())],
+    extensionFactories,
   });
 }

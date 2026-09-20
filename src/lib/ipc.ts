@@ -449,6 +449,8 @@ export type ShowOutcome =
 export type Conversation = {
   id: string;
   path: string;
+  /** Registry identity used by tabs and panes; path remains the transcript file. */
+  address?: string;
   title: string;
   at: number;
   messages: number;

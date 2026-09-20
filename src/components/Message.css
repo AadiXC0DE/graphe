@@ -26,7 +26,11 @@
    of that press. */
 .message__foot {
   position: relative;
-  height: var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--space-5);
+  padding-top: var(--space-1);
 }
 
 /* Under the words it copies and hard against them — 4px, a quarter of the gap
@@ -38,15 +42,16 @@
    focusable, because a control that only exists for a mouse does not exist for
    the keyboard. */
 .message__copy {
-  position: absolute;
-  top: var(--space-1);
+  position: relative;
+  order: -1;
+  flex: none;
   /* The glyph is 12px inside a 20px box, so pulling the box back by that 4px
      lines the icon up with the first letter above it. */
-  left: calc(var(--space-1) * -1);
+  margin-left: calc(var(--space-1) * -1);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
+  min-width: 20px;
   height: 20px;
   padding: 0;
   border-radius: var(--radius-sm);
@@ -57,13 +62,8 @@
     transform var(--dur-micro) var(--ease-out-quart);
 }
 
-/* Out of flow entirely: the icon keeps its 20px whatever the state says, so a
-   confirmation cannot shove the turn or the control beside it. */
+/* Keep feedback in flow so it cannot cover the adjacent fork control. */
 .message__copysaid {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 100%;
   display: flex;
   align-items: center;
   margin-left: var(--space-1);
@@ -88,7 +88,7 @@
 .message__copy::after {
   content: '';
   position: absolute;
-  inset: -4px -6px -12px;
+  inset: -4px 0 -12px;
 }
 
 /* Held out while it says Copied, because the press is usually the last thing
@@ -119,9 +119,7 @@
    than a glyph, so it sits past the 20px icon and grows to the right, which
    nothing else in the foot has to know about. */
 .message__action {
-  position: absolute;
-  top: var(--space-1);
-  left: calc(var(--space-1) * -1 + var(--space-5));
+  flex: none;
   display: inline-flex;
   align-items: center;
   height: 20px;

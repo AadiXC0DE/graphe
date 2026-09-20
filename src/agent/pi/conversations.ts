@@ -9,6 +9,8 @@ import { ago } from '../../lib/when';
 export type Conversation = {
   id: string;
   path: string;
+  /** Graphe's durable registry address, when the shell has resolved one. */
+  address?: string;
   title: string;
   at: number;
   messages: number;

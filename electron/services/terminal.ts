@@ -184,9 +184,13 @@ export class Terminals {
       this.live.set(id, record);
       return { ok: true, session };
     } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : 'the shell would not start';
+      const because = detail.includes('posix_spawnp failed')
+        ? 'The terminal helper could not launch the shell (posix_spawnp failed). Reinstall the app or check the shell and node-pty helper permissions.'
+        : detail;
       return {
         ok: false,
-        because: cause instanceof Error ? cause.message : 'the shell would not start',
+        because,
       };
     }
   }

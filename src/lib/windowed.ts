@@ -112,14 +112,12 @@ export class RowHeights {
         this.#keys.push(key);
         this.#at.set(key, at);
         this.#tall.push(this.#guess);
-        this.#sums.push(0);
+        // A new Fenwick node also owns older rows in its covered range.
+        // Starting at zero loses those rows at every power-of-two boundary.
+        const node = at + 1;
+        const start = node - (node & -node);
+        this.#sums.push(this.#prefix(at) - this.#prefix(start) + this.#guess);
         this.#total += this.#guess;
-      }
-      /* A node reaches over the rows added after it, so the totals go in once
-         every new row has its slot: adding them as the array grew left the
-         higher nodes short by everything that arrived before they existed. */
-      for (let at = from; at < this.#keys.length; at += 1) {
-        this.#add(at, this.#tall[at] ?? this.#guess);
       }
       return true;
     }

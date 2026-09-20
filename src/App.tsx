@@ -2506,8 +2506,10 @@ function Conversation() {
    *  after so the desk is never left pointing at a file that is gone. */
   const deleteConversation = useCallback(
     async (path: string) => {
-      const wasHere = path === inConversation;
       const here = currentDesk(desksNow.current);
+      const listed = conversations.find((one) => one.path === path || one.id === path || one.address === path);
+      const address = listed?.address ?? (path === inConversation ? here?.address : null) ?? path;
+      const wasHere = address === here?.address || path === inConversation;
       const where: Where = {
         ...(here === null ? {} : { project: here.path }),
         ...(here?.address == null ? {} : { conversation: here.address }),
@@ -2526,11 +2528,11 @@ function Conversation() {
          pointing at a transcript that is not there any more is a tab that
          fails the moment it is pressed. */
       const project = here?.path;
-      if (project !== undefined) setDesks((current) => parkThread(current, project, path));
-      if (desksNow.current.current === project) setPanes((current) => withoutConversation(current, path, null));
+      if (project !== undefined) setDesks((current) => parkThread(current, project, address));
+      if (desksNow.current.current === project) setPanes((current) => withoutConversation(current, address, null));
       if (wasHere) await swapConversation(null, true);
     },
-    [busy, inConversation, swapConversation, troubleHere],
+    [busy, conversations, inConversation, swapConversation, troubleHere],
   );
 
   /**

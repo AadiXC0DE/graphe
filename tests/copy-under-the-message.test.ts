@@ -63,7 +63,7 @@ describe('where the copy control sits', () => {
 
   it('reads as the foot of this message rather than the space before the next', () => {
     // 4px under the words against the thread's own 16px between turns.
-    expect(CSS).toContain('top: var(--space-1);');
+    expect(CSS).toContain('padding-top: var(--space-1);');
     // And the room is the 4px drop plus the control, so the turn ends where the
     // control does rather than hanging over what comes after it.
     expect(CSS).toMatch(/\.message__foot \{[^}]*height: var\(--space-5\);/);
@@ -106,7 +106,7 @@ describe('how it appears', () => {
   it('takes its hit area downwards, away from the last line of the message', () => {
     // Reaching upwards would put an invisible target over words people drag
     // across to select.
-    expect(CSS).toMatch(/\.message__copy::after \{[^}]*inset: -4px -6px -12px;/);
+    expect(CSS).toMatch(/\.message__copy::after \{[^}]*inset: -4px 0 -12px;/);
   });
 
   it('presses, and stops pressing when motion is turned down', () => {
@@ -143,16 +143,15 @@ describe('an icon rather than the word', () => {
     expect(control().getAttribute('aria-label')).not.toMatch(/conversation/i);
   });
 
-  it('keeps one square whatever it is saying', () => {
-    expect(CSS).toMatch(/\.message__copy \{[^}]*width: 20px;/);
+  it('keeps a square icon target and room for feedback', () => {
+    expect(CSS).toMatch(/\.message__copy \{[^}]*min-width: 20px;/);
     expect(CSS).toMatch(/\.message__copy \{[^}]*height: 20px;/);
   });
 
-  /** The confirmation rides beside the icon out of flow, so landing a copy
-   *  cannot widen the control or shove the turn under it. */
-  it('says Copied without taking any room', () => {
-    expect(CSS).toMatch(/\.message__copysaid \{[^}]*position: absolute;/);
-    expect(CSS).toMatch(/\.message__copysaid \{[^}]*left: 100%;/);
+  /** Feedback expands horizontally, leaving the turn height unchanged. */
+  it('says Copied in the same line without covering its neighbour', () => {
+    expect(CSS).toMatch(/\.message__copysaid \{[^}]*white-space: nowrap;/);
+    expect(CSS).toMatch(/\.message__copy \{[^}]*min-width: 20px;/);
   });
 });
 
@@ -188,6 +187,13 @@ describe('once it lands', () => {
 /** The one other thing that can be done with a turn from where the turn is: a
  *  fork of the conversation at it. */
 describe('forking a conversation at a message', () => {
+  it('keeps copy feedback in the layout beside the fork control', () => {
+    expect(CSS).toMatch(/\.message__foot \{[^}]*display: flex;/);
+    const feedback = /\.message__copysaid \{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    const action = /\.message__action \{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(feedback).not.toContain('position: absolute');
+    expect(action).not.toContain('position: absolute');
+  });
   it('is offered on the message, and hands over where that message stands', () => {
     const asked: number[] = [];
     const host = draw({

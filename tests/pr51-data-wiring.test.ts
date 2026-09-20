@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { MIGRATION_LOCK_STALE_MS, staleMigrationLock } from '../electron/services/migration-service';
 
 const MAIN = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
@@ -46,6 +47,35 @@ describe('PR #51 data durability wiring', () => {
     expect(MAIN).toContain('noteWhereItWorks(open, address, checkout?.folder ?? null, session)');
   });
 
+  it('resolves a saved conversation id through its registry transcript', () => {
+    const source = block('async function startConversationUnlocked(', '  const address =');
+    expect(source).toContain('const savedSessionPath =');
+    expect(source).toContain('written.sessionFile');
+    expect(source).toContain('{ sessionPath: savedSessionPath }');
+    expect(source).not.toContain('{ sessionPath: asked }');
+    expect(source).toContain('how.kind === \'fresh\' || asked !== undefined');
+  });
+
+  it('rebases migration instead of overwriting a concurrent registry update', () => {
+    const source = block('async function runWorkspaceMigration()', '/** Claim the migration directory');
+    expect(source).toContain('let migrationBase = index;');
+    expect(source).toContain('workspaceIndex !== migrationBase');
+    expect(source).toContain('immediately before the synchronous assignment');
+    expect(source).toContain('deferred after concurrent registry updates');
+  });
+
+  it('recovers only locks old enough to be owner-less', () => {
+    const lock = block('async function ownWorkspaceMigrationLock(', '/**\n * What the move found');
+    expect(lock).toContain('let ownerAlive = false;');
+    expect(lock).toContain("cause.code === 'ESRCH'");
+    expect(lock).toContain('ownerAlive = !recover');
+    expect(lock).toContain('!recover && !ownerAlive');
+    const now = 10_000;
+    expect(staleMigrationLock(now - MIGRATION_LOCK_STALE_MS - 1, now)).toBe(true);
+    expect(staleMigrationLock(now - MIGRATION_LOCK_STALE_MS, now)).toBe(false);
+    expect(staleMigrationLock(now - 1, now)).toBe(false);
+  });
+
   it('retains a stopped copy session until land/drop has really succeeded', () => {
     const land = block('async function landTheCopy(', 'handle<null>(CHANNEL.worktreeDrop');
     expect(land.indexOf('await stopCopyConversation')).toBeGreaterThanOrEqual(0);
@@ -61,6 +91,8 @@ describe('PR #51 data durability wiring', () => {
     expect(review.indexOf('await stopCopyConversation')).toBeGreaterThanOrEqual(0);
     expect(review.indexOf('await stopCopyConversation')).toBeLessThan(review.indexOf('landWorktree'));
     expect(review).toContain('await putDownCopyConversation');
+    expect(review).toContain('let sourceChanges = await uncommittedWork');
+    expect(review).toContain('sourceChanges.length === 0');
   });
 
   it('scopes restored views and terminals to the named project/workspace', () => {

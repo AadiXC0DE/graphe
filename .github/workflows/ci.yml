@@ -146,6 +146,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # npm can unpack node-pty's prebuilt spawn-helper without its executable
+      # bit. The Electron smoke suite uses node_modules directly, before the
+      # package hook has a chance to repair the copy inside an app bundle.
+      - name: Restore node-pty helper permissions
+        run: node scripts/ensure-node-pty-helper.mjs
       # Builds both halves itself, so it fails on the app rather than on a
       # missing artifact from another job. Empty for the default run: a switch
       # set to nothing is not a decision, so the in-process path stands.

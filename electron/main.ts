@@ -269,6 +269,7 @@ import {
   sameRepository,
   sharedBase,
   sweepCheckouts,
+  uncommittedWork,
   worktreeWords,
   type Landing as HowItLands,
   type RunGit,
@@ -340,9 +341,11 @@ import {
 import {
   MARKER_FILE,
   LOCK_FILE,
+  MIGRATION_LOCK_STALE_MS,
   commit,
   discover,
   readMarker,
+  staleMigrationLock,
 } from './services/migration-service';
 import { readoutOf } from './services/migration-readout';
 import {
@@ -3552,10 +3555,15 @@ async function conversationsInProject(
         conversationById(index, one.path)?.lineage ??
         conversationById(index, one.id)?.lineage ??
         null;
+      const address =
+        conversationById(index, one.path)?.conversationId ??
+        conversationById(index, one.id)?.conversationId ??
+        one.path;
       return {
         ...one,
+        address,
         archived: putAway,
-        state: reportedState(states.stateOf(named(one.path)), putAway),
+        state: reportedState(states.stateOf(named(address)), putAway),
         ...(trouble === null ? {} : { workspace: trouble }),
         ...(lineage === null ? {} : { lineage }),
       };
@@ -3593,16 +3601,14 @@ async function runWorkspaceMigration(): Promise<void> {
   const dir = app.getPath('userData');
   const markerFile = join(dir, MARKER_FILE);
   const lock = join(dir, LOCK_FILE);
+  const ownerFile = join(lock, 'owner.json');
   // A move that already happened keeps the moment it happened. Asking for the
   // check again re-reads the same folders; it does not make the move newer.
   const before = await readFile(markerFile, 'utf8').catch(() => null);
   const wasAt = before === null ? null : readMarker(before)?.completedAt ?? null;
   // Somebody else is doing it, or did it a moment ago. A second writer here
   // would decide the same ids and fight over the same file.
-  const mine = await mkdir(lock, { recursive: false }).then(
-    () => true,
-    () => false,
-  );
+  const mine = await ownWorkspaceMigrationLock(lock, ownerFile);
   if (!mine) return;
   try {
     const index = await loadWorkspaceIndex();
@@ -3640,18 +3646,17 @@ async function runWorkspaceMigration(): Promise<void> {
       recentsFile: join(dir, 'projects.json'),
       exists: (path: string) => existsSync(path),
     });
-    const run = await commit(manifest, {
-      index,
+    const migrationOptions = {
       probe: {
-        exists: async (path) => existsSync(path),
-        isRepo: async (path) =>
+        exists: async (path: string) => existsSync(path),
+        isRepo: async (path: string) =>
           (await gitRun(path, ['rev-parse', '--is-inside-work-tree']).catch(() => null))?.code === 0,
-        branchOf: async (path) => {
+        branchOf: async (path: string) => {
           const named = await gitRun(path, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => null);
           const branch = (named?.out ?? '').trim();
           return named?.code === 0 && branch !== '' && branch !== 'HEAD' ? branch : null;
         },
-        worktreeList: async (repo) => {
+        worktreeList: async (repo: string) => {
           const listed = await gitRun(repo, ['worktree', 'list', '--porcelain']).catch(() => null);
           return (listed?.out ?? '')
             .split('\n')
@@ -3662,7 +3667,22 @@ async function runWorkspaceMigration(): Promise<void> {
       },
       now: Date.now(),
       indexFile: workspaceIndexFile(),
-    });
+    };
+    // Discovery can take a while (git probes and legacy reads). If a normal
+    // operation changes the registry during that time, never assign the
+    // migration result computed from the old object over it. Rebase the pure
+    // migration decision on the latest in-memory index; after three changes we
+    // leave the index untouched and let the next explicit check retry.
+    let migrationBase = index;
+    let run = await commit(manifest, { ...migrationOptions, index: migrationBase });
+    for (let attempt = 0; workspaceIndex !== migrationBase && attempt < 3; attempt += 1) {
+      migrationBase = workspaceIndex;
+      run = await commit(manifest, { ...migrationOptions, index: migrationBase });
+    }
+    if (workspaceIndex !== migrationBase) {
+      log.line('warn', 'workspace migration deferred after concurrent registry updates');
+      return;
+    }
     // The copies first: a migration that rewrote the index and then failed to
     // keep the old files would have nothing to go back to. Exclusive, so a
     // check run after this one cannot replace the pre-migration state it kept
@@ -3674,6 +3694,18 @@ async function runWorkspaceMigration(): Promise<void> {
       // still the way back, so a second run reports it too. The source path is
       // what is written down: the copy is that path with `.bak` after it.
       if (existsSync(one.backup)) kept.push(one.path);
+    }
+    // Backup I/O above yields to normal registry operations too. Re-check
+    // immediately before the synchronous assignment, and rebase once more if
+    // needed; otherwise a view/conversation saved during a slow copy could be
+    // overwritten even though the earlier check saw a stable index.
+    for (let attempt = 0; workspaceIndex !== migrationBase && attempt < 3; attempt += 1) {
+      migrationBase = workspaceIndex;
+      run = await commit(manifest, { ...migrationOptions, index: migrationBase });
+    }
+    if (workspaceIndex !== migrationBase) {
+      log.line('warn', 'workspace migration deferred after concurrent registry updates');
+      return;
     }
     workspaceIndex = run.index;
     await saveWorkspaceIndex();
@@ -3703,6 +3735,61 @@ async function runWorkspaceMigration(): Promise<void> {
   } finally {
     await rm(lock, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/** Claim the migration directory, recovering only a lock whose owner is dead.
+ * A process can be killed between mkdir and writing owner.json, so an old
+ * owner-less directory is recoverable by age; an active owner is never removed
+ * merely because the migration is taking a while. */
+async function ownWorkspaceMigrationLock(lock: string, ownerFile: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await mkdir(lock, { recursive: false });
+      try {
+        await writeFile(ownerFile, `${JSON.stringify({ pid: process.pid, startedAt: Date.now() })}\n`, 'utf8');
+      } catch {
+        await rm(lock, { recursive: true, force: true }).catch(() => undefined);
+        return false;
+      }
+      return true;
+    } catch {
+      if (attempt !== 0) return false;
+      const owner = await readFile(ownerFile, 'utf8').catch(() => null);
+      let recover = false;
+      let ownerAlive = false;
+      if (owner !== null) {
+        try {
+          const parsed = JSON.parse(owner) as { pid?: unknown };
+          const pid = typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0 ? parsed.pid : null;
+          if (pid === process.pid) {
+            ownerAlive = true;
+          } else if (pid !== null) {
+            try {
+              process.kill(pid, 0);
+              ownerAlive = true;
+            } catch (cause) {
+              // ESRCH means the owner died. EPERM means it is alive but this
+              // process cannot signal it, so retaining the lock is safer.
+              recover = typeof cause === 'object' && cause !== null && 'code' in cause
+                ? cause.code === 'ESRCH'
+                : false;
+              ownerAlive = !recover;
+            }
+          }
+        } catch {
+          // A killed writer may leave a partial owner file. Age is the safe
+          // fallback for that case, just as it is for an owner-less lock.
+        }
+      }
+      if (!recover && !ownerAlive) {
+        const details = await stat(lock).catch(() => null);
+        recover = details !== null && staleMigrationLock(details.mtimeMs, Date.now(), MIGRATION_LOCK_STALE_MS);
+      }
+      if (!recover) return false;
+      await rm(lock, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+  return false;
 }
 
 /**
@@ -4045,6 +4132,57 @@ const startingFlowRuns = new Map<string, number>();
  *  must not advance the same gate/wave twice. */
 const drivingFlowRuns = new Set<string>();
 let activeFlowWorktreeLanes = 0;
+/** Process-wide worktree admission. A run may have more ready branches than
+ * the board can hold; opens wait here and are woken when another run releases
+ * a lane, rather than leaving a canvas permanently in Waiting for room. */
+type FlowWorktreeWaiter = { resolve: () => void; stopped: () => boolean };
+const flowWorktreeRoomWaiters = new Set<FlowWorktreeWaiter>();
+
+function wakeFlowWorktreeRoomWaiters(force = false): void {
+  if (force) {
+    for (const next of flowWorktreeRoomWaiters) {
+      if (!next.stopped()) continue;
+      flowWorktreeRoomWaiters.delete(next);
+      next.resolve();
+    }
+    return;
+  }
+  let room = Math.max(0, capsNow().board - activeFlowWorktreeLanes);
+  while (room > 0 && flowWorktreeRoomWaiters.size > 0) {
+    const next = flowWorktreeRoomWaiters.values().next().value as FlowWorktreeWaiter | undefined;
+    if (next === undefined) break;
+    flowWorktreeRoomWaiters.delete(next);
+    room -= 1;
+    next.resolve();
+  }
+}
+
+async function reserveFlowWorktreeLane(stopped: () => boolean): Promise<void> {
+  if (capsNow().board <= 0) throw new Error('No worktree capacity is available on this machine.');
+  while (activeFlowWorktreeLanes >= capsNow().board) {
+    if (stopped()) throw new Error('This flow has stopped.');
+    await new Promise<void>((resolve) => {
+      const waiter: FlowWorktreeWaiter = { resolve, stopped };
+      flowWorktreeRoomWaiters.add(waiter);
+    });
+  }
+  if (stopped()) throw new Error('This flow has stopped.');
+  activeFlowWorktreeLanes += 1;
+}
+
+async function waitForFlowWorktreeRoom(stopped: () => boolean): Promise<void> {
+  while (capsNow().board > 0 && activeFlowWorktreeLanes >= capsNow().board) {
+    if (stopped()) return;
+    await new Promise<void>((resolve) => {
+      flowWorktreeRoomWaiters.add({ resolve, stopped });
+    });
+  }
+}
+
+function releaseFlowWorktreeLane(): void {
+  activeFlowWorktreeLanes = Math.max(0, activeFlowWorktreeLanes - 1);
+  wakeFlowWorktreeRoomWaiters();
+}
 /** Owner-qualified run keys prevent an id from one project controlling another. */
 const liveRunKey = (project: string, flow: string): string => `${canonical(project)}\u0000${flow}`;
 /** A deleted flow invalidates callbacks already queued by its runner. */
@@ -4332,10 +4470,11 @@ function runnerPortFor(
   const leases = new Map<string, { key: string; newlyHeld: boolean }>();
   const reserved = new Set<string>();
   const queued = new Map<string, string>();
+  const stoppedLanes = new Set<string>();
   let released = false;
 
   async function lease(lane: Lane, folder: string): Promise<void> {
-    if (released) throw new Error('This flow has stopped.');
+    if (released || stoppedLanes.size > 0) throw new Error('This flow has stopped.');
     const key = canonical(folder);
     const prior = leases.get(lane.id);
     if (prior !== undefined) return;
@@ -4348,7 +4487,13 @@ function runnerPortFor(
       queued.set(lane.id, key);
       const outcome = await admission.when;
       queued.delete(lane.id);
-      if (outcome !== 'granted' || released) throw new Error('This flow has stopped.');
+      if (outcome !== 'granted' || released || stoppedLanes.size > 0) {
+        // A queued ticket can be admitted in the same turn that Stop/Delete
+        // marks this port released. In that case the lock is now ours and must
+        // be handed on immediately; otherwise the next run waits forever.
+        if (outcome === 'granted') workspaceLocks.release(key, runId);
+        throw new Error('This flow has stopped.');
+      }
       leases.set(lane.id, { key, newlyHeld: true });
       return;
     }
@@ -4367,25 +4512,73 @@ function runnerPortFor(
     });
   }
 
+  async function acquireLane(lane: Lane): Promise<Lane> {
+    if (lane.conversationId === null) {
+      if (lane.id !== LANE_0 && !reserved.has(lane.id)) {
+        await reserveFlowWorktreeLane(() => released || stoppedLanes.size > 0);
+        reserved.add(lane.id);
+      }
+      return lane;
+    }
+    const home = projectAt({ project });
+    if (home === null) throw new Error(CANVAS_WORDS.noProject);
+    const open = { path: home.path, held: home.held };
+    const index = await loadWorkspaceIndex();
+    const recorded = workspaceById(index, lane.workspaceId) ?? await recordedWorkspace(lane.conversationId);
+    const local = await localWorkspaceFor(home.path);
+    const target = recorded !== null && recorded.projectId === local.projectId && recorded.state !== 'deleted' && recorded.state !== 'deleting'
+      ? recorded
+      : null;
+    if (target === null && conversationAt(open.held, { conversation: lane.conversationId }) === null) {
+      throw new Error(CANVAS_WORDS.noConversation);
+    }
+    const folder = target?.cwd ?? folderFor(home, { conversation: lane.conversationId });
+    const tookSlot = lane.id !== LANE_0 && !reserved.has(lane.id);
+    if (tookSlot) {
+      await reserveFlowWorktreeLane(() => released || stoppedLanes.size > 0);
+      reserved.add(lane.id);
+    }
+    if (released || stoppedLanes.size > 0) {
+      if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
+      throw new Error('This flow has stopped.');
+    }
+    let started: Started | null = null;
+    try {
+      // A persisted lane is only an address. Its Pi runtime may have been
+      // evicted or may not exist after relaunch, so leasing the folder alone
+      // leaves the subsequent turn with no session to receive it.
+      const result = await startConversation(open, openingFor(lane.conversationId));
+      if (!result.ok) throw new Error(result.trouble.because);
+      started = result.value;
+      if (released || stoppedLanes.size > 0) throw new Error('This flow has stopped.');
+      await lease(lane, folder);
+      const headKey = `${project}\u0000${lane.id}`;
+      if (!laneHeads.has(headKey)) laneHeads.set(headKey, (await headSha(folder)) ?? '');
+      return {
+        ...lane,
+        conversationId: started.address,
+        ...(target === null ? {} : { workspaceId: target.workspaceId, branch: target.branch }),
+      };
+    } catch (cause) {
+      if (started !== null) {
+        await started.session.stop().catch(() => undefined);
+        putDown(open.held, started.address);
+      }
+      if (tookSlot && reserved.has(lane.id)) {
+        reserved.delete(lane.id);
+        releaseFlowWorktreeLane();
+      }
+      throw cause;
+    }
+  }
+
   return {
     async openLane(lane: Lane): Promise<Lane> {
       const home = projectAt({ project });
       if (home === null) throw new Error(CANVAS_WORDS.noProject);
       const open = { path: home.path, held: home.held };
       if (lane.conversationId !== null) {
-        const index = await loadWorkspaceIndex();
-        const recorded = workspaceById(index, lane.workspaceId) ?? await recordedWorkspace(lane.conversationId);
-        const local = await localWorkspaceFor(home.path);
-        const target = recorded !== null && recorded.projectId === local.projectId && recorded.state !== 'deleted' && recorded.state !== 'deleting'
-          ? recorded
-          : null;
-        if (target === null && conversationAt(open.held, { conversation: lane.conversationId }) === null) {
-          throw new Error(CANVAS_WORDS.noConversation);
-        }
-        const folder = target?.cwd ?? folderFor(home, { conversation: lane.conversationId });
-        await lease(lane, folder);
-        laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(folder)) ?? '');
-        return { ...lane, ...(target === null ? {} : { workspaceId: target.workspaceId, branch: target.branch }) };
+        return acquireLane(lane);
       }
       if (lane.id === LANE_0) {
         // Start in the workspace captured at the Start press. Falling back to
@@ -4408,19 +4601,25 @@ function runnerPortFor(
       // The same copy the New worktree press makes, by the same call, so a
       // canvas branch is an ordinary branch and lands through Review.
       if (!reserved.has(lane.id)) {
-        if (activeFlowWorktreeLanes >= capsNow().board) {
-          throw new Error('There is no room for another worktree lane right now.');
-        }
-        activeFlowWorktreeLanes += 1;
-        reserved.add(lane.id);
+        await acquireLane(lane);
+      }
+      if (released || stoppedLanes.size > 0) {
+        if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
+        throw new Error('This flow has stopped.');
       }
       const named = freshCheckout(open.held, open.path);
       const made = await createWorktree(gitRunHereFor(), open.path, named.name, null, {
         folder: named.folder,
       });
       if (!made.ok || made.value === null) {
-        if (reserved.delete(lane.id)) activeFlowWorktreeLanes = Math.max(0, activeFlowWorktreeLanes - 1);
+        if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
         throw new Error(made.ok ? CANVAS_WORDS.noRoom : made.because);
+      }
+      if (released || stoppedLanes.size > 0) {
+        const dropped = await dropWorktree(gitRunHereFor(), open.path, made.value.folder).catch(() => null);
+        if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
+        if (dropped?.ok !== true) throw new Error('This flow stopped before its worktree could be cleaned up.');
+        throw new Error('This flow has stopped.');
       }
       let workspace: WorkspaceRecord | null = null;
       let started: Started | null = null;
@@ -4441,6 +4640,7 @@ function runnerPortFor(
         laneHeads.set(`${project}\u0000${lane.id}`, (await headSha(made.value.folder)) ?? '');
         return { ...lane, conversationId: started.address, branch: made.value.branch };
       } catch (cause) {
+        if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
         // Setup has not sent a turn yet, so the newly-created conversation can
         // be stopped and closed without discarding user work. If the physical
         // cleanup refuses, keep its registry records so recovery can reopen the
@@ -4470,6 +4670,16 @@ function runnerPortFor(
         }
         throw cause;
       }
+    },
+
+    async acquireLane(lane) {
+      return acquireLane(lane);
+    },
+
+    async waitForRoom() {
+      const stopped = () => released || stoppedLanes.size > 0;
+      await waitForFlowWorktreeRoom(stopped);
+      if (stopped()) throw new Error('This flow has stopped.');
     },
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the port's shape
@@ -4529,6 +4739,11 @@ function runnerPortFor(
     },
 
     async stop(lane) {
+      stoppedLanes.add(lane.id);
+      // A lane can be blocked before its conversation exists, waiting for the
+      // process-wide worktree slot. Wake that admission so Stop can drain the
+      // driver rather than waiting for a lane that has been cancelled.
+      wakeFlowWorktreeRoomWaiters(true);
       const waiting = queued.get(lane.id);
       if (waiting !== undefined) workspaceLocks.cancel(waiting, runId);
       const home = projectAt({ project });
@@ -4537,16 +4752,25 @@ function runnerPortFor(
       await found?.held.stop().catch(() => undefined);
     },
 
+    async releaseLane(lane) {
+      if (lane.id === LANE_0) return;
+      if (reserved.delete(lane.id)) releaseFlowWorktreeLane();
+    },
+
     async release() {
       if (released) return;
       released = true;
+      // A lane may be waiting for the global board slot. Wake it so its
+      // stopped check can observe cancellation instead of retaining a promise
+      // forever after Stop/Delete.
+      wakeFlowWorktreeRoomWaiters(true);
       for (const key of queued.values()) workspaceLocks.cancel(key, runId);
       queued.clear();
       for (const held of leases.values()) {
         if (held.newlyHeld) workspaceLocks.release(held.key, runId);
       }
       leases.clear();
-      activeFlowWorktreeLanes = Math.max(0, activeFlowWorktreeLanes - reserved.size);
+      for (let index = 0; index < reserved.size; index += 1) releaseFlowWorktreeLane();
       reserved.clear();
     },
 
@@ -4669,10 +4893,9 @@ async function beginRun(
     return failed;
   };
   try {
-    // Resumed runs already have conversations. Re-admit each of their workspaces
-    // before the first wave; the pure runner intentionally skips `openLane` for a
-    // known conversation and must not be asked to know about shell locks.
-    await Promise.all(run.lanes.filter((lane) => lane.conversationId !== null).map((lane) => port.openLane(lane)));
+    // Lane admission belongs to the runner's current wave. Admitting every
+    // persisted lane up front can consume the board before the first wave and
+    // deadlock a resumed flow with more lanes than the machine allows.
     await keepFlows(projectId, userData, withRunFor(starting, run));
     pushFlow(project, withRunFor(starting, run));
     await wroteRunNote(
@@ -4697,6 +4920,8 @@ async function beginRun(
   drivingFlowRuns.add(key);
   let driven: CanvasRun;
   try {
+    // The runner admits a board-sized wave; completed lanes release their
+    // board slot through the port, so later waves can make progress.
     driven = await drive(starting, run, port);
   } catch {
     // A port/stream failure outside the runner's block boundary must still
@@ -5828,6 +6053,16 @@ async function startConversationUnlocked(
 ): Promise<Result<Started>> {
   const held = open.held;
   const asked = how.kind === 'carry-on' ? how.path : undefined;
+  // Resolve a durable conversation id to the transcript the registry owns
+  // before building the session. The id is an app identity, not a Pi file path;
+  // passing it as `sessionPath` opens the wrong file (or creates a new one).
+  await loadWorkspaceIndex();
+  const written = asked === undefined ? null : conversationById(workspaceIndex, asked);
+  const savedSessionPath = asked === undefined
+    ? null
+    : written === null
+      ? asked
+      : written.sessionFile ?? (written.conversationId === asked && asked.endsWith('.jsonl') ? asked : null);
   /** The permission rung the conversation being replaced was on, if one was. */
   let rungBefore: HowFar | null = null;
   /* A fresh press names the chat it is asking for before the chat exists, so a
@@ -5992,9 +6227,15 @@ async function startConversationUnlocked(
       // asks for, which is not built yet.
       ...(how.kind === 'fresh' && how.forkFrom !== undefined
         ? { sessionDir: sessionsFolder(), forkFrom: how.forkFrom }
-        : asked !== undefined
-          ? { sessionPath: asked }
-          : { sessionDir: sessionsFolder(), ...(how.kind === 'fresh' ? { fresh: true } : {}) }),
+        : savedSessionPath !== null
+          ? { sessionPath: savedSessionPath }
+          : {
+              sessionDir: sessionsFolder(),
+              // A registry id with no transcript (for example a durable
+              // draft) is still a new session. Never let carry-on fall through
+              // to Pi's "continue recent" selection and reopen another chat.
+              ...(how.kind === 'fresh' || asked !== undefined ? { fresh: true } : {}),
+            }),
       ...(providerAuthPath === null ? {} : { authPath: providerAuthPath }),
     });
   } catch (cause) {
@@ -6022,8 +6263,6 @@ async function startConversationUnlocked(
   // id already written down for that file — which is how a profile from before
   // ids existed stays one conversation rather than becoming two. Anything else
   // is found by the file the session is writing, or minted.
-  await loadWorkspaceIndex();
-  const written = asked === undefined ? null : conversationById(workspaceIndex, asked);
   const address =
     keep ??
     written?.conversationId ??
@@ -11288,7 +11527,23 @@ function register(): void {
     }
 
     let clashes: readonly string[] = [];
-    if (taking.length === entry.files.length && checkout.branch !== '') {
+    // A branch merge cannot carry source working-tree edits. In that case use
+    // the same file-by-file path as a partial review: tracked and untracked
+    // files shown in the entry are copied into the project, while ignored
+    // notes/checkpoints remain in the checkout rather than being force-dropped.
+    let sourceChanges = await uncommittedWork(gitRunHereFor(), checkout.folder);
+    if (sourceChanges.length > 0) {
+      // Stop a live source before taking byte-level snapshots. Otherwise the
+      // runtime can write another checkpoint between reviewSnapshotOf and
+      // bringBack, and the decision would land a state nobody approved.
+      await stopCopyConversation(open, entry.address);
+      const stopped = await reviewSnapshotOf(checkout.folder, repo);
+      if (staleDecision(entry, stopped)) return fail(await staleTrouble(open, entry, stopped));
+      sourceChanges = await uncommittedWork(gitRunHereFor(), checkout.folder);
+    }
+    const canMergeBranch =
+      taking.length === entry.files.length && checkout.branch !== '' && sourceChanges.length === 0;
+    if (canMergeBranch) {
       // Nothing held back, so the branch itself goes in and the copy is given
       // back. Its conversation is put down first: the session is rooted in that
       // folder, and left open the next thing it was asked to do would run
@@ -12297,6 +12552,10 @@ function register(): void {
       { key: workspaceKey, runId, label: held === undefined || held.trim() === '' ? open.name : held },
       own !== undefined && own.key === workspaceKey ? own.runId : undefined,
     );
+    // `Admission.granted` describes only the instant request. A queued ticket
+    // becomes a newly-held lock when `when` resolves; keeping that fact separate
+    // is essential because the original admission object remains `granted:false`.
+    let newlyHeld = admission.granted && admission.newlyHeld;
     if (!admission.granted) {
       // The folder is recorded as it is now, before the wait: a workspace this
       // chat is pointed at afterwards is a different request, not this one.
@@ -12321,6 +12580,7 @@ function register(): void {
         states.move(named(conversation.path), 'idle', Date.now());
         return done(null);
       }
+      newlyHeld = true;
       // The folder is free, so what was waiting begins: the adapter's own `busy`
       // says when, and `forwardTo` moves the state there.
     }
@@ -12336,7 +12596,7 @@ function register(): void {
         // A queued request may have just been granted. Release the lock before
         // returning from this validation path; the normal send try/finally is
         // below and therefore cannot clean up this early exit.
-        if (admission.granted && admission.newlyHeld) {
+        if (newlyHeld) {
           workspaceLocks.release(workspaceKey, runId);
         }
         states.move(named(conversation.path), 'idle', Date.now());
@@ -12347,7 +12607,7 @@ function register(): void {
         });
       }
     }
-    if (admission.granted && admission.newlyHeld) runsHere.set(whose, { key: workspaceKey, runId });
+    if (newlyHeld) runsHere.set(whose, { key: workspaceKey, runId });
     send(open.path, { type: 'message-started', text: textIn }, conversation.path);
     try {
       // Written down under the profile before the message goes, by the hash of
@@ -13086,7 +13346,9 @@ function register(): void {
     }
     drivingFlowRuns.add(key);
     try {
-      return done(await drive(live.flow, over, live.port).then((run) => settledRun(live, run)));
+      return done(
+        await drive(live.flow, over, live.port).then((run) => settledRun(live, run)),
+      );
     } finally {
       driver.resolve();
       drivingFlowRuns.delete(key);

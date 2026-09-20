@@ -89,6 +89,11 @@ import { askWords, cannotAsk, saysAnswers, tidyQuestions, type Answers } from '.
 import { CARRY_ON, isTransientStreamError, WAITS_MS } from './transient';
 import { maskToolResult } from './redact';
 import {
+  SCRIPTED_MODEL_ENV,
+  SCRIPTED_PROVIDER,
+  scriptedProviderConfig,
+} from './scripted-provider';
+import {
   cardsFor,
   contentFingerprint,
   extensionsIn,
@@ -1481,11 +1486,6 @@ async function lookAgainFor(runtime: PiRuntime): Promise<void> {
 /** Read by nothing but the real-window suite, which sets it to the address of a
  *  local server that answers in Pi's own message protocol. Named as a seam, and
  *  honoured as one: see `registerScriptedModel`. */
-const SCRIPTED_MODEL_ENV = 'GRAPHE_TEST_MODEL';
-
-const SCRIPTED_PROVIDER = 'graphe-scripted';
-const SCRIPTED_MODEL_ID = 'scripted';
-
 /** Whether this copy is a shipping build. Only Electron can say, so the shell
  *  says it on the way up, and the answer here until it does is yes: a caller
  *  that never speaks leaves the scripted model off rather than on. */
@@ -1517,25 +1517,7 @@ async function registerScriptedModel(runtime: PiRuntime): Promise<void> {
   if (shipped) return;
   const baseUrl = process.env[SCRIPTED_MODEL_ENV];
   if (baseUrl === undefined || baseUrl === '') return;
-  runtime.registerProvider(SCRIPTED_PROVIDER, {
-    name: 'Scripted test model',
-    baseUrl,
-    api: 'pi-messages',
-    // Enough auth to compose a provider the window will offer; the credential
-    // below is what makes it read as connected rather than merely present.
-    apiKey: 'scripted',
-    models: [
-      {
-        id: SCRIPTED_MODEL_ID,
-        name: 'Scripted replies',
-        reasoning: false,
-        input: ['text'],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 200_000,
-        maxTokens: 8_192,
-      },
-    ],
-  });
+  runtime.registerProvider(SCRIPTED_PROVIDER, scriptedProviderConfig(baseUrl));
   try {
     await runtime.setRuntimeApiKey(SCRIPTED_PROVIDER, 'scripted');
   } catch {

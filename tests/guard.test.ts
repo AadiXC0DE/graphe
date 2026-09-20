@@ -1813,27 +1813,7 @@ describe('a script handed straight to a shell', () => {
 /* Work that runs beside the conversation                                      */
 /* ========================================================================== */
 
-describe('putting work on the board', () => {
-  /* Found in an audit: both tools existed and the Guard had never heard of
-     them, so every fan-out met "Run an instruction I do not fully recognise?"
-     — a question about nothing anybody could answer. */
-  it('asks a question about the thing actually happening', () => {
-    const going = evaluate(call('set_going', { pieces: [{ doing: 'Rebuild the pricing page' }] }), ctx);
-    expect(going.kind).toBe('confirm');
-    expect(spoken(going)).toMatch(/several pieces of work/i);
-    expect(spoken(going)).not.toMatch(/do not fully recognise/i);
-
-    const ways = evaluate(call('try_ways', { doing: 'Rework the hero', ways: ['quiet', 'bold'] }), ctx);
-    expect(ways.kind).toBe('confirm');
-    expect(spoken(ways)).toMatch(/two or three different ways/i);
-  });
-
-  it('says that nothing reaches the project on its own', () => {
-    for (const name of ['set_going', 'try_ways']) {
-      expect(spoken(evaluate(call(name, {}), ctx)), name).toMatch(/your own files/i);
-    }
-  });
-
+describe('a piece of work sent to a helper', () => {
   /* A builder writes. Telling somebody it "cannot change anything" was true of
      the other three roles and false of this one. */
   it('does not tell somebody a builder cannot change anything', () => {

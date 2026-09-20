@@ -5,6 +5,11 @@
  * list a designer can read. This file is the join, and it is the last place in
  * the app where the two vocabularies touch.
  *
+ * Every entry here is a real commit in the project's own repository, kept under
+ * the app's namespace rather than on the branch somebody is working on: letting
+ * a turn end must never move their HEAD or their index, and a moment nobody
+ * asked to publish is not theirs to find in a branch listing.
+ *
  * DIFFERENTIATORS §1 calls this the feature that makes everything else safe to
  * try, and that is the whole argument for the module: a designer who is one bad
  * prompt away from starting over stops experimenting, and a tool nobody

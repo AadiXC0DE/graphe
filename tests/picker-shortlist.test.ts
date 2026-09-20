@@ -1,8 +1,66 @@
-/** The first screen shows the recent few, not everything remembered. */
+// @vitest-environment jsdom
+/** The first screen shows the recent few, not everything remembered.
+ *
+ *  Source text, not behaviour: the App's undecided and picking branches, and the list's own height; no behavioural test can reach it — nothing renders `App`, and jsdom never applies a stylesheet.
+ */
 
-import { describe, expect, it } from 'vitest';
-import { MOST_SHOWN } from '../src/components/ProjectPicker';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+
+import ProjectPicker, { MOST_SHOWN } from '../src/components/ProjectPicker';
+import type { RecentProject } from '../src/lib/ipc';
 import { MOST_REMEMBERED } from '../src/projects/recents';
+
+/** Read from the root: this file runs under jsdom, where `import.meta.url` is
+ *  not a file URL. */
+const read = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8');
+
+const hosts: HTMLElement[] = [];
+afterEach(() => {
+  for (const host of hosts.splice(0)) host.remove();
+});
+
+/** `act` only runs when this is set, and jsdom here does not set it. */
+const reactGlobals = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+
+beforeAll(() => {
+  reactGlobals.IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+/** A folder remembered once, in the order the picker is given them. */
+function remembered(name: string, at: number): RecentProject {
+  return {
+    path: `/w/${name}`,
+    name,
+    lastOpenedAt: at,
+    lastSpend: null,
+    missing: false,
+    branch: 'main',
+  };
+}
+
+/** The picker as it really draws. */
+async function draw(projects: readonly RecentProject[]): Promise<HTMLElement> {
+  const host = document.createElement('div');
+  document.body.append(host);
+  hosts.push(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(
+      createElement(ProjectPicker, {
+        projects,
+        onOpen: () => undefined,
+        onForget: () => undefined,
+        onBrowse: () => undefined,
+      }),
+    );
+  });
+  return host;
+}
 
 describe('the recents list is a shortlist', () => {
   it('shows fewer than the store keeps, so it never needs a scrollbar', () => {
@@ -11,23 +69,16 @@ describe('the recents list is a shortlist', () => {
   });
 
   it('renders the slice rather than every project', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const source = readFileSync(
-      fileURLToPath(new URL('../src/components/ProjectPicker.tsx', import.meta.url)),
-      'utf8',
+    const many = Array.from({ length: MOST_REMEMBERED }, (_, at) => remembered(`project-${String(at)}`, at));
+    expect(many.length).toBeGreaterThan(MOST_SHOWN);
+    const host = await draw(many);
+    expect([...host.querySelectorAll('.pickerrow__name')].map((one) => one.textContent)).toEqual(
+      many.slice(0, MOST_SHOWN).map((one) => one.name),
     );
-    expect(source).toContain('projects.slice(0, MOST_SHOWN)');
-    expect(source).not.toContain('{projects.map(');
   });
 
-  it('leaves no bounded scroll box behind on the list', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const css = readFileSync(
-      fileURLToPath(new URL('../src/components/ProjectPicker.css', import.meta.url)),
-      'utf8',
-    );
+  it('leaves no bounded scroll box behind on the list', () => {
+    const css = read('src/components/ProjectPicker.css');
     expect(css).not.toMatch(/overflow:\s*hidden auto/);
     expect(css).not.toMatch(/max-height:\s*min\(/);
   });
@@ -41,29 +92,25 @@ describe('the recents list is a shortlist', () => {
  *  This only became visible when the shell stopped blocking the launch: the
  *  window now draws well before the first answer comes back. */
 describe('the first screen is not guessed at', () => {
-  const app = async () => {
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    return readFileSync(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8');
-  };
+  const app = (): string => read('src/App.tsx');
 
-  it('tells "nothing was open" apart from "nobody has said yet"', async () => {
+  it('tells "nothing was open" apart from "nobody has said yet"', () => {
     // `recent` is null until the answer lands and an array afterwards. Reading
     // null as "none" is the bug: it draws the empty conversation for a moment.
     // The second half is the launch that is already on its way to a folder:
     // the list used to appear, be read, and be taken away a second later.
-    expect(await app()).toContain(
+    expect(app()).toContain(
       'const undecided = desk === null && (recent === null || openingOnLaunch);',
     );
-    expect(await app()).toContain(
+    expect(app()).toContain(
       'const picking = desk === null && !openingOnLaunch && recent !== null && recent.length > 0;',
     );
-    expect(await app()).toContain('void open(path).finally(() => setOpeningOnLaunch(false));');
+    expect(app()).toContain('void open(path).finally(() => setOpeningOnLaunch(false));');
   });
 
-  it('draws neither first screen until it knows which', async () => {
-    const source = await app();
-    expect(source).toContain('undecided ? null : desk === null || desk.turns.length === 0 ?');
+  it('draws neither first screen until it knows which', () => {
+    const source = app();
+    expect(source).toContain('undecided ? null : desk === null || chat.turns.length === 0 ?');
     // And no composer under a screen that is not there yet.
     expect(source).toContain('picking || undecided ? null : (');
   });

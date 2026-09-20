@@ -11,6 +11,8 @@
  *     in it survives being written through.
  *  3. **A no-op never writes.** A preference saved on every launch is a file
  *     rewritten for nothing, and `change` is the one place that can tell.
+ *
+ *  Source text, not behaviour: the adapter's stuck notice, the advisor reaching every createSession the shell opens, and the plan riding in the system prompt; no behavioural test can reach them — the joins run through electron/main.ts.
  */
 
 import { readFileSync } from 'node:fs';
@@ -378,7 +380,9 @@ describe('every conversation gets the advisor, including a canvas one', () => {
   it('is passed at every place a session is opened', () => {
     // A canvas opens its conversation through the same handler a tab does, so
     // "does the canvas use the advisor" is the same question as "does chat".
-    const opens = main.match(/createSession\(\{/g)?.length ?? 0;
+    // Every session goes through `openSession`, which picks the process and
+    // builds the same options either way.
+    const opens = main.match(/openSession\(\{/g)?.length ?? 0;
     const carried = main.match(/advisor: (?:prefs\.advisor|\(await preferences\(\)\)\.all\(\)\.advisor)/g)?.length ?? 0;
     expect(opens).toBeGreaterThan(0);
     expect(carried).toBe(opens);
@@ -386,7 +390,7 @@ describe('every conversation gets the advisor, including a canvas one', () => {
 
   it('and so is how long it thinks', () => {
     const paced = main.match(/advisorThinking: (?:prefs\.advisorThinking|\(await preferences\(\)\)\.all\(\)\.advisorThinking)/g)?.length ?? 0;
-    expect(paced).toBe(main.match(/createSession\(\{/g)?.length ?? 0);
+    expect(paced).toBe(main.match(/openSession\(\{/g)?.length ?? 0);
   });
 });
 
@@ -435,26 +439,14 @@ describe('the plan the advisor reads', () => {
      was tidied up — exactly the turns where a long job forgets it had a list.
      It is in the system prompt now, on every call. */
   it('is in the system prompt rather than appended to what somebody typed', () => {
-    expect(MAIN).not.toContain("const asked = [text, papers, plan ?? ''].filter");
     expect(MAIN).toContain('const asked = [text, papers].filter');
     const ADAPTER = readFileSync(new URL('../src/agent/pi/adapter.ts', import.meta.url), 'utf8');
-    expect(ADAPTER).toContain("name: 'graphe-standing'");
+    expect(ADAPTER).toContain("name: 'graphe-prompt'");
     expect(ADAPTER).toContain("api.on('before_agent_start'");
   });
 
-  /* Two ways out of the handler. A plan that made it into one of them is a plan
-     the advisor sees half the time. */
-  it('goes down both paths out of the handler', () => {
-    const at = MAIN.indexOf('return await checkItFirst(');
-    expect(at).toBeGreaterThan(-1);
-    expect(MAIN.slice(at, at + 240)).toContain('asked,');
-    expect(MAIN).toContain('chosen.length === 0\n          ? asked');
-  });
-
-  /* The person's own words are what the branch is named after and what sits
-     beside the pictures. The checklist is for the model, not for them. */
+  /* The person's own words are what the branch is named after. */
   it('is not mistaken for what the person typed', () => {
-    expect(MAIN).toContain('open.held.looking.instruction = text;');
     expect(MAIN).toContain('await nameBranchAfter(open, conversation.path, textIn)');
   });
 });

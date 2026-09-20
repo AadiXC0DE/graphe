@@ -1,24 +1,97 @@
+// @vitest-environment jsdom
 /** Where a tab sits is the person's to decide.
  *
  * The row is spatial memory, which is why the selected tab is never brought to
  * the front. It also has to be arrangeable, or the order is whatever order the
  * conversations happened to be opened in and nobody can put the two they are
  * working between next to each other.
+ *
+ * The rearrangement is proved twice over: on the desk, where the order lives,
+ * and on the row itself, which is drawn here and dragged with the events a hand
+ * would send. jsdom has no pointer, but it has the elements and the events.
  */
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import Tabs, { type Tab } from '../src/components/Tabs';
 import { moveThread, noDesks, openDesk, showThread, threadsIn, type Desks } from '../src/lib/projects';
-
-const tabs = readFileSync(
-  fileURLToPath(new URL('../src/components/Tabs.tsx', import.meta.url)),
-  'utf8',
-);
+import { NOTHING_SAID } from '../src/state/conversations';
 
 const project = '/work/site';
+
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+const NOTHING = (): void => undefined;
+
+/** The three conversations the desk above opens, as the strip receives them. */
+const OPEN: readonly Tab[] = [
+  { id: 'a', title: 'the hero', project: 'site', projectPath: project, state: 'idle' },
+  { id: 'b', title: 'the footer', project: 'site', projectPath: project, state: 'idle' },
+  { id: 'c', title: 'the nav', project: 'site', projectPath: project, state: 'idle' },
+];
+
+let root: Root | null = null;
+let host: HTMLDivElement | null = null;
+
+afterEach(() => {
+  act(() => root?.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+});
+
+/** The strip, drawn for real. Drawn again, it is a change of props. */
+function strip(over: { onReorder?: (id: string, to: number) => void }): HTMLDivElement {
+  if (host === null) {
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+  }
+  act(() => {
+    root?.render(
+      createElement(Tabs, {
+        tabs: OPEN,
+        at: 'a',
+        onOpen: NOTHING,
+        onClose: NOTHING,
+        onNew: NOTHING,
+        ...over,
+      }),
+    );
+  });
+  return host;
+}
+
+/** The tab wrappers, in the order the row draws them. The drag lives on the
+ *  wrapper; the button inside it is what a press opens. */
+const tabsIn = (where: HTMLElement): HTMLElement[] => [
+  ...where.querySelectorAll<HTMLElement>('.tabs__tab'),
+];
+
+/** What each tab is called, in the order the row draws them. */
+const row = (where: HTMLElement): (string | null)[] =>
+  tabsIn(where).map((one) => one.querySelector('[role="tab"]')?.getAttribute('aria-label') ?? null);
+
+/** A drag, as the browser sends one: the payload rides on the event, and jsdom
+ *  has no DragEvent of its own to lend it one. */
+const carried: { effectAllowed: string; dropEffect: string; setData: () => void } = {
+  effectAllowed: '',
+  dropEffect: '',
+  setData: NOTHING,
+};
+
+function fire(node: Element, kind: 'dragstart' | 'dragover' | 'drop'): void {
+  const one = new Event(kind, { bubbles: true, cancelable: true });
+  Object.defineProperty(one, 'dataTransfer', { value: carried });
+  act(() => {
+    node.dispatchEvent(one);
+  });
+}
 
 /** A project with three conversations open, in the order they were opened. */
 function three(): Desks {
@@ -32,7 +105,11 @@ function three(): Desks {
       [project]: {
         ...desk,
         address: '/a',
-        parked: { '/b': { turns: [] }, '/c': { turns: [] } },
+        conversations: {
+          '/a': { ...NOTHING_SAID },
+          '/b': { ...NOTHING_SAID },
+          '/c': { ...NOTHING_SAID },
+        },
         order: ['/a', '/b', '/c'],
       },
     },
@@ -76,11 +153,37 @@ describe('rearranging the row', () => {
 
 describe('the row itself', () => {
   it('is draggable only where there is somewhere for a tab to go', () => {
-    expect(tabs).toContain('draggable={onReorder !== undefined}');
+    const movable = strip({ onReorder: NOTHING });
+    expect(tabsIn(movable).map((one) => one.draggable)).toEqual([true, true, true]);
+
+    // A row nothing can be rearranged in: no tab offers a drag, and one that
+    // started anyway lands nowhere.
+    const fixed = strip({});
+    expect(tabsIn(fixed).some((one) => one.draggable)).toBe(false);
+    fire(tabsIn(fixed)[0]!, 'dragstart');
+    fire(tabsIn(fixed)[2]!, 'dragover');
+    expect(fixed.querySelectorAll('.tabs__tab--landing')).toHaveLength(0);
   });
 
   it('draws the place a tab would land rather than shuffling under the pointer', () => {
-    expect(tabs).toContain('tabs__tab--landing');
-    expect(tabs).toContain("event.dataTransfer.dropEffect = 'move';");
+    const moved: [string, number][] = [];
+    const where = strip({
+      onReorder: (id: string, to: number) => {
+        moved.push([id, to]);
+      },
+    });
+    carried.dropEffect = '';
+
+    fire(tabsIn(where)[0]!, 'dragstart');
+    fire(tabsIn(where)[2]!, 'dragover');
+
+    // The place is drawn; the row has not moved a tab to make it.
+    expect(tabsIn(where)[2]?.className).toContain('tabs__tab--landing');
+    expect(row(where)).toEqual(['the hero', 'the footer', 'the nav']);
+    expect(moved).toEqual([]);
+    expect(carried.dropEffect).toBe('move');
+
+    fire(tabsIn(where)[2]!, 'drop');
+    expect(moved).toEqual([['a', 2]]);
   });
 });

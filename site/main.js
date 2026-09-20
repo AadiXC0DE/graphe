@@ -3,6 +3,16 @@
 
 const quiet = window.matchMedia('(prefers-reduced-motion: reduce)');
 
+/* ── the version, in one place ───────────────────────────────────────── */
+
+/* The number lives in the JSON-LD, which is the copy a crawler reads anyway;
+   the chip and the sentence are filled from it so a release edits one line. */
+const VERSION = JSON.parse(document.querySelector('script[type="application/ld+json"]')?.textContent ?? '{}').softwareVersion;
+
+if (typeof VERSION === 'string' && VERSION !== '') {
+  for (const slot of document.querySelectorAll('[data-version]')) slot.textContent = VERSION;
+}
+
 /* ── things arrive as you reach them ─────────────────────────────────── */
 
 const arriving = new IntersectionObserver(
@@ -18,12 +28,11 @@ const arriving = new IntersectionObserver(
 
 for (const item of document.querySelectorAll('[data-reveal]')) arriving.observe(item);
 
-/* ── the window: four real screens, one frame ────────────────────────── */
+/* ── the window: real screens, one frame ─────────────────────────────── */
 
 /** What the caption says under each screen, so the picture is never unlabelled. */
 const CAPTIONS = {
   work: ['graphe', 'the files, the work, and what is running'],
-  design: ['graphe: design', 'your own tokens, read as a spec'],
   history: ['graphe: history', '87 moments saved, drawn as lines'],
   skills: ['graphe: skills', 'craft you installed, ready to use'],
 };
@@ -40,7 +49,15 @@ function show(view) {
     tab.setAttribute('aria-selected', String(on));
   }
   for (const screen of screens) {
-    screen.classList.toggle('is-on', screen.dataset.screen === view);
+    const on = screen.dataset.screen === view;
+    screen.classList.toggle('is-on', on);
+    // The three screens sit in one painted box, so the browser fetches every
+    // one of them up front whatever `loading` says. The two nobody is looking
+    // at wait for their tab instead: same picture, a third of the bytes.
+    if (on && screen.dataset.src !== undefined && screen.getAttribute('src') === null) {
+      screen.setAttribute('srcset', screen.dataset.srcset ?? '');
+      screen.setAttribute('src', screen.dataset.src);
+    }
   }
   const said = CAPTIONS[view];
   if (said && frameName && frameCap) {
@@ -116,7 +133,7 @@ if (steps.length > 0) {
 /* ── the window walks its own screens until somebody takes over ──────── */
 
 /* It used to nudge from the first tab to the second and back, which read as a
-   broken carousel rather than as a hint. It now walks all four, and the first
+   broken carousel rather than as a hint. It now walks every tab, and the first
    press stops it for good — a page that keeps moving the thing somebody is
    trying to look at is worse than one that never moved. */
 if (!quiet.matches && tabs.length > 1) {

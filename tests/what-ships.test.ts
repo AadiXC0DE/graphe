@@ -9,6 +9,8 @@
  *  does not compile in has to arrive as files. Anything it does compile in must
  *  not arrive twice. */
 
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { RUNTIME, carriedAlong, leaveOut } from '../scripts/what-ships.mjs';
@@ -33,6 +35,27 @@ describe('what travels with the app', () => {
     const carried = await carriedAlong();
     expect(carried).toContain('@huggingface/tokenizers');
     expect(carried).toContain('onnxruntime-web');
+  });
+
+  it('carries a package installed only under another one', async () => {
+    // electron-builder 26 hoists a nested package up to the archive's top level,
+    // so where the project's node_modules keeps one says nothing about where the
+    // bundle does. Everything Pi declares has to be carried and must not be
+    // excluded — `cross-spawn` is installed inside Pi and nowhere else, and an
+    // exclusion written from that nesting deleted the only copy there was.
+    const carried = new Set(await carriedAlong());
+    const whole = new Set(
+      (await leaveOut())
+        .filter((line) => !line.includes('/**/*'))
+        .map((line) => line.replace('!node_modules/', '')),
+    );
+    const pi = JSON.parse(
+      await readFile(new URL('../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url), 'utf8'),
+    );
+    for (const name of Object.keys(pi.dependencies ?? {})) {
+      expect(carried.has(name)).toBe(true);
+      expect(whole.has(name)).toBe(false);
+    }
   });
 
   it('leaves behind what the window already has compiled into it', async () => {

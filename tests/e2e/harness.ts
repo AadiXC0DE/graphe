@@ -17,10 +17,12 @@ import { drainStarted, withoutOurs } from '../../src/lib/queue';
 import {
   changeDesk,
   noDesks,
+  conversationIn,
   openDesk,
   receive,
   type Desks,
 } from '../../src/lib/projects';
+import { NOTHING_SAID } from '../../src/state/conversations';
 import type { Turn } from '../../src/lib/thread';
 import {
   addTasks,
@@ -541,11 +543,7 @@ export function harness(opts: HarnessOpts = {}): Harness {
     const one = conv(address);
     const desk = desks.byPath[project];
     const turns =
-      desk === undefined
-        ? []
-        : desk.address === address
-          ? desk.turns
-          : (desk.parked[address]?.turns ?? []);
+      desk === undefined ? [] : conversationIn(desk, address).turns;
     return {
       continuations: one.continuations,
       statuses: one.statuses,
@@ -571,11 +569,14 @@ export function harness(opts: HarnessOpts = {}): Harness {
     if (over.goal !== undefined) one.goal = createGoal(over.goal);
     if (address === front) return;
     desks = changeDesk(desks, project, (desk) =>
-      desk.parked[address] !== undefined
+      desk.conversations[address] !== undefined
         ? desk
         : {
             ...desk,
-            parked: { ...desk.parked, [address]: { turns: [], doing: null, counted: 0 } },
+            conversations: {
+              ...desk.conversations,
+              [address]: { ...NOTHING_SAID, doing: null },
+            },
             order: [...desk.order, address],
           },
     );

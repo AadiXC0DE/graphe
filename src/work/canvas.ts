@@ -1,151 +1,148 @@
 /** A flow: blocks you place, join up, and then start.
  *
- * The board runs work the moment it is asked for, which is right for "send this
- * off and tell me how it went" and wrong for composing. So a flow is drawn
- * first and nothing happens: blocks are a draft on disk until somebody presses
- * Start, and only then does each one become a piece on the board — the same
- * board, the same queue, the same ceiling. Stop takes them off it again.
- *
- * Everything here is a function of its arguments. What a flow *is*, what may be
+ * Everything here is a function of its arguments. What a flow is, what may be
  * joined to what, and what order it runs in are decided here; the view draws it
- * and the shell runs it.
+ * and the shell runs it. Nothing in this file reads, writes, waits or draws.
  */
 
 import type { HowFar } from '../agent/guard/policy';
+import type { Money } from '../agent/types';
+import { asRunId, type RunId } from '../domain/identity';
+import type { ThinkingLevel } from '../lib/ipc';
+
+let counter = 0;
+
+/** What a block is. Seven, four of which are real machinery; "research it" and
+ *  "split it between subagents" are sentences inside an ask, not kinds. */
+export type BlockKind = 'ask' | 'plan' | 'checks' | 'review' | 'gate' | 'pull-request' | 'goal';
 
 /** Which model a block is run by, or null for whatever is answering. The same
  *  shape the rest of the app names a model with. */
 export type BlockModel = { providerId: string; modelId: string } | null;
 
-let counter = 0;
-
-export type BlockKind =
-  | 'custom'
-  | 'plan'
-  | 'research'
-  | 'subagents'
-  | 'browser'
-  | 'checks'
-  | 'goal'
-  | 'review'
-  | 'wait'
-  | 'pull-request';
-
 /** One block on the canvas. */
 export type Block = {
-  /** Ours, and stable from the moment it is placed. */
+  /** `block-…`, stable from placement. */
   id: string;
   kind: BlockKind;
-  /** What this one is asked to do. The kind's own words until somebody edits. */
+  /** Two or three words on the card. The kind's own name until edited. */
+  name: string;
+  /** What it is asked to do. Empty is allowed only for kinds that send
+   *  nothing: an ask or a goal with nothing in it cannot start. */
   says: string;
+  /** null: the flow's default. */
   model: BlockModel;
-  /** Every block this one waits for. Empty means it waits for nothing and the
-   *  flow can begin here. Several means it begins when the last of them has
-   *  finished — a review after both the change and the checks is the shape
-   *  people draw, and one parent could not say it. */
+  /** null: the model's remembered level. */
+  thinking: ThinkingLevel | null;
+  /** Every block this waits for. Empty: it starts the flow. Several means it
+   *  begins when the last of them has finished. */
   after: readonly string[];
-  /** Look around and propose before touching anything. */
-  lookFirst?: boolean;
-  /** Files this block carries. Pictures go with the ask the way they do from
-   *  the composer; text goes into it. */
-  files?: readonly BlockFile[];
-  /** Where somebody put it. Absent until they move it, and then it stays put:
-   *  a canvas that tidies your arrangement away the moment you add a block is
-   *  a diagram, not a canvas. */
+  /** Plan mode for this turn. */
+  lookFirst: boolean;
+  /** Content ids in the attachment store. Never bytes: a flow file holds ids. */
+  attachments: readonly string[];
+  /** Checks and Goal: how many fix turns to send before failing. */
+  retries: number;
+  /** Where somebody put it. Absent means the arithmetic decides. */
   at?: { x: number; y: number };
 };
 
-/** One file on a block. Held whole rather than as a path: a flow is drawn once
- *  and run later, and a file that moved between the two would be a block that
- *  quietly stopped being about anything. */
-export type BlockFile = {
-  name: string;
-  mimeType: string;
-  /** A picture goes to the model as a picture; anything else goes into the ask
-   *  as text, because that is the only other thing a turn can carry. */
-  kind: 'image' | 'text';
-  /** Base64 without the data: prefix for a picture, the file's own text for
-   *  the rest. */
-  bytes: string;
-};
+/** Branches in turn, in one conversation, or each in its own worktree. */
+export type Lanes = 'in-turn' | 'worktrees';
 
-/** Enough to give a block something to work from; not so many that a flow file
- *  becomes an archive. */
-export const MOST_FILES = 6;
-
-/** Past this one file is not context, it is the whole conversation. */
-export const MOST_TEXT = 20_000;
-
-/** What one block came to. */
-export type BlockSaid = {
-  /** The last thing it said, whole. */
-  text: string;
-  /** How many turns it took. */
-  turns: number;
-  /** Epoch ms, when it finished. */
-  at: number;
-};
+/** The flow's own lane: the workspace it was started from, and the only lane a
+ *  flow in turn ever uses. Every other lane is a branch's worktree. */
+export const LANE_0 = 'lane-0';
 
 export type Flow = {
-  /** Ours, and stable for as long as the flow exists. A canvas is a tab like a
-   *  conversation is a tab, so it needs a name of its own to be one. */
+  /** `flow-…` */
   id: string;
   name: string;
+  /** Defaults used by blocks that leave their model or thinking unset. Optional
+   *  for files written before flow-level defaults existed; readers normalize a
+   *  missing value to null. */
+  model?: BlockModel;
+  thinking?: ThinkingLevel | null;
   blocks: readonly Block[];
-  /** The conversation this canvas drives. A block is an ordinary turn in it —
-   *  same tools, same Guard, same everything a person typing would get — so a
-   *  canvas is a way of sending, not a second kind of agent. Null until it has
-   *  been started once. */
-  conversation: string | null;
-  /** One project inside a folder that holds several, by its folder name. Null
-   *  where the project is one repo, which is every ordinary project. A whole
-   *  flow works in one of them: a pull request has to be opened somewhere. */
-  repo: string | null;
-  /** How far the whole flow may go on its own, where a block does not say. */
+  /** How far the whole flow may go on its own. */
   howFar: HowFar;
-  /** The block being run right now, or null. */
-  running: string | null;
-  /** How many times the block that is running has been sent. One for anything
-   *  ordinary; a goal block counts up until it is done or the rounds run out. */
-  rounds: number;
-  /** What has finished, in the order it finished. */
-  done: readonly string[];
-  /** What each finished block came to, by block. The point of running one is
-   *  what it said, and a flow that ends with nothing on screen has told nobody
-   *  anything. */
-  said: Readonly<Record<string, BlockSaid>>;
-  /** When it was last started, or null while it is still being drawn. */
+  lanes: Lanes;
+  /** Newest first, at most KEPT_RUNS. The shell owns these; a save from the
+   *  window never writes them. */
+  runs: readonly Run[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** How many runs a flow keeps. Enough to compare the last few tries without
+ *  the file growing for ever. */
+export const KEPT_RUNS = 10;
+
+export type RunState = 'running' | 'needs-you' | 'done' | 'failed' | 'stopped' | 'interrupted';
+export type BlockState = 'draft' | 'waiting' | 'running' | 'needs-you' | 'done' | 'failed' | 'stopped';
+
+/** One place a run works: the flow's own workspace, or a branch's worktree. */
+export type Lane = {
+  /** `lane-0` is the flow's own; others are branches. */
+  id: string;
+  workspaceId: string;
+  /** Opened on first use. */
+  conversationId: string | null;
+  /** The worktree's branch, for Review. */
+  branch: string | null;
+};
+
+/** What one block came to in one run. */
+export type BlockRun = {
+  state: BlockState;
+  lane: string;
   startedAt: number | null;
+  endedAt: number | null;
+  /** The last thing the turn said, whole. Null until done. */
+  said: string | null;
+  turns: number;
+  spent: Money | null;
+  /** Goal and checks retries used. */
+  rounds: number;
+  /** Review: the verdict card's line. Pull request: the URL. */
+  result: string | null;
+  failure: string | null;
+};
+
+export type Run = {
+  id: RunId;
+  state: RunState;
+  startedAt: number;
+  endedAt: number | null;
+  lanes: readonly Lane[];
+  blocks: Readonly<Record<string, BlockRun>>;
+  spent: Money | null;
 };
 
 /** A canvas nobody has drawn on yet. */
 export function newFlow(name = canvasWords.untitled): Flow {
   counter += 1;
+  const at = Date.now();
   return {
-    id: `flow-${Date.now().toString(36)}-${String(counter)}`,
+    id: `flow-${at.toString(36)}-${String(counter)}`,
     name,
+    model: null,
+    thinking: null,
     blocks: [],
-    conversation: null,
-    repo: null,
-    // A flow is left to run: the whole point is walking away from it. Stopping
-    // to ask would stop it somewhere nobody is looking, so it starts at the
-    // rung that does not — and the row in its own bar is where that changes.
+    // A flow is left to run: stopping to ask would stop it where nobody is
+    // looking. The rung is on the flow's own bar, and this is its default.
     howFar: 'doing',
-    running: null,
-    rounds: 0,
-    done: [],
-    said: {},
-    startedAt: null,
+    lanes: 'in-turn',
+    runs: [],
+    createdAt: at,
+    updatedAt: at,
   };
 }
 
-/** Where a block has got to. `needs-you` is the one that cannot move on by
- *  itself: a gate somebody has to open. */
-export type BlockState = 'draft' | 'waiting' | 'running' | 'needs-you' | 'done' | 'failed';
-
-/** True for a block that sends nothing and simply stops the flow. */
-export function isGate(block: Block): boolean {
-  return block.kind === 'wait';
+/** Unique for the life of the window. A flow read off disk brings its own ids. */
+export function blockId(): string {
+  counter += 1;
+  return `block-${Date.now().toString(36)}-${String(counter)}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -154,7 +151,6 @@ export function isGate(block: Block): boolean {
 
 export const canvasWords = {
   name: 'Canvas',
-  /** What a canvas is called before anybody has said. */
   untitled: 'Canvas',
   /** A canvas takes its name from the first thing it was asked to do. */
   named: (blocks: readonly Block[]): string => {
@@ -165,123 +161,122 @@ export const canvasWords = {
   },
   note: 'Place the steps, join them up, then start.',
   empty: 'Build a flow',
-  emptyNote: 'Take a loop somebody already worked out, or place a block and build out from it.',
+  emptyNote: 'Take a template somebody already worked out, or place a block and build out from it.',
+  canvases: 'Canvases',
   rename: 'What this canvas is called',
-  shut: 'Close this panel',
-  bigger: 'Fill the window',
-  smaller: 'Back to the column',
+  close: 'Close this panel',
+  fill: 'Fill window',
   start: 'Start',
   stop: 'Stop',
-  again: 'Start again',
-  add: 'Add a block',
+  continue: 'Continue',
+  open: 'Open',
+  watch: 'Watch',
+  delete: 'Delete',
+  duplicate: 'Duplicate',
+  tidy: 'Tidy',
+  fit: 'Fit',
+  undo: 'Undo',
+  redo: 'Redo',
+  runs: 'Runs',
+  place: 'Place a block',
+  templates: 'Templates',
+  further: 'Further out',
+  closer: 'Closer',
+  inTurn: 'In turn',
+  inWorktrees: 'In worktrees',
+  lanesNote: 'In turn runs each branch one after another in this conversation; in worktrees each branch gets its own copy and its own conversation, and runs at the same time.',
   blocks: 'Blocks',
-  loops: 'Ready-made',
   what: 'What it does',
+  startFrom: 'Start from',
   model: 'Model',
   everyModel: 'Models',
-  howFar: 'How far it may go',
-  /** A block left on no model of its own. Named for the setting, with the
-   *  model it lands on said underneath. */
   whichever: 'Default',
   whicheverNote: (model: string | null): string =>
     model === null
-      ? 'Whatever this canvas’s conversation is set to.'
-      : `Whatever this canvas’s conversation is set to: ${model} right now.`,
-  waitsFor: 'Runs after',
-  /** Only where the project holds several. */
-  which: 'Works in',
-  everyBlock: 'Every block runs on this unless it names its own',
-  whichNote: 'Which project inside this folder the whole flow works in',
-  nothing: 'Nothing (it starts the flow)',
-  /** In the picker, above the blocks it could be made to wait for. */
-  afterWhich: 'Runs after all of these',
-  shows: 'Shows it',
-  files: 'Attachments',
-  filesCount: (n: number): string => (n === 1 ? '1 file' : `${String(n)} files`),
-  attach: 'Attach',
-  takeOff: (name: string): string => `Take ${name} off this block`,
-  tooMany: (n: number): string => `A block carries up to ${String(n)} files.`,
+      ? 'Whatever this canvas is set to.'
+      : `Whatever this canvas is set to: ${model} right now.`,
   thinking: 'Thinking',
-  thinkingNote: 'How long this model takes before it answers',
   lookFirst: 'Plan first',
   lookFirstNote: 'Propose before touching anything',
-  nothingBefore: 'Nothing',
-  tidyUp: 'Tidy up',
-  tidyNote: 'Put every block back in line',
-  remove: 'Remove',
-  connect: 'Drag from a block’s dot to the one that should follow it',
-  unjoined: 'Took that one off. Drag again to put it back.',
-  fit: 'Fit',
-  further: 'Further out',
-  closer: 'Closer',
-  /** Under the title. */
+  waitsFor: 'Runs after',
+  nothing: 'Nothing (starts the flow)',
+  attachments: 'Attachments',
+  attach: 'Attach',
+  takeOff: (name: string): string => `Take ${name} off this block`,
+  retries: 'Retries',
+  answerIt: 'Answer',
+  watchNote: 'Read every turn this block took',
   counted: (blocks: number, done: number, going: number): string => {
     if (blocks === 0) return 'Nothing placed yet.';
     const many = `${String(blocks)} ${blocks === 1 ? 'block' : 'blocks'}`;
-    if (going > 0) return `${many} · ${String(done)} done, ${String(going)} going`;
+    if (going > 0) return `${many} · ${String(done)} done, ${String(going)} running`;
     if (done > 0) return `${many} · ${String(done)} done`;
     return `${many} · not started`;
   },
   states: {
     draft: 'Ready',
     waiting: 'Waiting',
-    running: 'Going',
+    running: 'Running',
     'needs-you': 'Needs you',
     done: 'Done',
-    failed: 'Stopped',
+    failed: 'Failed',
+    stopped: 'Stopped',
   } as Readonly<Record<BlockState, string>>,
-  /** On the gate, and the press that opens it. */
-  carryOn: 'Carry on',
-  gateWaits: 'Stopped here until you say carry on.',
-  /** On a goal block while it is going round again. */
+  /** On a gate, and the press that opens it. */
+  gateWaits: 'Stopped here until you say Continue.',
+  /** On a goal or checks block while it is going round again. */
   round: (n: number, of: number): string => `Round ${String(n)} of ${String(of)}`,
-  ranOut: 'The rounds ran out before the checks passed.',
-  /** On the block a flow begins at, and the one nothing follows. Both are read
-   *  off the joins rather than chosen: an open dot on the left is a block
-   *  nothing runs before, an open dot on the right is where the flow stops. */
-  startsHere: 'Starts here',
-  waitsHere: 'Waits for the block before it',
-  ends: 'Ends here',
-  endsNote: 'Nothing follows this yet. Drag from here to add what does',
-  /** Over what a block came to. */
-  came: 'What it came to',
-  /** Along the foot while it is going. A block can run for twenty minutes, and
-   *  "Going" on a card is not enough to know it has not hung. */
+  /** A lane past the ceiling waits for one to free up. */
+  room: 'Waiting for room',
   working: 'Working…',
   asksYou: 'It has stopped to ask you something',
-  watchIt: 'Watch it work',
-  answerIt: 'Answer it',
-  clear: 'Clear',
-  clearNote: 'Take every block off this canvas',
-  clearSure: (n: number): string =>
-    `Take all ${String(n)} blocks off? What the run said stays in the conversation.`,
-  clearYes: 'Clear it',
-  clearNo: 'Keep them',
   /** The band along the foot once a run is over. */
   ending: {
     finished: 'Finished',
     stopped: 'Stopped',
+    failed: 'Failed',
+    interrupted: 'Interrupted when Graphe closed',
+    resume: 'Resume',
+    again: 'Start again',
     ranTo: (blocks: number, turns: number): string =>
       `${String(blocks)} ${blocks === 1 ? 'block' : 'blocks'} · ${canvasWords.turnsTook(turns)}`,
     left: (n: number): string => `${String(n)} never ran`,
     lastly: 'Last thing it said',
     openThread: 'Open the conversation',
-    threadNote: 'Read every turn this canvas took',
+    review: 'Review',
     hide: 'Hide this',
   },
-  findModel: 'Find a model',
-  noModel: 'No model by that name.',
   turnsTook: (n: number): string => (n === 1 ? '1 turn' : `${String(n)} turns`),
-  /** How many blocks are waiting on this one. */
   after: (n: number): string => (n === 1 ? '1 follows' : `${String(n)} follow`),
   nothingYet: 'Nothing yet.',
-  /** Refusals, said where the line was drawn. */
+  /** What one block came to, said over the block it is carried into. */
+  cameTo: (name: string): string => `What ${name} came to:`,
+  /** Refusals, said where the line was drawn or the Start was pressed. */
   itself: 'A block cannot wait for itself.',
   loop: 'These would wait for each other, so neither could start.',
   missing: 'I could not find that block.',
-  running: 'This flow is going. Stop it before changing the shape.',
+  running: 'This flow is running. Stop it before changing the shape.',
   saySomething: 'Say what it should do before starting.',
+  nothingPlaced: 'Nothing to start. Place a block first.',
+  needsBranch: 'A pull request needs a branch. Run this canvas in worktrees, or take the project off its default branch.',
 } as const;
+
+/** The three sentences an ask can start from. Named for the work, because that
+ *  is what somebody is choosing between. */
+export const ASK_STARTING: readonly { name: string; says: string }[] = [
+  {
+    name: 'Research it',
+    says: 'Look this up properly before deciding anything. Read what is already here, search the web where it helps, and say what you found and what you would do about it. Change nothing.',
+  },
+  {
+    name: 'Split between subagents',
+    says: 'Split this between subagents working in parallel, then bring what they found back together.',
+  },
+  {
+    name: 'Check it in the browser',
+    says: 'Open the page in the browser and check the change works. Say what you saw, and take a picture of it.',
+  },
+];
 
 /* -------------------------------------------------------------------------- */
 /* The blocks somebody can place                                               */
@@ -302,13 +297,13 @@ export type BlockSpec = {
  *
  * Named as the operation rather than the tool behind it, and each carries the
  * whole instruction it will be run with — a block *is* what it is asked, so the
- * words in the panel are the words that go out. Editing one is editing that.
+ * words in the panel are the words that go out.
  */
 export const BLOCKS: readonly BlockSpec[] = [
   {
-    kind: 'custom',
-    name: 'Custom',
-    note: 'Whatever you type, sent as it is.',
+    kind: 'ask',
+    name: 'Ask',
+    note: 'Say what to do, sent as it is.',
     needsWords: true,
     says: '',
   },
@@ -320,39 +315,11 @@ export const BLOCKS: readonly BlockSpec[] = [
     says: 'Look around the project and say what you would do. Change nothing.',
   },
   {
-    kind: 'research',
-    name: 'Research',
-    note: 'Read around the problem before deciding.',
-    needsWords: true,
-    says: '',
-  },
-  {
-    kind: 'subagents',
-    name: 'Subagents',
-    note: 'Fan the work out and bring it back together.',
-    needsWords: true,
-    says: '',
-  },
-  {
-    kind: 'browser',
-    name: 'Browser',
-    note: 'Open the page and check the change works.',
-    needsWords: false,
-    says: 'Open the page in the browser and check the change works. Say what you saw, and take a picture of it.',
-  },
-  {
     kind: 'checks',
     name: 'Checks',
     note: 'Run the project’s checks and fix what fails.',
     needsWords: false,
     says: 'Run this project’s checks. Fix anything that fails, then run them again until they pass.',
-  },
-  {
-    kind: 'goal',
-    name: 'Goal',
-    note: 'Keep going until the checks pass, or the rounds run out.',
-    needsWords: true,
-    says: '',
   },
   {
     kind: 'review',
@@ -362,9 +329,9 @@ export const BLOCKS: readonly BlockSpec[] = [
     says: 'Review what has changed and give your verdict, with the findings that matter first.',
   },
   {
-    kind: 'wait',
-    name: 'Wait for me',
-    note: 'Stop here until you say carry on. Nothing is sent.',
+    kind: 'gate',
+    name: 'Gate',
+    note: 'Stop here until you say Continue. Nothing is sent.',
     needsWords: false,
     says: '',
   },
@@ -375,89 +342,130 @@ export const BLOCKS: readonly BlockSpec[] = [
     needsWords: false,
     says: 'Open a pull request for what changed, with a title and a description of the change.',
   },
+  {
+    kind: 'goal',
+    name: 'Goal',
+    note: 'Keep going until the checks pass, or the tries run out.',
+    needsWords: true,
+    says: '',
+  },
 ];
 
 export function specOf(kind: BlockKind): BlockSpec {
   return BLOCKS.find((one) => one.kind === kind) ?? BLOCKS[0]!;
 }
 
-/** How many rounds one goal block runs before it stops and says so. Not a cost
- *  ceiling — the rung is that — but the thing that keeps "until it is done"
- *  from meaning "for ever". */
-export const ROUNDS = 12;
-
-/** What a goal block is asked the first time, and every round after. */
-export function goalWords(about: string): string {
-  return `Work toward this until it is done, then stop: ${about.trim()}. Run this project's checks when you think you are there.`;
+/** True for a block that sends nothing and simply stops the flow. */
+export function isGate(block: Block): boolean {
+  return block.kind === 'gate';
 }
 
-export function carryOnWords(about: string, why: string): string {
-  return `Not there yet. ${why} Carry on toward: ${about.trim()}`;
+/** How many fix turns a kind sends before it fails. Checks and a goal are the
+ *  two that go round; everything else gets its one turn. */
+export function retriesFor(kind: BlockKind): number {
+  if (kind === 'checks') return 2;
+  if (kind === 'goal') return 6;
+  return 0;
 }
 
-/** What a subagents block is asked. Written here rather than in the view so the
- *  sentence can be read back in a test. */
-export function helperWords(about: string): string {
-  return `Split this between subagents working in parallel, then bring what they found back together: ${about.trim()}`;
+/** What a goal block is asked, first time and every round after. */
+export function goalSays(about: string): string {
+  return `Work toward this until it is done, then stop: ${about.trim()}. Run this project’s checks when you think you are there.`;
+}
+
+/** What a checks block is asked after a run that failed. */
+export function checksFix(failure: string): string {
+  return `Fix what failed: ${failure.trim()}`;
 }
 
 /* -------------------------------------------------------------------------- */
-/* Ready-made loops                                                            */
+/* Templates                                                                   */
 /* -------------------------------------------------------------------------- */
 
-export type Loop = {
+/** One block in a template. `after` is indices into the same list, so a
+ *  template is a shape rather than a set of ids nobody has yet. */
+export type BlockShape = {
+  kind: BlockKind;
+  /** Overrides the kind's own name, where two blocks of one kind must be told
+   *  apart in what a later block carries. */
+  name?: string;
+  says?: string;
+  after: readonly number[];
+};
+
+export type Template = {
   id: string;
   name: string;
   note: string;
-  /** `after` is indices into this same list, so a loop is a shape rather than
-   *  a set of ids nobody has yet. */
-  blocks: readonly { kind: BlockKind; after: readonly number[] }[];
+  lanes: Lanes;
+  blocks: readonly BlockShape[];
 };
 
-export const LOOPS: readonly Loop[] = [
+export const TEMPLATES: readonly Template[] = [
   {
     id: 'ship-it',
-    name: 'Build, verify, ship',
-    note: 'Make the change, open it in the browser, run the checks, then a pull request.',
+    name: 'Ship it',
+    note: 'Make the change, run the checks, read it back, then open the pull request.',
+    lanes: 'in-turn',
     blocks: [
-      { kind: 'custom', after: [] },
-      { kind: 'browser', after: [0] },
-      { kind: 'checks', after: [1] },
+      { kind: 'ask', after: [] },
+      { kind: 'checks', after: [0] },
+      { kind: 'review', after: [1] },
       { kind: 'pull-request', after: [2] },
     ],
   },
   {
-    id: 'look-first',
-    name: 'Plan, build, review',
-    note: 'Read the project before touching it, make the change, then read the diff back.',
+    id: 'plan-first',
+    name: 'Plan first',
+    note: 'Read the project, stop for a yes, make the change, then the checks.',
+    lanes: 'in-turn',
     blocks: [
       { kind: 'plan', after: [] },
-      { kind: 'custom', after: [0] },
-      { kind: 'review', after: [1] },
+      { kind: 'gate', after: [0] },
+      { kind: 'ask', after: [1] },
+      { kind: 'checks', after: [2] },
     ],
   },
   {
-    id: 'many-hands',
-    name: 'Plan, fan out, review',
-    note: 'One pass to see the shape, subagents in parallel, then one verdict over the lot.',
+    id: 'two-ways',
+    name: 'Two ways',
+    note: 'One plan, two tries in their own worktrees, then an ask that compares what both came to.',
+    lanes: 'worktrees',
     blocks: [
       { kind: 'plan', after: [] },
-      { kind: 'subagents', after: [0] },
-      { kind: 'review', after: [1] },
+      { kind: 'ask', name: 'Way A', after: [0] },
+      { kind: 'ask', name: 'Way B', after: [0] },
+      {
+        kind: 'ask',
+        name: 'Compare',
+        says: 'Say what each way came to, which one to keep and why, then what is left to do.',
+        after: [1, 2],
+      },
     ],
   },
 ];
 
+/** Put a whole template down, each block behind the ones it was drawn behind.
+ *  The template's lanes come with it: "Two ways" is two worktrees or it is not
+ *  two ways. */
+export function placeTemplate(flow: Flow, template: Template): Flow {
+  let next: Flow = { ...flow, lanes: template.lanes };
+  const made: string[] = [];
+  for (const one of template.blocks) {
+    const at = next.blocks.length;
+    next = place(next, one.kind, one.after.map((index) => made[index] ?? '').filter((id) => id !== ''));
+    const id = next.blocks[at]?.id;
+    if (id === undefined) continue;
+    made.push(id);
+    if (one.name !== undefined) next = change(next, id, { name: one.name });
+    if (one.says !== undefined) next = change(next, id, { says: one.says });
+  }
+  return next;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Editing a flow                                                              */
 /* -------------------------------------------------------------------------- */
-
-/** Unique for the life of the window. A flow read back off disk brings its own
- *  ids, and nothing here can hand out one of those twice. */
-export function blockId(): string {
-  counter += 1;
-  return `block-${Date.now().toString(36)}-${String(counter)}`;
-}
 
 export function place(flow: Flow, kind: BlockKind, after: string | readonly string[] | null = null): Flow {
   const spec = specOf(kind);
@@ -465,23 +473,18 @@ export function place(flow: Flow, kind: BlockKind, after: string | readonly stri
   const block: Block = {
     id: blockId(),
     kind,
+    name: spec.name,
     says: spec.says,
     model: null,
+    thinking: null,
+    // A wait pointing at a block nobody has would strand it, so it is dropped
+    // where it is drawn.
     after: [...new Set(asked.filter((one) => flow.blocks.some((block) => block.id === one)))],
+    lookFirst: false,
+    attachments: [],
+    retries: retriesFor(kind),
   };
   return { ...flow, blocks: [...flow.blocks, block] };
-}
-
-/** Put a whole loop down, each block behind the one it was drawn behind. */
-export function placeLoop(flow: Flow, loop: Loop): Flow {
-  let next = flow;
-  const made: string[] = [];
-  for (const one of loop.blocks) {
-    const before = next.blocks.length;
-    next = place(next, one.kind, one.after.map((at) => made[at] ?? '').filter((id) => id !== ''));
-    made.push(next.blocks[before]?.id ?? '');
-  }
-  return next;
 }
 
 export function change(flow: Flow, id: string, over: Partial<Omit<Block, 'id'>>): Flow {
@@ -575,56 +578,26 @@ export function joined(flow: Flow, id: string, after: string): boolean {
 /* Starting it                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Blocks that cannot go yet, because nobody has said what they are about. */
-export function notReady(flow: Flow): readonly Block[] {
-  return flow.blocks.filter((one) => specOf(one.kind).needsWords && one.says.trim() === '');
+/** The run the window and the foot band are about: the newest one. */
+export function latestRun(flow: Flow): Run | null {
+  return flow.runs[0] ?? null;
 }
 
-/** True while a block is being run. */
-export function isRunning(flow: Flow): boolean {
-  return flow.running !== null;
-}
-
-export function canStart(flow: Flow): boolean {
-  return flow.blocks.length > 0 && notReady(flow).length === 0 && !isRunning(flow);
-}
-
-/**
- * The next block to send, or null when there is nothing left to send.
- *
- * The first one in order that has not finished and whose wait has. A block
- * whose wait never finished is never sent — what follows a step that did not
- * happen would be working against a change nobody made.
- */
-export function nextUp(flow: Flow): Block | null {
-  const done = new Set(flow.done);
-  for (const block of runOrder(flow)) {
-    if (done.has(block.id)) continue;
-    // Every one of them, not the first: a block with two waits begins when the
-    // last of them has finished.
-    if (!block.after.every((one) => done.has(one))) continue;
-    return block;
-  }
-  return null;
-}
-
-/** How far along a block is. */
+/** Where a block has got to in the run the flow is showing. A flow with no run
+ *  has never been started, so everything on it is a draft. */
 export function stateOf(block: Block, flow: Flow): BlockState {
-  if (flow.done.includes(block.id)) return 'done';
-  if (flow.running === block.id) return isGate(block) ? 'needs-you' : 'running';
-  if (flow.running === null && flow.startedAt === null) return 'draft';
-  // Going, and this one has not had its turn: either its wait is still out or
-  // it is simply behind something else.
-  return 'waiting';
+  const run = latestRun(flow);
+  if (run === null) return 'draft';
+  return run.blocks[block.id]?.state ?? 'draft';
 }
 
 /** How far along each block sits, counted from whatever it waits for. */
-function columns(flow: Flow): Map<string, number> {
+export function columns(flow: Flow): Map<string, number> {
   const byId = new Map(flow.blocks.map((one) => [one.id, one]));
   const at = new Map<string, number>();
   // One past the furthest thing it waits for, so a block waiting on two chains
   // of different lengths sits after both of them rather than beside the short
-  // one. `walking` closes a ring a hand-edited file could still hold.
+  // one. `walking` closes a ring a hand-edited flow could still hold.
   const walking = new Set<string>();
   const far = (id: string): number => {
     const held = at.get(id);
@@ -648,39 +621,250 @@ export function runOrder(flow: Flow): readonly Block[] {
   return [...flow.blocks].sort((one, other) => (at.get(one.id) ?? 0) - (at.get(other.id) ?? 0));
 }
 
-/** What a looking-up block is asked. */
-export function lookedUpWords(about: string): string {
-  return `Look this up properly before deciding anything: ${about.trim()}. Read what is already here, search the web where it helps, and say what you found and what you would do about it. Change nothing.`;
+/** True for a block that has not had its turn in this run. */
+function notStarted(run: Run, block: Block): boolean {
+  const held = run.blocks[block.id];
+  return held === undefined || held.state === 'draft' || held.state === 'waiting';
 }
 
-/** What one block is asked, ready to send. Text it carries goes in with it,
- *  each file named and fenced so the model can tell one from the next. */
-export function asksOf(block: Block): string {
-  const said = block.says.trim();
-  const asked =
-    block.kind === 'subagents'
-      ? helperWords(said)
-      : block.kind === 'research'
-        ? lookedUpWords(said)
-        : block.kind === 'goal'
-          ? goalWords(said)
-          : said === ''
-            ? specOf(block.kind).says
-            : said;
-  const text = (block.files ?? []).filter((one) => one.kind === 'text');
-  if (text.length === 0) return asked;
-  const carried = text.map((one) => {
-    const cut = one.bytes.length > MOST_TEXT;
-    const body = cut ? one.bytes.slice(0, MOST_TEXT) : one.bytes;
-    return `--- ${one.name} ---\n${body}${cut ? `\n--- cut here; ${one.name} is longer than this ---` : ''}`;
+/**
+ * What may be sent now: every block not started whose parents have all finished
+ * in this run.
+ *
+ * In turn, that is at most one — the next in run order. In worktrees it is one
+ * per lane, which is every branch of a fan out at once and never two turns in
+ * one folder: two blocks that both start the flow are both in `lane-0`, and
+ * files are written by one turn at a time.
+ */
+export function readyNow(flow: Flow, run: Run): readonly Block[] {
+  const ready = runOrder(flow).filter((one) => {
+    if (!notStarted(run, one)) return false;
+    return one.after.every((was) => run.blocks[was]?.state === 'done');
   });
-  return `${asked}\n\n${carried.join('\n\n')}`;
+  if (flow.lanes !== 'worktrees') return ready.slice(0, 1);
+  const taken = new Set<string>();
+  return ready.filter((one) => {
+    const lane = laneFor(flow, one);
+    if (taken.has(lane)) return false;
+    taken.add(lane);
+    return true;
+  });
 }
 
-/** Back to a draft: the shape kept, what it got to forgotten. The conversation
- *  stays — what it said is worth keeping and is the record of the run. */
-export function reset(flow: Flow): Flow {
-  return { ...flow, startedAt: null, running: null, rounds: 0, done: [], said: {} };
+/** The blocks a branch begins at: a fork's second and later children, in the
+ *  order they were placed. One worktree each. */
+function branchStarts(flow: Flow): readonly string[] {
+  return flow.blocks
+    .filter((one) => {
+      const first = flow.blocks.find((other) => other.id === one.after[0]);
+      if (first === undefined) return false;
+      return flow.blocks.find((other) => other.after.includes(first.id))?.id !== one.id;
+    })
+    .map((one) => one.id);
+}
+
+/**
+ * Which lane a block runs in, worked out from the shape.
+ *
+ * A block with no parents runs in the flow's own lane. Otherwise it inherits
+ * its first parent's lane, and a parent's second and later children each start
+ * a branch of their own when the flow is in worktrees — which is what makes a
+ * fan out two branches rather than one queue. A fan in takes its first parent's
+ * lane, and the other lanes' work reaches it in its words.
+ */
+export function laneFor(flow: Flow, block: Block): string {
+  if (flow.lanes !== 'worktrees') return LANE_0;
+  const parent = flow.blocks.find((one) => one.id === block.after[0]);
+  if (parent === undefined) return LANE_0;
+  // A fan in runs where its first parent ran, and the other lanes' work reaches
+  // it in its words rather than in a folder of its own.
+  if (block.after.length > 1) return laneFor(flow, parent);
+  const children = flow.blocks.filter((one) => one.after.includes(parent.id));
+  if (children[0]?.id === block.id) return laneFor(flow, parent);
+  // Numbered in placement order, so two forks in one flow never share a
+  // worktree however many branches each of them has.
+  return `lane-${String(branchStarts(flow).indexOf(block.id) + 1)}`;
+}
+
+/** The next block to send, or null when there is nothing left to send. Null for
+ *  a flow that has never been started: a run is what makes a block go. */
+export function nextUp(flow: Flow): Block | null {
+  const run = latestRun(flow);
+  if (run === null) return null;
+  return readyNow(flow, run)[0] ?? null;
+}
+
+/**
+ * What one block is asked, ready to send.
+ *
+ * A plan, a goal and a checks fix are asked the kind's own sentence, and an ask
+ * is asked what somebody typed. Work that landed in another lane is not in this
+ * lane's transcript, so it is carried in above the sentence, named for the
+ * block it came from. Work in this lane is already the conversation.
+ */
+export function askOf(flow: Flow, run: Run, block: Block): string {
+  const sentence =
+    block.kind === 'goal'
+      ? goalSays(block.says)
+      : block.says.trim() === ''
+        ? specOf(block.kind).says
+        : block.says.trim();
+  const mine = laneFor(flow, block);
+  const carried = flow.blocks
+    .filter(
+      (one) =>
+        block.after.includes(one.id) && laneFor(flow, one) !== mine,
+    )
+    .map((one) => {
+      const said = run.blocks[one.id]?.said ?? '';
+      return `${canvasWords.cameTo(one.name)}\n${said}`;
+    });
+  return carried.length === 0 ? sentence : [...carried, sentence].join('\n\n');
+}
+
+/** Whether a flow's waits ever resolve, or two blocks wait for each other. */
+function ringed(flow: Flow): boolean {
+  const have = new Set(flow.blocks.map((one) => one.id));
+  const placed = new Set<string>();
+  for (let pass = 0; pass <= flow.blocks.length; pass += 1) {
+    let grew = false;
+    for (const one of flow.blocks) {
+      if (placed.has(one.id)) continue;
+      // A wait on a block nobody has is already gone, so it does not hold one.
+      if (!one.after.every((was) => !have.has(was) || placed.has(was))) continue;
+      placed.add(one.id);
+      grew = true;
+    }
+    if (!grew) break;
+  }
+  return placed.size !== flow.blocks.length;
+}
+
+/** Where the flow would run while it is in turn: on a branch of its own, or on
+ *  the project's default branch. The window knows which; this file does not, so
+ *  whoever asks says. */
+export type Standing = 'branch' | 'default-branch';
+
+/**
+ * Whether a flow may be started, and why not.
+ *
+ * A pull request opened from the project's default branch is not a pull
+ * request, so that block needs either worktrees or a project already off it,
+ * and the sentence says which.
+ */
+export function canStart(
+  flow: Flow,
+  standing: Standing = 'branch',
+): { ok: true } | { ok: false; because: string } {
+  if (flow.blocks.length === 0) return { ok: false, because: canvasWords.nothingPlaced };
+  const mute = flow.blocks.find(
+    (one) => (one.kind === 'ask' || one.kind === 'goal') && one.says.trim() === '',
+  );
+  if (mute !== undefined) return { ok: false, because: canvasWords.saySomething };
+  if (ringed(flow)) return { ok: false, because: canvasWords.loop };
+  const wantsOne = flow.blocks.some((one) => one.kind === 'pull-request');
+  if (wantsOne && flow.lanes !== 'worktrees' && standing === 'default-branch') {
+    return { ok: false, because: canvasWords.needsBranch };
+  }
+  return { ok: true };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The record of a run                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** The flow with this run on it, newest first, and no more than KEPT_RUNS of
+ *  them. Replacing one by id is what a runner does on every tick. */
+export function withRun(flow: Flow, run: Run): Flow {
+  const rest = flow.runs.filter((one) => one.id !== run.id);
+  return { ...flow, runs: [run, ...rest].slice(0, KEPT_RUNS) };
+}
+
+/** How a run ended, for the foot band. Null while it is still going: there is
+ *  nothing to say until something has stopped. */
+export type Ending = {
+  /** True where every block ended in `done`. Anything else — a failure, a stop
+   *  — is not whole. */
+  whole: boolean;
+  /** Blocks that had a turn, whether or not it went well. */
+  ran: number;
+  turns: number;
+  cost: Money | null;
+  /** Blocks that never ran at all. */
+  left: readonly Block[];
+  /** The last block to say anything, and what it said. */
+  last: { block: Block; said: string } | null;
+};
+
+export function endedAs(flow: Flow, run: Run): Ending | null {
+  if (run.state === 'running' || run.state === 'needs-you') return null;
+  const never = flow.blocks.filter((one) => notStarted(run, one));
+  let turns = 0;
+  let last: { block: Block; said: string } | null = null;
+  for (const block of flow.blocks) {
+    const done = run.blocks[block.id];
+    if (done === undefined || done.said === null) continue;
+    if (last === null || (done.endedAt ?? 0) >= (run.blocks[last.block.id]?.endedAt ?? 0)) {
+      last = { block, said: done.said };
+    }
+  }
+  for (const block of flow.blocks) turns += run.blocks[block.id]?.turns ?? 0;
+  return {
+    whole: flow.blocks.every((one) => run.blocks[one.id]?.state === 'done'),
+    ran: flow.blocks.length - never.length,
+    turns,
+    cost: run.spent,
+    left: never,
+    last,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Undo, and redo                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** How many drawings back undo reaches. As many as a person might want to step
+ *  back through, and no more than a session holds easily. */
+export const KEPT_UNDOS = 50;
+
+export type History = {
+  /** Oldest first. */
+  past: readonly Flow[];
+  now: Flow;
+  /** Nearest first. */
+  future: readonly Flow[];
+};
+
+export function historyOf(flow: Flow): History {
+  return { past: [], now: flow, future: [] };
+}
+
+/** Every drawing of one canvas, in order. A different canvas starts a ring of
+ *  its own: undo never reaches from one canvas into another. */
+export function undoable(history: History, flow: Flow): History {
+  if (flow.id !== history.now.id) return historyOf(flow);
+  if (flow === history.now) return history;
+  return { past: [...history.past, history.now].slice(-KEPT_UNDOS), now: flow, future: [] };
+}
+
+export function undo(history: History): History {
+  const back = history.past[history.past.length - 1];
+  if (back === undefined) return history;
+  return {
+    past: history.past.slice(0, -1),
+    now: back,
+    future: [history.now, ...history.future].slice(0, KEPT_UNDOS),
+  };
+}
+
+export function redo(history: History): History {
+  const ahead = history.future[0];
+  if (ahead === undefined) return history;
+  return {
+    past: [...history.past, history.now].slice(-KEPT_UNDOS),
+    now: ahead,
+    future: history.future.slice(1),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -740,12 +924,6 @@ export function layOut(flow: Flow): Drawn {
   };
 }
 
-/** Put everything back where the arithmetic would have it. */
-export function tidied(flow: Flow): Flow {
-  const where = tidy(flow);
-  return { ...flow, blocks: flow.blocks.map((one) => ({ ...one, at: where[one.id] })) };
-}
-
 /** True once somebody has moved something, so Tidy is worth offering. */
 export function isArranged(flow: Flow): boolean {
   const where = tidy(flow);
@@ -753,45 +931,6 @@ export function isArranged(flow: Flow): boolean {
     const auto = where[one.id];
     return one.at !== undefined && (auto === undefined || one.at.x !== auto.x || one.at.y !== auto.y);
   });
-}
-
-/** The blocks a flow begins at: the ones waiting for nothing. Several is not a
- *  mistake — they start together — but which they are is worth saying, because
- *  a block accidentally left unattached would otherwise start on its own. */
-export function startsAt(flow: Flow): readonly Block[] {
-  return flow.blocks.filter((one) => one.after.length === 0);
-}
-
-/**
- * How a run ended, once nothing of it is going.
- *
- * Null while it is still going or before it was ever started, so the view can
- * ask this one question rather than assembling the answer out of four fields.
- */
-export type Ending = {
-  /** True where every block had its turn. */
-  whole: boolean;
-  ran: number;
-  turns: number;
-  left: readonly Block[];
-  /** The last block to say anything, and what it said. */
-  last: { block: Block; said: BlockSaid } | null;
-};
-
-export function endedAs(flow: Flow): Ending | null {
-  if (flow.startedAt === null || flow.running !== null) return null;
-  const done = new Set(flow.done);
-  if (done.size === 0) return null;
-  const left = flow.blocks.filter((one) => !done.has(one.id));
-  let last: { block: Block; said: BlockSaid } | null = null;
-  let turns = 0;
-  for (const block of flow.blocks) {
-    const said = flow.said[block.id];
-    if (said === undefined) continue;
-    turns += said.turns;
-    if (last === null || said.at >= last.said.at) last = { block, said };
-  }
-  return { whole: left.length === 0, ran: done.size, turns, left, last };
 }
 
 /**
@@ -807,39 +946,90 @@ export function lineState(parent: BlockState, block: BlockState): 'idle' | 'pass
   return block === 'done' ? 'passed' : 'idle';
 }
 
-/** Everything waiting directly on this one. */
-export function waitingOn(flow: Flow, id: string): readonly Block[] {
-  return flow.blocks.filter((one) => one.after.includes(id));
-}
-
 /* -------------------------------------------------------------------------- */
 /* Reading one back                                                            */
 /* -------------------------------------------------------------------------- */
 
-const KINDS = new Set<string>(BLOCKS.map((one) => one.kind));
+/**
+ * What a file may call a block, and what it is here.
+ *
+ * The only names a card can be given: anything else is dropped rather than
+ * drawn unnamed. Four one-sentence kinds became asks, and a wait became the
+ * gate it always was.
+ */
+const KINDS: Readonly<Record<string, BlockKind>> = {
+  ask: 'ask',
+  plan: 'plan',
+  checks: 'checks',
+  review: 'review',
+  gate: 'gate',
+  'pull-request': 'pull-request',
+  goal: 'goal',
+  custom: 'ask',
+  research: 'ask',
+  subagents: 'ask',
+  browser: 'ask',
+  wait: 'gate',
+};
 
-function readSaid(value: unknown, have: ReadonlySet<string>): Readonly<Record<string, BlockSaid>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
-  const kept: Record<string, BlockSaid> = {};
-  for (const [id, one] of Object.entries(value as Record<string, unknown>)) {
-    if (!have.has(id) || typeof one !== 'object' || one === null) continue;
-    const raw = one as Record<string, unknown>;
-    if (typeof raw['text'] !== 'string') continue;
-    kept[id] = {
-      text: raw['text'],
-      turns: typeof raw['turns'] === 'number' && raw['turns'] > 0 ? Math.floor(raw['turns']) : 1,
-      at: typeof raw['at'] === 'number' && raw['at'] > 0 ? raw['at'] : 0,
-    };
-  }
-  return kept;
-}
+/** Every level a model may be asked for. Anything else is the model's own. */
+const THINKING: Readonly<Record<string, ThinkingLevel>> = {
+  off: 'off',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max',
+};
+
+/** Every state a run may be in, and every one a block may be in. A name the
+ *  file made up is nothing rather than the nearest one, because a card or a
+ *  foot band printed off one would be a lie somebody acts on. */
+const RUN_STATES: Readonly<Record<string, RunState>> = {
+  running: 'running',
+  'needs-you': 'needs-you',
+  done: 'done',
+  failed: 'failed',
+  stopped: 'stopped',
+  interrupted: 'interrupted',
+};
+
+const BLOCK_STATES: Readonly<Record<string, BlockState>> = {
+  draft: 'draft',
+  waiting: 'waiting',
+  running: 'running',
+  'needs-you': 'needs-you',
+  done: 'done',
+  failed: 'failed',
+  stopped: 'stopped',
+};
 
 /** Whatever the file held, as a list of ids. A string is a flow written when a
  *  block could only wait for one thing. */
 function readAfter(value: unknown): readonly string[] {
   if (typeof value === 'string') return value === '' ? [] : [value];
   if (!Array.isArray(value)) return [];
-  return [...new Set((value as readonly unknown[]).filter((one): one is string => typeof one === 'string' && one !== ''))];
+  return [
+    ...new Set(
+      (value as readonly unknown[]).filter(
+        (one): one is string => typeof one === 'string' && one !== '',
+      ),
+    ),
+  ];
+}
+
+/** Content ids in the attachment store. Whatever a flow written before that
+ *  held was bytes, and bytes are not an id, so they are left behind. */
+function readAttachments(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      (value as readonly unknown[]).filter(
+        (one): one is string => typeof one === 'string' && one.trim() !== '',
+      ),
+    ),
+  ];
 }
 
 function readAt(value: unknown): { x: number; y: number } | null {
@@ -852,26 +1042,6 @@ function readAt(value: unknown): { x: number; y: number } | null {
   return { x, y };
 }
 
-function readFiles(value: unknown): readonly BlockFile[] {
-  if (!Array.isArray(value)) return [];
-  const kept: BlockFile[] = [];
-  for (const one of value as readonly unknown[]) {
-    if (typeof one !== 'object' || one === null) continue;
-    const raw = one as Record<string, unknown>;
-    const name = raw['name'];
-    const mimeType = raw['mimeType'];
-    const bytes = raw['bytes'];
-    if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof bytes !== 'string') continue;
-    if (mimeType.trim() === '' || bytes === '') continue;
-    // Flows written before a block could carry anything but a picture have no
-    // kind at all, and everything they hold is a picture.
-    const kind = raw['kind'] === 'text' ? 'text' : 'image';
-    kept.push({ name, mimeType, kind, bytes });
-    if (kept.length === MOST_FILES) break;
-  }
-  return kept;
-}
-
 function readModel(value: unknown): BlockModel {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
@@ -880,6 +1050,105 @@ function readModel(value: unknown): BlockModel {
   if (typeof providerId !== 'string' || providerId.trim() === '') return null;
   if (typeof modelId !== 'string' || modelId.trim() === '') return null;
   return { providerId, modelId };
+}
+
+function readThinking(value: unknown): ThinkingLevel | null {
+  return typeof value === 'string' ? (THINKING[value] ?? null) : null;
+}
+
+function readMoney(value: unknown): Money | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const minor = raw['minor'];
+  const currency = raw['currency'];
+  if (typeof minor !== 'number' || !Number.isFinite(minor)) return null;
+  if (typeof currency !== 'string' || currency === '') return null;
+  return { minor, currency };
+}
+
+function readLanes(value: unknown): readonly Lane[] {
+  if (!Array.isArray(value)) return [];
+  const lanes: Lane[] = [];
+  for (const one of value as readonly unknown[]) {
+    if (typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    const id = raw['id'];
+    const workspaceId = raw['workspaceId'];
+    if (typeof id !== 'string' || id === '') continue;
+    if (typeof workspaceId !== 'string' || workspaceId === '') continue;
+    const conversationId = raw['conversationId'];
+    const branch = raw['branch'];
+    lanes.push({
+      id,
+      workspaceId,
+      conversationId: typeof conversationId === 'string' && conversationId !== '' ? conversationId : null,
+      branch: typeof branch === 'string' && branch !== '' ? branch : null,
+    });
+  }
+  return lanes;
+}
+
+function readBlockRun(value: unknown): BlockRun | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  const lane = raw['lane'];
+  const number = (one: unknown): number | null =>
+    typeof one === 'number' && Number.isFinite(one) ? one : null;
+  const text = (one: unknown): string | null => (typeof one === 'string' && one !== '' ? one : null);
+  const state = raw['state'];
+  return {
+    state: (typeof state === 'string' ? BLOCK_STATES[state] : undefined) ?? 'draft',
+    lane: typeof lane === 'string' && lane !== '' ? lane : LANE_0,
+    startedAt: number(raw['startedAt']),
+    endedAt: number(raw['endedAt']),
+    said: typeof raw['said'] === 'string' ? raw['said'] : null,
+    turns: Math.max(0, Math.floor(number(raw['turns']) ?? 0)),
+    spent: readMoney(raw['spent']),
+    rounds: Math.max(0, Math.floor(number(raw['rounds']) ?? 0)),
+    result: text(raw['result']),
+    failure: text(raw['failure']),
+  };
+}
+
+/** Every run a flow held, newest first and never more than it keeps. A run
+ *  whose block nobody has any more is dropped with the block. */
+function readRuns(value: unknown, have: ReadonlySet<string>): readonly Run[] {
+  if (!Array.isArray(value)) return [];
+  const runs: Run[] = [];
+  const seen = new Set<string>();
+  for (const one of value as readonly unknown[]) {
+    if (runs.length === KEPT_RUNS) break;
+    if (typeof one !== 'object' || one === null) continue;
+    const raw = one as Record<string, unknown>;
+    const id = raw['id'];
+    const startedAt = raw['startedAt'];
+    const state = raw['state'];
+    if (typeof id !== 'string' || id === '' || seen.has(id)) continue;
+    if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) continue;
+    const where = typeof state === 'string' ? RUN_STATES[state] : undefined;
+    if (where === undefined) continue;
+    seen.add(id);
+    const blocks: Record<string, BlockRun> = {};
+    const held = raw['blocks'];
+    if (typeof held === 'object' && held !== null && !Array.isArray(held)) {
+      for (const [key, block] of Object.entries(held as Record<string, unknown>)) {
+        if (!have.has(key)) continue;
+        const read = readBlockRun(block);
+        if (read !== null) blocks[key] = read;
+      }
+    }
+    const endedAt = raw['endedAt'];
+    runs.push({
+      id: asRunId(id),
+      state: where,
+      startedAt,
+      endedAt: typeof endedAt === 'number' && Number.isFinite(endedAt) ? endedAt : null,
+      lanes: readLanes(raw['lanes']),
+      blocks,
+      spent: readMoney(raw['spent']),
+    });
+  }
+  return runs;
 }
 
 /** A flow out of whatever a file held. Anything unreadable is no flow at all,
@@ -899,19 +1168,33 @@ export function readFlow(raw: unknown): Flow | null {
     const id = block['id'];
     const kind = block['kind'];
     if (typeof id !== 'string' || id === '' || seen.has(id)) continue;
-    if (typeof kind !== 'string' || !KINDS.has(kind)) continue;
+    if (typeof kind !== 'string') continue;
+    const now = KINDS[kind];
+    if (now === undefined) continue;
     seen.add(id);
+    const spec = specOf(now);
+    const said = block['says'];
+    const retries = block['retries'];
+    const attachments = readAttachments(block['attachments'] ?? block['pictures']);
+    const at = readAt(block['at']);
     blocks.push({
       id,
-      kind: kind as BlockKind,
-      says: typeof block['says'] === 'string' ? block['says'] : '',
+      kind: now,
+      name: typeof block['name'] === 'string' && block['name'].trim() !== '' ? block['name'] : spec.name,
+      // An empty sentence is the kind's own words for everything that brought
+      // some, and a block that was never said what about for the two that did
+      // not.
+      says: typeof said === 'string' && said.trim() !== '' ? said : spec.needsWords ? '' : spec.says,
       model: readModel(block['model']),
+      thinking: readThinking(block['thinking']),
       after: readAfter(block['after']),
-      ...(block['lookFirst'] === true ? { lookFirst: true } : {}),
-      ...(readFiles(block['files'] ?? block['pictures']).length === 0
-        ? {}
-        : { files: readFiles(block['files'] ?? block['pictures']) }),
-      ...(readAt(block['at']) === null ? {} : { at: readAt(block['at']) as { x: number; y: number } }),
+      lookFirst: block['lookFirst'] === true,
+      attachments,
+      retries:
+        typeof retries === 'number' && Number.isFinite(retries) && retries >= 0
+          ? Math.floor(retries)
+          : retriesFor(now),
+      ...(at === null ? {} : { at }),
     });
   }
 
@@ -944,36 +1227,90 @@ export function readFlow(raw: unknown): Flow | null {
       kept.get(one.id)?.push(parent);
     }
   }
-  const startedAt = held['startedAt'];
-  const name = held['name'];
-  const conversation = held['conversation'];
-  const running = held['running'];
-  const doneList = held['done'];
   const standing: Block[] = blocks.map((one) => ({ ...one, after: kept.get(one.id) ?? [] }));
-  const have2 = new Set(standing.map((one) => one.id));
+  const lanes = held['lanes'];
+  const createdAt = held['createdAt'];
   return {
     id,
-    name: typeof name === 'string' && name.trim() !== '' ? name : canvasWords.untitled,
+    name:
+      typeof held['name'] === 'string' && held['name'].trim() !== ''
+        ? (held['name'] as string)
+        : canvasWords.untitled,
+    model: readModel(held['model']),
+    thinking: readThinking(held['thinking']),
     blocks: standing,
-    conversation: typeof conversation === 'string' && conversation !== '' ? conversation : null,
-    repo: typeof held['repo'] === 'string' && held['repo'] !== '' ? held['repo'] : null,
     howFar: isHowFar(held['howFar']) ? held['howFar'] : 'doing',
-    // Nothing is running the moment this is read: the window that was running
-    // it is gone, and claiming otherwise would draw a block that never moves.
-    running: typeof running === 'string' && have2.has(running) ? null : null,
-    rounds: 0,
-    said: readSaid(held['said'], have2),
-    done: Array.isArray(doneList)
-      ? (doneList as readonly unknown[]).filter(
-          (one): one is string => typeof one === 'string' && have2.has(one),
-        )
-      : [],
-    startedAt: typeof startedAt === 'number' && startedAt > 0 ? startedAt : null,
+    lanes: lanes === 'worktrees' ? 'worktrees' : 'in-turn',
+    runs: readRuns(held['runs'], new Set(standing.map((one) => one.id))),
+    // A flow written before flows were dated is not from 1970; it is undated.
+    createdAt: typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0,
+    updatedAt:
+      typeof held['updatedAt'] === 'number' && Number.isFinite(held['updatedAt'])
+        ? (held['updatedAt'] as number)
+        : 0,
   };
 }
 
-/** What a canvas may be set to. The Guard knows two more, and a person setting
- *  a whole flow once has never wanted them. */
+/** Read a flow supplied by the renderer without the forgiving recovery rules
+ *  used for files. IPC saves must reject a malformed drawing rather than
+ *  silently dropping a block/edge and persisting a different graph. Run history
+ *  is intentionally not validated here: the shell owns and discards it. */
+export function readFlowStrict(raw: unknown): Flow | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const held = raw as Record<string, unknown>;
+  if (typeof held['id'] !== 'string' || held['id'] === '' || typeof held['name'] !== 'string' || !Array.isArray(held['blocks'])) return null;
+  const model = held['model'];
+  if (model !== undefined && model !== null && (typeof model !== 'object' || Array.isArray(model) || readModel(model) === null)) return null;
+  const thinking = held['thinking'];
+  if (thinking !== undefined && thinking !== null && (typeof thinking !== 'string' || readThinking(thinking) === null)) return null;
+  // These fields control authorization and execution admission. Unlike the
+  // file reader's recovery path, IPC must not silently default an omitted value
+  // to full-access `doing` or the wrong lane mode.
+  if (!isHowFar(held['howFar'])) return null;
+  if (held['lanes'] !== 'in-turn' && held['lanes'] !== 'worktrees') return null;
+  for (const key of ['createdAt', 'updatedAt']) {
+    const value = held[key];
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) return null;
+  }
+
+  const list = held['blocks'] as readonly unknown[];
+  const ids = new Set<string>();
+  const kinds = new Set(Object.values(KINDS));
+  for (const one of list) {
+    if (typeof one !== 'object' || one === null || Array.isArray(one)) return null;
+    const block = one as Record<string, unknown>;
+    const id = block['id'];
+    if (typeof id !== 'string' || id === '' || ids.has(id)) return null;
+    ids.add(id);
+    if (typeof block['kind'] !== 'string' || !kinds.has(block['kind'] as BlockKind)) return null;
+    if (typeof block['name'] !== 'string' || typeof block['says'] !== 'string') return null;
+    if (block['model'] !== null && (typeof block['model'] !== 'object' || Array.isArray(block['model']) || readModel(block['model']) === null)) return null;
+    if (block['thinking'] !== null && (typeof block['thinking'] !== 'string' || readThinking(block['thinking']) === null)) return null;
+    if (!Array.isArray(block['after'])) return null;
+    const after = block['after'] as readonly unknown[];
+    if (new Set(after).size !== after.length || after.some((parent) => typeof parent !== 'string' || parent === '' || parent === id || !ids.has(parent) && !list.some((candidate) => typeof candidate === 'object' && candidate !== null && (candidate as Record<string, unknown>)['id'] === parent))) return null;
+    if (block['lookFirst'] !== true && block['lookFirst'] !== false) return null;
+    if (!Array.isArray(block['attachments'])) return null;
+    const attachments = block['attachments'] as readonly unknown[];
+    if (new Set(attachments).size !== attachments.length || attachments.some((attachment) => typeof attachment !== 'string' || attachment.trim() === '')) return null;
+    const retries = block['retries'];
+    if (typeof retries !== 'number' || !Number.isFinite(retries) || retries < 0 || !Number.isInteger(retries)) return null;
+    if (block['at'] !== undefined && readAt(block['at']) === null) return null;
+  }
+  const normalized = readFlow(raw);
+  if (normalized === null || normalized.blocks.length !== list.length) return null;
+  // readFlow drops self/unknown/cyclic edges during recovery. Exact equality of
+  // the edge lists makes those cases a hard IPC refusal instead.
+  for (const one of list) {
+    const source = one as Record<string, unknown>;
+    const parsed = normalized.blocks.find((block) => block.id === source['id']);
+    if (parsed === undefined || JSON.stringify(parsed.after) !== JSON.stringify(source['after'])) return null;
+  }
+  return normalized;
+}
+
+/** What a flow may be set to. The Guard knows two more, and a person setting a
+ *  whole flow once has never wanted them. */
 const EVERY_RUNG: readonly HowFar[] = ['looking', 'asking', 'changing', 'doing'];
 
 function isHowFar(value: unknown): value is HowFar {

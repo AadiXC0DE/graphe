@@ -69,10 +69,45 @@ jobs:
       - run: npm run build
       - run: npm run app:build
 
-  e2e:
-    name: End to end
-    # The fake model runs the real shell, and the boundary it runs behind only
-    # exists on macOS.
+      # What a launch has to download, off the renderer build above. The main
+      # chunk is the dominant cost — most of what a launch reads — and it is
+      # inside the 450 KB the app promises (446.3 KB when this became blocking).
+      # The step fails the job when the number goes over: the fix is a dynamic
+      # import, not a raised limit. The table goes into the artifact and the
+      # job summary either way.
+      - name: Measure the launch budget
+        run: |
+          set +e
+          node scripts/perf-report.mjs --check --json=launch-budget.json > perf-report.txt 2>&1
+          status=$?
+          cat perf-report.txt
+          {
+            echo '### Launch budget'
+            echo '```'
+            cat perf-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      # Kept whether the number is over or not, so a regression has something to
+      # be compared against.
+      - name: Keep the launch budget
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-budget
+          path: |
+            perf-report.txt
+            launch-budget.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  integration:
+    name: Integration (in process)
+    # A whole turn against a scripted model, run through the shell's own
+    # decision modules with no window: integration coverage, not the real
+    # Electron suite, which is `electron-smoke` below. macOS because the
+    # boundary this runs behind only exists on the product's own platform.
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -83,6 +118,45 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx vitest run tests/e2e
+
+  electron-smoke:
+    name: Electron smoke
+    # The only job that runs the shipped shell in a real window: a built
+    # renderer, a built main process, and a profile thrown away afterwards. A
+    # window needs a desktop, which is what the product's own platform gives.
+    #
+    # Twice, because the shell has two ways to host a conversation and only one
+    # of them is the default. The second entry is 6.2's own gate: it runs the
+    # whole suite with `GRAPHE_CHILD_RUNTIME=1`, so the child path has to keep
+    # working in the window rather than only in its own tests.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: in-process
+            runtime: ''
+          - name: child runtime
+            runtime: '1'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # npm can unpack node-pty's prebuilt spawn-helper without its executable
+      # bit. The Electron smoke suite uses node_modules directly, before the
+      # package hook has a chance to repair the copy inside an app bundle.
+      - name: Restore node-pty helper permissions
+        run: node scripts/ensure-node-pty-helper.mjs
+      # Builds both halves itself, so it fails on the app rather than on a
+      # missing artifact from another job. Empty for the default run: a switch
+      # set to nothing is not a decision, so the in-process path stands.
+      - run: npm run test:electron
+        env:
+          GRAPHE_CHILD_RUNTIME: ${{ matrix.runtime }}
 
   package:
     name: Package

@@ -3,6 +3,8 @@
  * The list had a preference order and the first bundle found won it forever, so
  * a machine with VS Code and Cursor always got VS Code, and there was nowhere
  * to say otherwise.
+ *
+ *  Source text, not behaviour: the shell reading the chosen editor at the press, and answering appsHere and setOpensIn; no behavioural test can reach it — electron/main.ts is not importable here, and nothing else covers that wiring.
  */
 
 import { readFileSync } from 'node:fs';

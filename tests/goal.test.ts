@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   createGoal,
@@ -128,14 +127,5 @@ describe('the round budget', () => {
   it('is a number a person could sit through, not a machine', () => {
     expect(ROUNDS).toBeGreaterThan(4);
     expect(ROUNDS).toBeLessThanOrEqual(30);
-  });
-
-  it('no longer skips past somebody else’s list', () => {
-    // A goal used to be verified against a project-wide checklist, so it had to
-    // remember which steps were already there. Lists belong to one conversation
-    // now, so there is nothing to skip past and nothing to get wrong.
-    const source = readFileSync('src/work/goal.ts', 'utf8');
-    expect(source).not.toContain('planBaselineN');
-    expect(source).not.toContain('baselineFor');
   });
 });

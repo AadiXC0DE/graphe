@@ -9,9 +9,18 @@ import { ago } from '../../lib/when';
 export type Conversation = {
   id: string;
   path: string;
+  /** Graphe's durable registry address, when the shell has resolved one. */
+  address?: string;
   title: string;
   at: number;
   messages: number;
+  /** The folder it was started in, as the transcript header says. Null for a
+   *  transcript old enough not to carry one. This is what decides which project
+   *  a conversation belongs to when it worked in a checkout of it. */
+  cwd: string | null;
+  /** Whether somebody has put it away. Pi knows nothing about this: the shell
+   *  fills it in from the registry, which is where the decision lives. */
+  archived?: boolean;
 };
 
 /** Long enough to recognise the thought, short enough to scan a column of them. */
@@ -83,11 +92,27 @@ export function nameOf(chosen: unknown, firstMessage: string, at: number): strin
 export type Opening =
   | { kind: 'carry-on'; path: string }
   | { kind: 'most-recent' }
-  | { kind: 'fresh' };
+  /** A conversation that does not exist yet. `workspace` names the workspace it
+   *  starts in; leaving it out means the project's own folder. A new chat never
+   *  picks a workspace by counting the conversations already open. `key` is the
+   *  press that asked for it, so a request sent twice makes one conversation
+   *  while a second press, with a key of its own, still makes a second one. */
+  | { kind: 'fresh'; workspace?: string; forkFrom?: string; key?: string };
 
-export function openingFor(asked: unknown, fresh = false): Opening {
+/** The press is only carried when there is one: a key that came from nowhere is
+ *  the same as no key, and the caller here is the window, which is not trusted
+ *  with the shape of anything. */
+export function openingFor(asked: unknown, fresh = false, key?: unknown): Opening {
   if (typeof asked === 'string' && asked.trim() !== '') return { kind: 'carry-on', path: asked };
-  return fresh ? { kind: 'fresh' } : { kind: 'most-recent' };
+  if (!fresh) return { kind: 'most-recent' };
+  return typeof key === 'string' && key.trim() !== ''
+    ? { kind: 'fresh', key: key.trim() }
+    : { kind: 'fresh' };
+}
+
+/** A new conversation, in a workspace somebody chose. */
+export function openingIn(workspace: string): Opening {
+  return { kind: 'fresh', workspace };
 }
 
 type Fields = Readonly<Record<string, unknown>>;
@@ -132,12 +157,14 @@ function conversationOf(info: unknown): Conversation | null {
   // An empty conversation is a file, not something anyone remembers starting.
   if (messages === null || messages === 0) return null;
   const first = source['firstMessage'];
+  const cwd = textAt(source, 'cwd');
   return {
     id,
     path,
     title: nameOf(source['name'], typeof first === 'string' ? first : '', at),
     at,
     messages,
+    cwd: cwd === '' ? null : cwd,
   };
 }
 

@@ -9,6 +9,8 @@
  * an unanswered plan the moment it lands, which is right for a plan nobody was
  * waiting on — and wrong for one that asked a question, because answering your
  * own question is not asking one.
+ *
+ *  Source text, not behaviour: the window's plan-answer joins and the shell's plan gate; no behavioural test can reach them — neither App.tsx nor electron/main.ts loads in a test.
  */
 
 import { readFileSync } from 'node:fs';
@@ -146,6 +148,9 @@ describe('a plan with nothing in it', () => {
  *  the same way the stale-folder rule is: on the source. */
 describe('the window actually sends what was decided', () => {
   const APP = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  /** One row of the conversation, drawn. The card that shows a plan's questions
+   *  lives here now, because the window draws two transcripts. */
+  const ROW = readFileSync(new URL('../src/components/Turnstile.tsx', import.meta.url), 'utf8');
 
   it('hands the decision to the message rather than dropping it', () => {
     expect(APP).toMatch(/decidedMessage\(chosen\.decision\)/);
@@ -162,7 +167,7 @@ describe('the window actually sends what was decided', () => {
   });
 
   it('still passes the questions to the card that draws them', () => {
-    expect(APP).toMatch(/questions=\{turn\.questions\}/);
+    expect(ROW).toMatch(/questions=\{turn\.questions\}/);
   });
 });
 
@@ -173,20 +178,25 @@ describe('the window actually sends what was decided', () => {
 /**
  * Plan is a gate, and a gate with a door beside it is not one.
  *
- * A session is built in four places — the conversation, the copy made when
- * somebody has asked to see work checked first, a pull request's own checkout,
- * and a piece on the board. Three of them were opened without the gate, so with
- * "check it first" on, the very message Plan was holding ran in a copy with
- * every tool it started with. What this asserts is not a wording: it is that a
- * fifth session, added later, cannot quietly be the fourth hole.
+ * A session is built in three places — the conversation, a pull request's own
+ * checkout, and a piece on the board. Each was opened without the gate at some
+ * point, so with Plan on, the very message it was holding ran with every tool
+ * the session started with. What this asserts is not a wording: it is that a
+ * fourth session, added later, cannot quietly be the third hole.
  */
 describe('every session Plan has to reach', () => {
   const SHELL = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
-  /** Every `createSession({ … })` in the shell, as the text of its arguments. */
+  /** Every `openSession({ … })` in the shell, as the text of its arguments.
+   *
+   * The shell goes through `openSession`, which picks the process a
+   * conversation's agent is hosted in and builds the same options either way,
+   * so every place a session is opened is a call of that name. Scanning for
+   * the two implementations behind it would miss the whole point: a fourth
+   * call site would be a hole nobody looked at. */
   function sessionsBuilt(): readonly string[] {
     const built: string[] = [];
-    const opener = 'createSession({';
+    const opener = 'openSession({';
     for (let at = SHELL.indexOf(opener); at !== -1; at = SHELL.indexOf(opener, at + 1)) {
       let depth = 0;
       let end = at + opener.length - 1;
@@ -204,9 +214,9 @@ describe('every session Plan has to reach', () => {
   }
 
   it('finds every place a session is opened', () => {
-    // Four today. A fifth is not a failure — it is a prompt to say whether the
-    // gate belongs in it, which is exactly what the next case asks.
-    expect(sessionsBuilt().length).toBeGreaterThanOrEqual(4);
+    // Three today. A fourth is not a failure — it is a prompt to say whether
+    // the gate belongs in it, which is exactly what the next case asks.
+    expect(sessionsBuilt().length).toBeGreaterThanOrEqual(3);
   });
 
   it('opens none of them without saying whether Plan is on', () => {

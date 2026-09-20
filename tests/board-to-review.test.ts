@@ -3,6 +3,8 @@
  * With the review queue as the default, work no longer arrives in the folder on
  * its own. A conversation's checkout reached the list; a board piece did not,
  * so a piece that finished had nowhere at all to be looked at.
+ *
+ *  Source text, not behaviour: what the shell does with a finished board piece; no behavioural test can reach it — electron/main.ts internals.
  */
 
 import { readFileSync } from 'node:fs';
@@ -29,7 +31,9 @@ describe('a piece that lands on the board', () => {
     const at = main.indexOf('function tellTheConversation(');
     const block = main.slice(at, main.indexOf('\n}', at));
     expect(block).toContain('continuations.landed(');
-    expect(block).toContain("noteForReview(desk.path, open.held, piece.id, checkout, false, 'board', piece.doing)");
+    // The list is told first, and nothing is carried into anybody's folder:
+    // the fifth argument used to be the live-mirror flag, which is gone.
+    expect(block).toContain("noteForReview(desk.path, open.held, piece.id, checkout, 'board', piece.doing)");
     expect(block.indexOf('continuations.landed(')).toBeLessThan(block.indexOf('noteForReview('));
   });
 
@@ -63,6 +67,7 @@ describe('what a branchless copy cannot do', () => {
   });
 
   it('carries its files rather than merging a branch that is not there', () => {
-    expect(main).toContain("if (taking.length === entry.files.length && checkout.branch !== '') {");
+    expect(main).toContain("taking.length === entry.files.length && checkout.branch !== '' && sourceChanges.length === 0");
+    expect(main).toContain('if (canMergeBranch)');
   });
 });

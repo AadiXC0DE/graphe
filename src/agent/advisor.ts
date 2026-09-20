@@ -109,6 +109,174 @@ export function worthHaving(models: readonly Priced[]): boolean {
 }
 
 /* -------------------------------------------------------------------------- */
+/* One settings file, one conversation                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The package keeps its settings in one file for the whole machine and reads
+ * that file itself, so there is nowhere to hand it a conversation's choice.
+ * What it holds is therefore whoever wrote it last: two conversations with
+ * different advisors used to overwrite each other, and a chat could be answered
+ * by a model nobody chose there.
+ *
+ * There is no seam to fix that with. Pi's `CreateAgentSessionOptions` carries a
+ * model and a thinking level, not an extension's settings, and `ExtensionAPI`
+ * has no per-session settings object; `pi-advisor-flow` 0.4.0 resolves its
+ * config path from `getAgentDir()` alone and refuses project-local config on
+ * purpose, and the two flags it registers are never read. So this is the
+ * serialization the plan allows and not the scoped setting it prefers: one
+ * conversation holds the file while it is open. Another, asking for a different
+ * advisor, is left without a second opinion and told why, rather than quietly
+ * taking the first one's model. The holder gives it back when it is finished
+ * with, or when somebody turns the advisor off there. `advisorScopeWords`
+ * carries the same limitation to the screen, so it is not only in a comment.
+ */
+export type AdvisorChoice = {
+  advises: ModelChoice | null;
+  does: ModelChoice | null;
+  thinks?: ThinkingLevel | undefined;
+  gates?: AdvisorSwitches | undefined;
+};
+
+/** What the machine's one settings file holds, and whose choice it is. */
+export type AdvisorScope = {
+  /** The conversation whose choice the file carries. Null when nobody holds
+   *  it. */
+  owner: string | null;
+  /** The choice as it was written. */
+  holds: AdvisorChoice | null;
+};
+
+export const advisorScopeWords = {
+  /** The standing limitation, said on the advisor add-on's own row. The
+   *  addition keeps one setting for the whole computer; the plan asks for that
+   *  to be labelled rather than left to be discovered by a chat that quietly
+   *  has no advisor. */
+  oneSetting:
+    'It keeps one advisor setting for this whole computer, and there is nowhere to set one per chat. Whoever has it on holds it until that conversation closes.',
+  /** The same row while this conversation is the one holding it. */
+  ours: (holds: string): string =>
+    `This conversation holds the one advisor setting for this computer, set to ${holds}. Another chat asking for a different advisor runs without one until this closes.`,
+  /** And while another conversation is. */
+  inUse: (holds: string): string =>
+    `Another conversation holds the one advisor setting for this computer, set to ${holds}. This one has no second opinion unless it asks for the same.`,
+  /** Said to the conversation that cannot have the file, naming what it asked
+   *  for and what is already there. Both model names, because the person is
+   *  the only one who can say which conversation should win. */
+  held: (wants: string, holds: string): string =>
+    `The advisor keeps one setting for this computer, and another conversation is using it for ${holds}. This conversation asked for ${wants}, so it has been left without a second opinion rather than answer as a model you did not choose here.`,
+  /** Said where the advisor was not asked for but another conversation has it
+   *  on with a gate that lets it speak up on its own. */
+  running: (holds: string): string =>
+    `Another conversation has the advisor on for this computer, set to ${holds}, and it is set to speak up on its own. This conversation did not ask for it.`,
+} as const;
+
+/** How a choice reads in a sentence. Off is a real answer, not a missing one. */
+export function saysChoice(choice: AdvisorChoice | null): string {
+  const advises = choice?.advises ?? null;
+  return advises === null ? 'off' : modelRef(advises);
+}
+
+/** Nobody holds the file: what the first conversation to ask will see. */
+export function noScope(): AdvisorScope {
+  return { owner: null, holds: null };
+}
+
+/** Whether two choices would put the same thing in the file. */
+export function sameChoice(one: AdvisorChoice | null, other: AdvisorChoice | null): boolean {
+  if (one === null || other === null) return one === other;
+  return (
+    sameAdvisor(one.advises, other.advises) &&
+    sameAdvisor(one.does, other.does) &&
+    one.thinks === other.thinks &&
+    one.gates?.completionGate === other.gates?.completionGate &&
+    one.gates?.loopGate === other.gates?.loopGate
+  );
+}
+
+export type Holder = {
+  scope: AdvisorScope;
+  /** True when this conversation's choice is what the file holds, so it may
+   *  write it. */
+  granted: boolean;
+  /** Said to the person when it is not, or null. */
+  because: string | null;
+};
+
+/**
+ * The file, for a conversation that wants `choice`.
+ *
+ * Granted when nobody holds it, when this conversation already does, or when it
+ * wants exactly what is already in it: the same setting shared by two
+ * conversations is nobody being served somebody else's model.
+ */
+export function holdScope(scope: AdvisorScope, who: string, choice: AdvisorChoice): Holder {
+  if (scope.owner === null || scope.owner === who) {
+    return { scope: { owner: who, holds: choice }, granted: true, because: null };
+  }
+  if (sameChoice(scope.holds, choice)) return { scope, granted: true, because: null };
+  return {
+    scope,
+    granted: false,
+    because: advisorScopeWords.held(saysChoice(choice), saysChoice(scope.holds)),
+  };
+}
+
+/** A conversation finished with the file. Only the holder can give it back. */
+export function letGoScope(scope: AdvisorScope, who: string): AdvisorScope {
+  return scope.owner === who ? noScope() : scope;
+}
+
+/**
+ * The machine's one settings file, as the conversations sharing it see it.
+ *
+ * One of these exists per Pi folder for as long as the app is running, and
+ * every conversation in that folder goes through it. It is a class rather than
+ * loose state in the adapter because this is the rule the plan asks to be able
+ * to prove: a second conversation asking for a different advisor must not reach
+ * the file, and the file must not be rewritten while it is being read. Both are
+ * reachable here without a live Pi session.
+ */
+export class AdvisorFile {
+  #scope: AdvisorScope = noScope();
+  #writing: Promise<void> = Promise.resolve();
+
+  /** What the file holds, and whose choice it is. */
+  get scope(): AdvisorScope {
+    return this.#scope;
+  }
+
+  /**
+   * One write at a time. Two conversations starting together used to interleave
+   * two half-written files, and the addition reads this file between the two.
+   */
+  write(work: () => Promise<void>): Promise<void> {
+    const next = this.#writing.then(work).catch(() => undefined);
+    this.#writing = next;
+    return next;
+  }
+
+  /**
+   * The file, for a conversation that wants `choice`. `put` is the write that
+   * makes the choice true on disk; it runs only for the conversation that was
+   * granted the file.
+   */
+  async take(who: string, choice: AdvisorChoice, put: () => Promise<void>): Promise<Holder> {
+    const taken = holdScope(this.#scope, who, choice);
+    if (!taken.granted) return taken;
+    this.#scope = taken.scope;
+    await this.write(put);
+    return taken;
+  }
+
+  /** A conversation finished with the file. Only the holder can give it back. */
+  release(who: string): AdvisorScope {
+    this.#scope = letGoScope(this.#scope, who);
+    return this.#scope;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* The package's own settings                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -239,12 +407,14 @@ export function advisorSettings(
 /* Which tools came from where                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** One extension as Pi's loader hands it back, in the two fields anything here
- *  reads. Kept structural so no Pi shape has to travel with it. */
+/** One extension as Pi's loader hands it back, in the three fields anything
+ *  here reads. Kept structural so no Pi shape has to travel with it. */
 export type LoadedExtension = {
   path?: string | undefined;
   resolvedPath?: string | undefined;
   tools?: ReadonlyMap<string, unknown> | undefined;
+  /** The `/` commands it registered, with the description it gave each one. */
+  commands?: ReadonlyMap<string, { description?: string | undefined }> | undefined;
 };
 
 /**

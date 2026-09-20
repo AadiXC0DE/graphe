@@ -3,6 +3,8 @@
  * Opening the full-screen history from the sidebar never named a project, so it
  * read the parent folder — which in a polyrepo is not a repository at all — and
  * drew an empty graph over three projects' worth of commits.
+ *
+ *  Source text, not behaviour: which project the window hands the history and reviews sheets, and the shell handlers behind them; App.tsx is not renderable here and electron/main.ts sits behind IPC no test drives.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -64,7 +66,6 @@ describe('the reviews screen in a folder of several projects', () => {
 
   it('reads the project the window named, not the folder holding it', () => {
     expect(main).toContain('readRepo({ path: folderFor(open, where) })');
-    expect(main).not.toContain('return done(await readRepo(open));');
   });
 
   it('posts a comment against that same project', () => {

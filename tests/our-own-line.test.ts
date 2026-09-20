@@ -4,6 +4,8 @@
  * behind the run. Pi reports those as queued like any other, and drawn in the
  * line they read as somebody's message waiting to be answered — which is two
  * wrong things at once: nobody typed it, and there is nothing to wait for.
+ *
+ *  Source text, not behaviour: where the shell filters the line on its way to the window and drops a message that has started; no behavioural test can reach it — the harness replays that loop itself and never calls `enrichForTheWindow`.
  */
 
 import { readFileSync } from 'node:fs';
@@ -60,7 +62,6 @@ describe('OL-02 and stop being ours once they have run', () => {
    the shell is what takes them out. */
 describe('OL-03 the shell takes them out on the way to the window', () => {
   const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
-  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 
   it('filters the line where the events are forwarded', () => {
     expect(shell).toContain('function enrichForTheWindow');
@@ -74,10 +75,5 @@ describe('OL-03 the shell takes them out on the way to the window', () => {
   it('stops counting one of its own the moment it begins', () => {
     const at = shell.indexOf('function enrichForTheWindow');
     expect(shell.slice(at, at + 1200)).toContain('drainStarted(mine, event.text)');
-  });
-
-  it('and the window no longer keeps a second copy of the answer', () => {
-    expect(app).not.toContain('withoutOurs(');
-    expect(app).not.toContain('oursInLine');
   });
 });

@@ -30,6 +30,7 @@ import {
   changeDesk,
   closeDesk,
   currentDesk,
+  inFront,
   intoTheBox,
   noDesks,
   openDesk,
@@ -368,10 +369,14 @@ describe('P-03 desks, in the window', () => {
   it('keeps each conversation to its own project', () => {
     const desks = twoDesks();
 
-    expect(desks.byPath[ONE.path]?.turns).toHaveLength(1);
-    expect(desks.byPath[TWO.path]?.turns).toHaveLength(1);
-    expect(desks.byPath[ONE.path]?.turns[0]).toMatchObject({ text: 'the first project' });
-    expect(desks.byPath[TWO.path]?.turns[0]).toMatchObject({ text: 'the second project' });
+    expect(inFront(desks.byPath[ONE.path]).turns).toHaveLength(1);
+    expect(inFront(desks.byPath[TWO.path]).turns).toHaveLength(1);
+    expect(inFront(desks.byPath[ONE.path]).turns[0]).toMatchObject({
+      text: 'the first project',
+    });
+    expect(inFront(desks.byPath[TWO.path]).turns[0]).toMatchObject({
+      text: 'the second project',
+    });
   });
 
   it('keeps each meter to its own project', () => {
@@ -409,7 +414,7 @@ describe('P-03 desks, in the window', () => {
 
     const away = openDesk(desks, TWO);
     expect(currentDesk(away)?.name).toBe('two');
-    expect(currentDesk(away)?.turns[0]).toMatchObject({ text: 'the second project' });
+    expect(inFront(currentDesk(away)).turns[0]).toMatchObject({ text: 'the second project' });
 
     const back = openDesk(away, ONE);
     // The same desk, not a rebuilt one: conversation, meter and versions came
@@ -425,13 +430,15 @@ describe('P-03 desks, in the window', () => {
     const front = desks.current!;
     const behind = front === ONE.path ? TWO.path : ONE.path;
 
-    const turnsBefore = desks.byPath[front]!.turns.length;
+    const turnsBefore = inFront(desks.byPath[front]).turns.length;
     desks = receive(desks, to(behind, heard(' — and one more thing')));
 
-    expect(desks.byPath[front]!.turns).toHaveLength(turnsBefore);
-    expect(desks.byPath[behind]!.turns.map((turn) => ('text' in turn ? turn.text : ''))).toContain(
-      `the ${behind === ONE.path ? 'first' : 'second'} project — and one more thing`,
-    );
+    expect(inFront(desks.byPath[front]).turns).toHaveLength(turnsBefore);
+    expect(
+      inFront(desks.byPath[behind]).turns.map((turn) =>
+        'text' in turn ? turn.text : '',
+      ),
+    ).toContain(`the ${behind === ONE.path ? 'first' : 'second'} project — and one more thing`);
   });
 
   it('ignores an event for a project that is not open rather than inventing one', () => {

@@ -36,9 +36,12 @@ const PATIENCE = 8 * 60_000;
  *
  * Same reason as `src/preview/show.ts`: an app opened from the dock inherits
  * almost no path, so everything a person installed is invisible to us while
- * being perfectly visible in their terminal.
+ * being perfectly visible in their terminal. Exported because a probe that asks
+ * "is npm here?" and the child that later runs npm must give the same answer:
+ * a check against a narrower path than the one it guards is a check that
+ * refuses work the app could have done.
  */
-function searchPath(): string {
+export function searchPath(): string {
   const home = homedir();
   const extra = [
     '/opt/homebrew/bin',

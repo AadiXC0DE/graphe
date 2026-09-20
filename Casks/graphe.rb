@@ -3,17 +3,13 @@
 #
 # ## Why this is the launch route
 #
-# Homebrew does not set `com.apple.quarantine` on what it downloads. Browsers
-# and mail clients do. That one difference is the whole reason Graphe can ship
-# without an Apple Developer Program membership: an app installed through this
-# cask launches with no Gatekeeper dialog at all, while the same .dmg downloaded
-# in Safari sends the user into System Settings to allow it by hand.
+# Homebrew and browser downloads can be quarantined by macOS. This app is not
+# notarized, so first launch may require approval in Privacy & Security.
 #
 # The app is ad-hoc signed (`codesign --sign -`), which is what Apple Silicon
 # requires and what costs nothing. It is not notarized, and this file must not
 # pretend otherwise — no `no_quarantine` flag, no xattr stripping in a postflight
-# block. Both of those exist to work around the dialog, and neither is needed
-# here; a cask that quietly disarms Gatekeeper for its users is a cask that
+# block. A cask that quietly disarms Gatekeeper for its users is a cask that
 # should not be trusted, and Homebrew's own reviewers say so.
 #
 # See notes/strategy/ARCHITECTURE.md, "Can we ship without paying Apple?".
@@ -71,7 +67,7 @@ cask "graphe" do
   # Graphe's window is the entire product, so an old copy is a different
   # product. Say so rather than letting people sit on the build they installed.
   auto_updates false
-  depends_on macos: :monterey
+  depends_on macos: :ventura
 
   app "Graphe.app"
 
@@ -88,13 +84,8 @@ cask "graphe" do
   ]
 
   caveats <<~EOS
-    Graphe is signed, but not notarized by Apple: there is no paid developer
-    account yet. Homebrew 5 and earlier installed it with no prompt, but
-    Homebrew 6 applies the quarantine attribute to cask installs, so on first
-    launch macOS may ask you to allow it. If it does: right-click the app in
-    Finder and choose Open, or use "Open Anyway" in System Settings, Privacy
-    & Security. It is the genuine binary from the GitHub release, not a broken
-    download. The prompt exists because Apple has not vetted a signed binary
-    from a free account, and notarization removes it for good.
+    Graphe is ad-hoc signed, not notarized by Apple. On first launch macOS
+    may require approval through "Open Anyway" in System Settings,
+    Privacy & Security. This cask does not bypass Gatekeeper.
   EOS
 end

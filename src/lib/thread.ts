@@ -11,7 +11,7 @@
 
 import type { ActivityState } from '../components/ActivityLine';
 import type { MessageAuthor } from '../components/Message';
-import type { AgentEvent, ImageCard, ReviewVerdict } from '../agent/types';
+import type { AgentEvent, ImageCard, KeptThing, ReviewVerdict } from '../agent/types';
 import type { Answers, Question } from '../agent/asking';
 import type { Prompt } from '../cost/phrasing';
 import { PLAN_WORDS } from '../agent/plan';
@@ -56,9 +56,11 @@ export type Turn =
       /** When it began, epoch ms. A helper's card counts up from this; without
        *  it every helper on the board claimed to have started this second. */
       at?: number;
-      /** When it finished, epoch ms. The pair is how long a command took, which
-       *  is the one thing a list of commands cannot work out for itself. */
-      endedAt?: number;
+      /** How long it took, measured by the host and carried on the event. Not
+       *  worked out from `at` and the fold's own clock: a batch of events
+       *  folded in one go gives both readings the same instant, and a command
+       *  that took two minutes then claims to have taken none. */
+      ms?: number;
       label: string;
       detail?: string;
       /** What the step has said for itself while running — a helper's findings
@@ -74,6 +76,12 @@ export type Turn =
       /** A picture the step took. Drawn under the line, because a step that
        *  says it took a picture and shows nothing is a step nobody can check. */
       shown?: ImageCard;
+      /** The step as the add-on drew it, headless at eighty columns and with
+       *  the colour taken out. Drawn under the line in a `<pre>`, because a
+       *  tool that brought its own renderer wrote a layout this window's own
+       *  one line cannot reproduce, and showing the generic line instead is
+       *  showing somebody something their add-on did not write. */
+      drawn?: readonly string[];
     }
   | {
       kind: 'asked';
@@ -249,6 +257,8 @@ function closeInto(
   state: ActivityState,
   detail?: string,
   shown?: ImageCard,
+  ms?: number,
+  drawn?: readonly string[],
 ): boolean {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
@@ -262,7 +272,8 @@ function closeInto(
     turns[index] = {
       ...turn,
       state,
-      endedAt: Date.now(),
+      ...(ms === undefined ? {} : { ms }),
+      ...(drawn === undefined || drawn.length === 0 ? {} : { drawn }),
       ...(answered
         ? { label: ADVISOR_ANSWERED, progress: detail }
         : { detail: detail ?? turn.detail }),
@@ -272,6 +283,19 @@ function closeInto(
     return true;
   }
   return false;
+}
+
+/** What a step handed back that its own line has no room for — a file, a
+ *  second picture, the tail of a long output — named under the step, where
+ *  "Show me" prints the machinery behind it. Nothing the transcript holds comes
+ *  back as nothing. */
+function keptUnder(turns: Turn[], callId: string, kept: readonly KeptThing[]): boolean {
+  const at = turns.findLastIndex((turn) => turn.kind === 'did' && turn.callId === callId);
+  const turn = at === -1 ? undefined : turns[at];
+  if (turn?.kind !== 'did') return false;
+  const named = kept.map((one) => `${one.what}, ${one.where}`).join('\n');
+  turns[at] = { ...turn, real: turn.real === undefined ? named : `${turn.real}\n${named}` };
+  return true;
 }
 
 /**
@@ -405,8 +429,18 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
       return changed;
     }
 
-    case 'tool-end':
-      return closeInto(turns, event.id, event.ok ? 'done' : 'failed', event.detail, event.shown);
+    /* How the step ended, in the words the record has for it. A step somebody
+       stopped is not the step's own fault, and one the record never saw finish
+       is interrupted — not failed, and never still running. */
+    case 'tool-end': {
+      const ending = event.ending;
+      const state: ActivityState =
+        ending === 'interrupted' ? 'interrupted' : event.ok ? 'done' : 'failed';
+      const detail = event.detail ?? (ending === 'stopped' ? STEP_WAS_STOPPED : undefined);
+      const closed = closeInto(turns, event.id, state, detail, event.shown, event.ms, event.drawn);
+      if (event.kept === undefined || event.kept.length === 0) return closed;
+      return keptUnder(turns, event.id, event.kept) || closed;
+    }
 
     case 'blocked': {
       if (closeInto(turns, event.call.id, 'failed', event.reason)) return true;
@@ -454,6 +488,7 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
     /* Held by the window beside the composer, not folded into the thread: a
        message waiting its turn is not something that has happened yet. */
     case 'queued':
+    case 'queued-for-folder':
       return false;
 
     /* The agent has begun on one of the queued messages. The waiting line
@@ -601,6 +636,24 @@ export function applyEventInto(turns: Turn[], event: AgentEvent): boolean {
       // Do not leave behind a claim that notes were shortened when they were
       // not: the completed line says plainly that the conversation stayed put.
       turns[index] = { kind: 'tidying', id: was.id, state: event.ok ? 'done' : 'failed' };
+      return true;
+    }
+
+    /* An add-on's own message, come back with the conversation. It is neither
+       the person's nor ours: the words are drawn as they were written, in the
+       add-on's name, and the extension that wrote them travels on the event for
+       whoever can say more about it. */
+    case 'extension-said': {
+      const picture = event.shown;
+      turns.push(
+        said(
+          'add-on',
+          event.text,
+          picture === undefined
+            ? undefined
+            : [{ name: event.from, src: `data:${picture.mimeType};base64,${picture.bytes}` }],
+        ),
+      );
       return true;
     }
 

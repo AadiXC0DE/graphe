@@ -3,6 +3,8 @@
  * The sentences are the feature: "up to date" is a real answer and has to be
  * said, and a refusal has to say which of the two reasons it was — a dirty tree
  * or a divergence — because the next move is different for each.
+ *
+ *  Source text, not behaviour: the panel's own words, the window's pass-through of the project, and the shell's fast-forward guards; no behavioural test can reach them — nothing renders Overview, and electron/main.ts is not importable here.
  */
 
 import { readFileSync } from 'node:fs';

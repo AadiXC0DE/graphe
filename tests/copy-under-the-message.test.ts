@@ -10,6 +10,8 @@
  * Three things here have all been wrong on screen at some point: the control
  * appearing above the text, the turn changing height as the cursor crossed it,
  * and a control a mouse could reach and a keyboard could not.
+ *
+ *  Source text, not behaviour: the control's spacing, reveal, hit area and held state; no behavioural test can reach it — jsdom applies no CSS from the file.
  */
 
 import { readFileSync } from 'node:fs';
@@ -61,7 +63,7 @@ describe('where the copy control sits', () => {
 
   it('reads as the foot of this message rather than the space before the next', () => {
     // 4px under the words against the thread's own 16px between turns.
-    expect(CSS).toContain('top: var(--space-1);');
+    expect(CSS).toContain('padding-top: var(--space-1);');
     // And the room is the 4px drop plus the control, so the turn ends where the
     // control does rather than hanging over what comes after it.
     expect(CSS).toMatch(/\.message__foot \{[^}]*height: var\(--space-5\);/);
@@ -104,7 +106,7 @@ describe('how it appears', () => {
   it('takes its hit area downwards, away from the last line of the message', () => {
     // Reaching upwards would put an invisible target over words people drag
     // across to select.
-    expect(CSS).toMatch(/\.message__copy::after \{[^}]*inset: -4px -6px -12px;/);
+    expect(CSS).toMatch(/\.message__copy::after \{[^}]*inset: -4px 0 -12px;/);
   });
 
   it('presses, and stops pressing when motion is turned down', () => {
@@ -141,16 +143,15 @@ describe('an icon rather than the word', () => {
     expect(control().getAttribute('aria-label')).not.toMatch(/conversation/i);
   });
 
-  it('keeps one square whatever it is saying', () => {
-    expect(CSS).toMatch(/\.message__copy \{[^}]*width: 20px;/);
+  it('keeps a square icon target and room for feedback', () => {
+    expect(CSS).toMatch(/\.message__copy \{[^}]*min-width: 20px;/);
     expect(CSS).toMatch(/\.message__copy \{[^}]*height: 20px;/);
   });
 
-  /** The confirmation rides beside the icon out of flow, so landing a copy
-   *  cannot widen the control or shove the turn under it. */
-  it('says Copied without taking any room', () => {
-    expect(CSS).toMatch(/\.message__copysaid \{[^}]*position: absolute;/);
-    expect(CSS).toMatch(/\.message__copysaid \{[^}]*left: 100%;/);
+  /** Feedback expands horizontally, leaving the turn height unchanged. */
+  it('says Copied in the same line without covering its neighbour', () => {
+    expect(CSS).toMatch(/\.message__copysaid \{[^}]*white-space: nowrap;/);
+    expect(CSS).toMatch(/\.message__copy \{[^}]*min-width: 20px;/);
   });
 });
 
@@ -180,5 +181,60 @@ describe('once it lands', () => {
     expect(copy.className).toContain('message__copy--held');
     expect(copy.getAttribute('aria-label')).toBe('Copied');
     expect(host.querySelector('.message__copysaid')?.textContent).toBe('Copied');
+  });
+});
+
+/** The one other thing that can be done with a turn from where the turn is: a
+ *  fork of the conversation at it. */
+describe('forking a conversation at a message', () => {
+  it('keeps copy feedback in the layout beside the fork control', () => {
+    expect(CSS).toMatch(/\.message__foot \{[^}]*display: flex;/);
+    const feedback = /\.message__copysaid \{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    const action = /\.message__action \{([^}]*)\}/.exec(CSS)?.[1] ?? '';
+    expect(feedback).not.toContain('position: absolute');
+    expect(action).not.toContain('position: absolute');
+  });
+  it('is offered on the message, and hands over where that message stands', () => {
+    const asked: number[] = [];
+    const host = draw({
+      from: 'you',
+      children: 'Make the hero tighter.',
+      copy: 'Make the hero tighter.',
+      action: {
+        label: 'Fork here',
+        hint: 'A second chat from here. Same files, so changes are shared.',
+        onPress: () => asked.push(4),
+      },
+    });
+    const action = host.querySelector('.message__action') as HTMLButtonElement;
+    expect(action.textContent).toBe('Fork here');
+    expect(action.disabled).toBe(false);
+    act(() => {
+      action.click();
+    });
+    expect(asked).toEqual([4]);
+  });
+
+  /* A boundary still being written is not one the shell will fork, and the
+     window says so where the press is rather than sending it to be refused. */
+  it('stands the press down on a message that is still being written, and says why', () => {
+    const host = draw({
+      from: 'graphe',
+      children: 'Working on it…',
+      action: {
+        label: 'Fork here',
+        hint: 'A second chat from here. Same files, so changes are shared.',
+        onPress: () => undefined,
+        waits: 'Fork here waits until this turn finishes.',
+      },
+    });
+    const action = host.querySelector('.message__action') as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    expect(action.getAttribute('title')).toBe('Fork here waits until this turn finishes.');
+  });
+
+  it('draws nothing at all where there is nowhere to fork from', () => {
+    const host = draw({ from: 'graphe', children: 'Done.', copy: 'Done.' });
+    expect(host.querySelector('.message__action')).toBeNull();
   });
 });

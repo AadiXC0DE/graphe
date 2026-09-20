@@ -3,7 +3,9 @@
  *  Roles decide which tools a helper may hold and what it is told about the
  *  job; the boundary decides what of a helper's words are allowed to look like
  *  a person or the machine. Both are pure — string in, string out — so every
- *  claim here is tested without a process in sight. */
+ *  claim here is tested without a process in sight.
+ *
+ *  Source text, not behaviour: the child briefing itself with helperBrief; no behavioural test can reach it — the call is in the runner's unexported work(). */
 
 import { readFileSync } from 'node:fs';
 

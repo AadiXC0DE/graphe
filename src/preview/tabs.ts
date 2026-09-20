@@ -109,11 +109,15 @@ export const tabsWords = {
  *  `localhost:3000` and `:3000` are what people actually type at a dev server,
  *  and neither is a URL until something puts a scheme on the front. Anything
  *  with a space in it, or no dot and no port, is not an address and is not
- *  quietly turned into a search: there is no search here. */
+ *  quietly turned into a search: there is no search here.
+ *
+ *  A scheme is http or https and nothing else: the pane is a browser for what
+ *  the project serves, and reading this machine's own files is not one of the
+ *  things it is for. */
 export function asAddress(typed: string): string | null {
   const said = typed.trim();
   if (said === '' || /\s/.test(said)) return null;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(said)) return said;
+  if (/^https?:\/\//i.test(said)) return said;
   if (/^:\d{2,5}(\/|$)/.test(said)) return `http://localhost${said}`;
   if (/^localhost(:\d{2,5})?(\/|$)/i.test(said)) return `http://${said}`;
   if (/^\d{1,3}(\.\d{1,3}){3}(:\d{2,5})?(\/|$)/.test(said)) return `http://${said}`;

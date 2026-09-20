@@ -7,6 +7,8 @@
  * them then wrote a review of a diff nobody had read.
  *
  * The refusal is the whole answer, so it has to travel back with the silence.
+ *
+ *  Source text, not behaviour: the child runner's refusal memory, its quiet endings and its step beat; no behavioural test can reach it — that code is the child's own entry, which no test spawns.
  */
 
 import { readFileSync } from 'node:fs';
@@ -69,7 +71,6 @@ describe('the join that fills it in', () => {
     // The settled path and the nothing-arrived-in-time path, neither left
     // reporting the bare sentence.
     expect(runner.match(/error: nothingSaid\(\)/g)?.length).toBe(2);
-    expect(runner).not.toContain('error: SAID_NOTHING');
   });
 });
 

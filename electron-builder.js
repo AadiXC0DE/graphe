@@ -37,7 +37,7 @@ import { join } from 'node:path';
 
 import adhocSign from './scripts/adhoc-sign.mjs';
 import { squeezeDiskImages } from './scripts/squeeze-dmg.mjs';
-import { leaveOut, leaveOutTheLanguages } from './scripts/what-ships.mjs';
+import { leaveOut, leaveOutTheLanguages, unpackRules } from './scripts/what-ships.mjs';
 
 /**
  * Keep this version's source maps where a stack trace can still be read.
@@ -113,11 +113,22 @@ export default async function config() {
     npmRebuild: false,
 
     asar: true,
-    // Pi is reached through a dynamic ESM import at runtime. Keeping it out of
-    // the archive means that import resolves to an ordinary file on disk, which
-    // is one fewer thing to be surprised by, and it is also where the prebuilt
-    // .node files live — those cannot be loaded from inside an asar at all.
-    asarUnpack: ['node_modules/@earendil-works/**'],
+    /* Pi is reached through a dynamic ESM import at runtime. Keeping it out of
+       the archive means that import resolves to an ordinary file on disk, which
+       is one fewer thing to be surprised by, and it is also where the prebuilt
+       .node files live — those cannot be loaded from inside an asar at all.
+
+       Everything in its runtime closure is unpacked with it, from the same list
+       that decides what is carried at all. A module on disk resolves
+       `node_modules` by walking up from its own real path, so it can never reach
+       a dependency left inside the archive: unpacking Pi alone had the child
+       runtime die on `partial-json`, a package that was in the bundle and simply
+       not reachable from there.
+
+       The child runtime joins them for the same reason and one better: it is an
+       ESM entry Node has to import, and an ESM entry inside the archive is not
+       reliably importable. `childProgram()` looks in `app.asar.unpacked` for it. */
+    asarUnpack: [...(await unpackRules()), 'dist-electron/runtime-child.mjs'],
 
     // After packing, before the .dmg is built. The trim has to come first: it
     // changes bytes the signature covers.

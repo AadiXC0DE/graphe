@@ -13,11 +13,15 @@
   right: 0;
   bottom: 0;
   z-index: 2;
-  width: var(--rail-width);
+  /* The panel's width and the room the composition keeps for it are one number:
+     .app--overviewed sets both, and it is what gives way first when the window
+     cannot hold a rail and a readable conversation. */
+  width: var(--overview-take);
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-left: 1px solid var(--border);
+  /* A rail given no room paints no edge either — see the file panel in App.css. */
+  border-left: min(1px, var(--overview-take)) solid var(--border);
   overflow-y: auto;
   /* Fixed to the glass, so no bar: it would run the full height of the window
      beside the work rather than in it, and the reveal shoved every line in the
@@ -362,17 +366,9 @@
    needs to stay there is in CostMeter.css, under .cost-meter--panel. */
 .overview { padding-bottom: 0; }
 
-@media (max-width: 1100px) {
-  .overview {
-    width: var(--rail-width-tight);
-  }
-}
-
-@media (max-width: 720px) {
-  .overview {
-    width: 240px;
-  }
-}
+/* The panel's width is the room the composition kept for it: the two narrow
+   steps this used to carry are on --rail-width itself (App.css), so the panel
+   and the padding around the conversation cannot disagree. */
 
 @media (prefers-reduced-motion: reduce) {
   .overview { animation: none; }
@@ -474,95 +470,6 @@
 .overview__foot .overview__do {
   margin-top: 0;
   width: 100%;
-}
-
-/* ---------------------------------------------------------------------------
-   Ways into the design view
-   Six rows, each naming what it holds and how much of it there is. The panel is
-   328px wide; the thing behind these rows is not, which is the whole point of
-   the row being a door rather than the room.
-   --------------------------------------------------------------------------- */
-
-.overview__ways {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.overview__way {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: 44px;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background-color var(--dur-micro) var(--ease-hover);
-}
-
-.overview__waytext {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.overview__wayname {
-  font-size: var(--text-xs);
-  color: var(--text);
-}
-
-.overview__waynote {
-  font-size: var(--text-2xs);
-  line-height: 1.35;
-  color: var(--text-faint);
-}
-
-.overview__waycount {
-  flex: none;
-  margin-left: auto;
-  min-width: 20px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--bg-sunken);
-  color: var(--text-muted);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-/* Something to put right, rather than something there is a lot of. */
-.overview__waycount--wrong {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
-.overview__way:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .overview__way:hover {
-    background: var(--bg-sunken);
-  }
-}
-
-/* The shortcut, printed on the control it belongs to rather than in a list
-   somewhere nobody reads. */
-.overview__key {
-  margin-left: var(--space-2);
-  padding: 1px 5px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-sunken);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
 }
 
 /* A folder that holds several projects, one row each.

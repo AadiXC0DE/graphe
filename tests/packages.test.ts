@@ -12,12 +12,20 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CURATED,
+  NODE_DOWNLOAD,
   WARNING,
   installed,
+  npmSetup,
   packageShelf,
   readCatalog,
+  reloadWords,
+  installAddon,
+  routeFor,
+  type Installed,
   type PackageHost,
+  type RunInstall,
 } from '../src/agent/pi/packages';
+import { installPlanFor } from '../src/projects/setup';
 import { cardFrom } from '../src/agent/pi/extension-probe';
 
 /* -------------------------------------------------------------------------- */
@@ -367,6 +375,7 @@ describe('CURATED', () => {
         tools: [{ name: one.id, description: one.why }],
         commands: [],
         sentTurns: false,
+        toolsOnly: false,
         source: one.why,
       });
       expect(card.orchestrating, one.id).toBe(false);
@@ -520,13 +529,14 @@ describe('packageShelf.mine', () => {
 describe('packageShelf.add', () => {
   it('installs it and says so', async () => {
     const host = fakeHost();
-    expect(await packageShelf(host).add('pi-lens')).toEqual({ ok: true });
+    const answer = await packageShelf(host).add('pi-lens');
+    expect(answer.ok).toBe(true);
     expect(host.add).toHaveBeenCalledWith('pi-lens');
   });
 
   it('accepts a scoped name, and trims what was typed', async () => {
     const host = fakeHost();
-    expect(await packageShelf(host).add('  @studio/pi-copy-review  ')).toEqual({ ok: true });
+    expect((await packageShelf(host).add('  @studio/pi-copy-review  ')).ok).toBe(true);
     expect(host.add).toHaveBeenCalledWith('@studio/pi-copy-review');
   });
 
@@ -600,6 +610,568 @@ describe('packageShelf.remove', () => {
         },
       }),
     );
-    await expect(shelf.remove('pi-lens')).resolves.toBeUndefined();
+    await expect(shelf.remove('pi-lens')).resolves.toEqual({
+      id: 'pi-lens',
+      doing: 'remove',
+      before: null,
+      after: null,
+    });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* A change, recorded                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Let every promise that can settle, settle. Nothing here is on a clock: the
+ *  question is the order work happens in, not how long it takes. */
+async function flush(): Promise<void> {
+  for (let at = 0; at < 8; at += 1) await Promise.resolve();
+}
+
+/** A host that knows what version is on disk, and lets each step be watched. */
+function versionedHost(versions: Record<string, string>, overrides: Partial<PackageHost> = {}): PackageHost {
+  return fakeHost({
+    add: vi.fn(async (id: string) => {
+      versions[id] = '2.0.0';
+    }),
+    update: vi.fn(async (id: string) => {
+      versions[id] = '3.0.0';
+    }),
+    remove: vi.fn(async (id: string) => {
+      delete versions[id];
+    }),
+    installed: vi.fn(async (id: string) =>
+      versions[id] === undefined ? { version: null } : { version: versions[id]! },
+    ),
+    ...overrides,
+  });
+}
+
+describe('a change to what is installed', () => {
+  it('records what was there before it and what is there after', async () => {
+    const host = versionedHost({ 'pi-lens': '1.4.2' });
+    const answer = await packageShelf(host).add('pi-lens');
+
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.change).toEqual({
+      id: 'pi-lens',
+      doing: 'install',
+      before: { version: '1.4.2' },
+      after: { version: '2.0.0' },
+    });
+  });
+
+  it('says the version, because added on its own cannot tell an update from a first install', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({}));
+    shelf.watching((progress) => said.push(progress.says));
+
+    await shelf.add('pi-lens');
+    expect(said).toEqual(['Adding Lens…', 'Added Lens 2.0.0.']);
+  });
+
+  it('says what an update moved from and to', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({ 'pi-lens': '1.4.2' }));
+    shelf.watching((progress) => said.push(progress.says));
+
+    const answer = await shelf.update('pi-lens');
+    expect(answer.ok).toBe(true);
+    expect(said).toEqual(['Updating Lens…', 'Updated Lens from 1.4.2 to 3.0.0.']);
+  });
+
+  it('runs one at a time, in the order they were asked for', async () => {
+    const running: string[] = [];
+    const open: (() => void)[] = [];
+    const host = versionedHost({}, {
+      add: vi.fn(async (id: string) => {
+        running.push(`start ${id}`);
+        const { promise, resolve } = Promise.withResolvers<void>();
+        open.push(() => {
+          running.push(`end ${id}`);
+          resolve();
+        });
+        return promise;
+      }),
+      installed: vi.fn(async () => ({ version: null })),
+    });
+    const shelf = packageShelf(host);
+
+    const first = shelf.add('pi-one');
+    const second = shelf.add('pi-two');
+    // Nothing of the second one starts while the first is still going: two
+    // installs into one folder at once is a half-populated node_modules.
+    await flush();
+    expect(running).toEqual(['start pi-one']);
+    expect(open).toHaveLength(1);
+
+    open[0]?.();
+    await first;
+    await flush();
+    expect(running).toEqual(['start pi-one', 'end pi-one', 'start pi-two']);
+    open[1]?.();
+    await second;
+    expect(running).toEqual(['start pi-one', 'end pi-one', 'start pi-two', 'end pi-two']);
+  });
+
+  it('does not let a failed one stop the next', async () => {
+    const host = versionedHost({}, {
+      add: vi.fn(async (id: string) => {
+        if (id === 'pi-broken') throw new Error('npm error code E404');
+        return undefined;
+      }),
+    });
+    const shelf = packageShelf(host);
+
+    const broken = await shelf.add('pi-broken');
+    expect(broken).toEqual({ ok: false, why: 'There is nothing by that name to add.' });
+    expect((await shelf.add('pi-fine')).ok).toBe(true);
+  });
+
+  it('says the change happened even when nobody can name the version', async () => {
+    const said: string[] = [];
+    // A host from before this file knew about versions: it installs and cannot
+    // say what landed.
+    const shelf = packageShelf(fakeHost());
+    shelf.watching((progress) => said.push(progress.says));
+
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.change).toEqual({ id: 'pi-lens', doing: 'install', before: null, after: null });
+    expect(said).toEqual(['Adding Lens…', 'Added Lens.']);
+  });
+
+  it('stops saying anything once the watcher is taken off', async () => {
+    const said: string[] = [];
+    const shelf = packageShelf(versionedHost({}));
+    const stop = shelf.watching((progress) => said.push(progress.says));
+    stop();
+
+    await shelf.add('pi-lens');
+    expect(said).toEqual([]);
+  });
+
+  it('passes the installer’s own progress through in the same channel', async () => {
+    const said: string[] = [];
+    /** The installer's progress callback, as the host would hold it. */
+    let fromInstaller: ((says: string) => void) | undefined;
+    const shelf = packageShelf(
+      versionedHost({}, {
+        watching: (handler) => {
+          fromInstaller = handler;
+        },
+      }),
+    );
+    shelf.watching((progress) => said.push(progress.says));
+    // While an install is happening, in the words the installer uses.
+    fromInstaller?.('added 3 packages in 2s');
+
+    expect(said).toEqual(['added 3 packages in 2s']);
+  });
+
+  it('is reported to a conversation in the words that say what to do about it', async () => {
+    const shelf = packageShelf(versionedHost({}));
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(reloadWords(answer.change)).toBe('Installed; reload this chat to activate');
+
+    const off = await packageShelf(versionedHost({ 'pi-lens': '1.4.2' })).remove('pi-lens');
+    expect(reloadWords(off)).toBe('Removed; reload this chat to let it go');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Stopping one, and what the installer said                                    */
+/* -------------------------------------------------------------------------- */
+
+/** An install that does not finish until somebody ends it, the way a real one
+ *  does not: the installer is a child process npm owns. */
+function stalled(versions: Record<string, string>, overrides: Partial<PackageHost> = {}) {
+  const ended: (() => void)[] = [];
+  const waiting = (): Promise<void> =>
+    new Promise<void>((_resolve, reject) => {
+      ended.push(() => reject(new Error('npm install was ended')));
+    });
+  const host = versionedHost(versions, {
+    add: waiting,
+    update: waiting,
+    ...overrides,
+  });
+  return { host, ended };
+}
+
+describe('stopping a change', () => {
+  it('ends the installer and says what it left on disk', async () => {
+    const versions: Record<string, string> = {};
+    const { host, ended } = stalled(versions, {
+      // What a killed installer leaves: the folder it had got as far as.
+      stop: async () => {
+        versions['pi-lens'] = '1.9.0';
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+    const said: string[] = [];
+    shelf.watching((progress) => said.push(progress.says));
+
+    const adding = shelf.add('pi-lens');
+    await flush();
+    const outcome = await shelf.stop();
+
+    expect(outcome).toEqual({
+      stopped: true,
+      says: 'Stopped adding Lens. Lens 1.9.0 is on disk.',
+    });
+    expect(await adding).toEqual({
+      ok: false,
+      stopped: true,
+      why: 'Stopped adding Lens. Lens 1.9.0 is on disk.',
+    });
+    // The one thing it must never say: that the change finished.
+    expect(said).toEqual(['Adding Lens…']);
+  });
+
+  it('says nothing was installed when the stop landed before anything did', async () => {
+    const { host, ended } = stalled({}, {
+      stop: async () => {
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+
+    const adding = shelf.add('pi-lens');
+    await flush();
+    expect(await shelf.stop()).toEqual({
+      stopped: true,
+      says: 'Stopped adding Lens. Nothing was installed.',
+    });
+    await adding;
+  });
+
+  it('says what an update kept when it is stopped half way', async () => {
+    const versions: Record<string, string> = { 'pi-lens': '1.4.2' };
+    const { host, ended } = stalled(versions, {
+      stop: async () => {
+        for (const one of ended.splice(0)) one();
+      },
+    });
+    const shelf = packageShelf(host);
+
+    const updating = shelf.update('pi-lens');
+    await flush();
+    expect(await shelf.stop()).toEqual({
+      stopped: true,
+      says: 'Stopped updating Lens. Lens 1.4.2 is on disk, unchanged.',
+    });
+    await updating;
+  });
+
+  it('says plainly when there was nothing to stop', async () => {
+    const shelf = packageShelf(versionedHost({}, { stop: async () => {} }));
+    expect(await shelf.stop()).toEqual({
+      stopped: false,
+      says: 'Nothing is being changed just now.',
+    });
+  });
+
+  it('does not claim to have stopped an installer it cannot reach', async () => {
+    // No `stop` on the host at all: nothing here can end it, so the change
+    // carries on and finishes, and the press is told that rather than told it
+    // worked.
+    const versions: Record<string, string> = {};
+    const { host, ended } = stalled(versions);
+    const shelf = packageShelf(host);
+    const adding = shelf.add('pi-lens');
+    await flush();
+
+    expect(await shelf.stop()).toEqual({ stopped: false, says: expect.stringMatching(/cannot end an install/) });
+    versions['pi-lens'] = '2.0.0';
+    for (const one of ended.splice(0)) one();
+    await adding;
+  });
+});
+
+describe('what the installer said', () => {
+  /** A host whose installer talks while it fails, the way npm does. */
+  function talkative(lines: readonly string[], overrides: Partial<PackageHost> = {}): PackageHost {
+    let listener: ((says: string) => void) | undefined;
+    return versionedHost({}, {
+      add: async () => {
+        for (const line of lines) listener?.(line);
+        throw new Error('npm error code 1');
+      },
+      watching: (handler) => {
+        listener = handler;
+      },
+      ...overrides,
+    });
+  }
+
+  it('keeps its own last lines and hands them to the failure', async () => {
+    const shelf = packageShelf(
+      talkative(['npm error code EEXIST', 'npm error path /Users/x/.pi/agent/node_modules']),
+    );
+
+    expect(await shelf.add('pi-lens')).toEqual({
+      ok: false,
+      why: 'I could not add that.',
+      logs: ['npm error code EEXIST', 'npm error path /Users/x/.pi/agent/node_modules'],
+    });
+  });
+
+  it('keeps a bounded amount of it, so the last lines are the ones kept', async () => {
+    const shelf = packageShelf(
+      talkative(Array.from({ length: 60 }, (_one, at) => `npm step ${String(at + 1)}`)),
+    );
+
+    const answer = await shelf.add('pi-lens');
+    expect(answer.ok).toBe(false);
+    if (answer.ok) return;
+    expect(answer.logs).toHaveLength(40);
+    expect(answer.logs?.[0]).toBe('npm step 21');
+    expect(answer.logs?.at(-1)).toBe('npm step 60');
+  });
+
+  it('hands up no logs at all when the installer said nothing', async () => {
+    const answer = await packageShelf(talkative([])).add('pi-lens');
+    expect(answer.ok).toBe(false);
+    if (answer.ok) return;
+    expect(Object.keys(answer).sort()).toEqual(['ok', 'why']);
+  });
+
+  it('does not hand a later failure the lines an earlier one left', async () => {
+    const said: string[][] = [[], ['npm error code EEXIST']];
+    let attempt = 0;
+    let listener: ((says: string) => void) | undefined;
+    const shelf = packageShelf(
+      versionedHost({}, {
+        add: async () => {
+          for (const line of said[attempt] ?? []) listener?.(line);
+          attempt += 1;
+          throw new Error('npm error code 1');
+        },
+        watching: (handler) => {
+          listener = handler;
+        },
+      }),
+    );
+
+    expect(await shelf.add('pi-lens')).toEqual({ ok: false, why: 'I could not add that.' });
+    const second = await shelf.add('pi-lens');
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.logs).toEqual(['npm error code EEXIST']);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* What installing needs from this computer                                    */
+/* -------------------------------------------------------------------------- */
+
+describe('the npm line', () => {
+  it('says nothing at all when npm is here', () => {
+    const setup = npmSetup({ npm: true, brew: false });
+    expect(setup.needed).toBe(false);
+    expect(setup.line).toBe('');
+  });
+
+  it('names what is missing, and does not offer a command nobody can run', () => {
+    const setup = npmSetup({ npm: false, brew: false });
+    expect(setup.needed).toBe(true);
+    // The prerequisite, said before the press rather than after it.
+    expect(setup.line).toMatch(/npm/);
+    expect(setup.line).toMatch(/Node/);
+    expect(setup.command).toBeNull();
+    expect(setup.download).toBe(NODE_DOWNLOAD);
+  });
+
+  it('offers the one command where there is a Homebrew to run it with', () => {
+    const setup = npmSetup({ npm: false, brew: true });
+    expect(setup.command).toBe('brew install node');
+  });
+
+  it('offers the page that installs Node, wherever it is asked from', () => {
+    expect(NODE_DOWNLOAD).toBe('https://nodejs.org/en/download');
+    expect(npmSetup({ npm: false, brew: true }).download).toBe(NODE_DOWNLOAD);
+  });
+});
+
+describe('whether a change can be ended', () => {
+  it('says so before anybody presses, for a host that can', () => {
+    expect(packageShelf(versionedHost({}, { stop: async () => {} })).canStop).toBe(true);
+  });
+
+  it('says so for a host that cannot, so no press is offered', () => {
+    expect(packageShelf(versionedHost({})).canStop).toBe(false);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The command we run ourselves                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('what an add-on is installed with', () => {
+  /** The install root's own files, as `readdir` hands them over. */
+  const at = (...names: readonly string[]): readonly string[] => names;
+
+  it('follows the lockfile in the install root, the same rule a checkout gets', () => {
+    const manager = (files: readonly string[]) => installPlanFor(files)?.manager ?? 'npm';
+    expect(manager(at('package.json'))).toBe('npm');
+    expect(manager(at('package.json', 'pnpm-lock.yaml'))).toBe('pnpm');
+    expect(manager(at('package.json', 'yarn.lock'))).toBe('yarn');
+    expect(manager(at('package.json', 'bun.lockb'))).toBe('bun');
+    // Nothing there at all: npm is what Pi writes and what a clean machine has.
+    expect(manager(at())).toBe('npm');
+  });
+
+  it('installs into the folder Pi loads from, not the project', () => {
+    // `--prefix` rather than cwd: the install root is where the next session
+    // reads add-ons from, and it is not the project folder.
+    expect(routeFor('install', 'npm', '/agent/npm', 'pi-lens')).toEqual({
+      command: 'npm',
+      args: ['install', 'pi-lens', '--prefix', '/agent/npm', '--legacy-peer-deps', '--no-audit', '--no-fund'],
+    });
+    expect(routeFor('install', 'pnpm', '/agent/npm', 'pi-lens').args).toContain('/agent/npm');
+    expect(routeFor('install', 'bun', '/agent/npm', 'pi-lens').args).toContain('/agent/npm');
+    // Yarn installs into the working directory, which is the root we hand it.
+    expect(routeFor('install', 'yarn', '/agent/npm', 'pi-lens')).toEqual({
+      command: 'yarn',
+      args: ['add', 'pi-lens'],
+    });
+  });
+
+  it('asks for the newest one on an update, and names it on a removal', () => {
+    expect(routeFor('update', 'npm', '/root', 'pi-lens').args).toContain('pi-lens@latest');
+    expect(routeFor('remove', 'npm', '/root', 'pi-lens').args).toEqual([
+      'uninstall',
+      'pi-lens',
+      '--prefix',
+      '/root',
+      '--legacy-peer-deps',
+      '--no-audit',
+      '--no-fund',
+    ]);
+    expect(routeFor('remove', 'bun', '/root', 'pi-lens').args).toEqual(['uninstall', 'pi-lens', '--cwd', '/root']);
+  });
+
+  it('keeps an add-on\u2019s own pi peers out of the install', () => {
+    // A second copy of the runtime beside an add-on is how a package that
+    // works in Pi fails here, so peer resolution is off on every manager.
+    expect(routeFor('install', 'npm', '/root', 'pi-lens').args).toContain('--legacy-peer-deps');
+    expect(routeFor('install', 'bun', '/root', 'pi-lens').args).toContain('--omit=peer');
+    expect(routeFor('install', 'pnpm', '/root', 'pi-lens').args).toContain(
+      '--config.auto-install-peers=false',
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Running the install ourselves: a clean machine, a stop, and what is left    */
+/* -------------------------------------------------------------------------- */
+
+/** A child that does not come back until somebody ends it, the way npm does
+ *  not. The signal is the whole point of running the install here rather than
+ *  through Pi, which owns its npm child privately and offers no way to stop it. */
+function childThatWaits(): { run: RunInstall; ended: () => boolean } {
+  let aborted = false;
+  const run: RunInstall = (_command, _args, options) =>
+    new Promise((_done, reject) => {
+      options.signal.addEventListener('abort', () => {
+        aborted = true;
+        reject(new Error('the install was ended'));
+      });
+    });
+  return { run, ended: () => aborted };
+}
+
+describe('installing an add-on as our own child', () => {
+  it('runs npm into the install root, on the lockfile that is there', async () => {
+    const seen: { command: string; args: readonly string[]; folder: string }[] = [];
+    const run: RunInstall = async (command, args, options) => {
+      seen.push({ command, args, folder: options.folder });
+      return { code: 0, said: '' };
+    };
+
+    const outcome = await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-lens',
+      new AbortController().signal,
+    );
+
+    expect(outcome).toEqual({ ok: true });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.command).toBe('npm');
+    // The install root, not the project: this is where the next session reads
+    // add-ons from.
+    expect(seen[0]?.args).toContain('/agent/npm');
+    expect(seen[0]?.folder).toBe('/agent/npm');
+  });
+
+  it('works on a machine whose npm is only found on the widened path', () => {
+    // The claim is about `runHelper`'s own path, and it is proved against a
+    // real npm in `tests/addon-install.test.ts`: what this holds is that the
+    // route hands the child the root it must install into and asks for
+    // nothing else from the machine.
+    const args = routeFor('install', 'npm', '/agent/npm', 'pi-lens').args;
+    expect(args).toEqual(['install', 'pi-lens', '--prefix', '/agent/npm', '--legacy-peer-deps', '--no-audit', '--no-fund']);
+  });
+
+  it('says which manager it is about to run, so the screen is not blank', async () => {
+    const said: string[] = [];
+    const run: RunInstall = async () => ({ code: 0, said: '' });
+
+    await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['pnpm-lock.yaml'] },
+      'pi-lens',
+      new AbortController().signal,
+      (line) => said.push(line),
+    );
+
+    expect(said).toEqual(['pnpm install pi-lens --prefix /agent/npm --config.auto-install-peers=false --config.strict-peer-dependencies=false']);
+  });
+
+  it('reports a stopped install as ended rather than as a failure', async () => {
+    const { run, ended } = childThatWaits();
+    const controller = new AbortController();
+
+    const installing = installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-lens',
+      controller.signal,
+    );
+    await Promise.resolve();
+    controller.abort();
+
+    const outcome: Installed = await installing;
+    expect(outcome).toEqual({ ok: false, ended: true });
+    expect(ended()).toBe(true);
+  });
+
+  it('hands a real failure up as what the installer said, not as a code', async () => {
+    const run: RunInstall = async () => ({ code: 1, said: 'npm error code E404\nnpm error 404 Not Found' });
+
+    const outcome = await installAddon(
+      run,
+      'install',
+      { folder: '/agent/npm', present: ['package.json'] },
+      'pi-nothing',
+      new AbortController().signal,
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect('ended' in outcome).toBe(false);
+    if ('ended' in outcome) return;
+    expect(outcome.because).toContain('E404');
   });
 });

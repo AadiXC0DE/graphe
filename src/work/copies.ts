@@ -31,10 +31,11 @@ function readable(text: string, most = READABLE): string {
   return one === '' ? 'project' : one;
 }
 
-/** The short digest that breaks the ties. Of the resolved path, so a symlink
- *  and its target are one project rather than two. */
-function digestOf(project: string): string {
-  return createHash('sha256').update(resolve(project)).digest('hex').slice(0, 8);
+/** The short digest that breaks the ties. Given a resolved path, so a symlink
+ *  and its target are one project rather than two; given a project's id, so a
+ *  project that moves keeps one folder. */
+function digestOf(of: string): string {
+  return createHash('sha256').update(of).digest('hex').slice(0, 8);
 }
 
 /**
@@ -44,7 +45,7 @@ function digestOf(project: string): string {
  * somebody looking at the folder; the digest is what makes it right.
  */
 export function keyFor(project: string): string {
-  return `${readable(basename(resolve(project)) || project)}-${digestOf(project)}`;
+  return `${readable(basename(resolve(project)) || project)}-${digestOf(resolve(project))}`;
 }
 
 /** What a copy is for. Each kind gets its own folder under the app's data, so
@@ -68,7 +69,46 @@ export function copyFolder(
 }
 
 /**
- * The same, in a folder shared with the whole machine.
+ * Where a project's rescued writing goes.
+ *
+ * Filed under a digest of the project's own id, which is the one thing two
+ * projects cannot share. Older versions filed it under the flattened path, so
+ * two projects landed in one folder and a rescue there wrote over the other
+ * project's copy of any file that had the same name.
+ *
+ * The id rather than the path, because a project that is moved keeps its id:
+ * writing somebody has not come back for stays findable. The readable half is
+ * the folder's own name for whoever comes looking.
+ */
+export function rescueFolder(base: string, project: string, projectId: string): string {
+  return join(base, 'kept-aside', rescueKeyFor(project, projectId));
+}
+
+/** The name a project's rescued writing is filed under. */
+export function rescueKeyFor(project: string, projectId: string): string {
+  return `${readable(basename(resolve(project)) || project)}-${rescueDigestOf(projectId)}`;
+}
+
+/** The part of that name that is this project and no other. Exposed because the
+ *  readable half changes when a project is moved, so finding earlier rescues
+ *  after a move means matching on this. */
+export function rescueDigestOf(projectId: string): string {
+  return digestOf(projectId);
+}
+
+/**
+ * Where a project's rescued writing was filed by the version before this one.
+ *
+ * The whole path with every awkward character flattened to a dash, so `/x/a-b`
+ * and `/x/a.b` both come out `-x-a-b` and two projects shared one folder. Kept
+ * because those folders are still on disk, holding writing nobody has moved.
+ */
+export function legacyRescueRoot(base: string, project: string): string {
+  const key = resolve(project).replace(/[^a-zA-Z0-9_-]/g, '-').replace(/-+/g, '-');
+  return join(base, 'kept-aside', key);
+}
+
+/** The same, in a folder shared with the whole machine.
  *
  * Anything under the system's temp folder sits beside every other program's
  * scratch, so it says whose it is in the name — somebody clearing space has to

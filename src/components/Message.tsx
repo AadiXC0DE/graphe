@@ -5,7 +5,9 @@ import Clipped, { howMuch } from './Clipped';
 import Markdown from './Markdown';
 import './Message.css';
 
-export type MessageAuthor = 'you' | 'graphe';
+/** Who a turn is from. An add-on is somebody's own extension, speaking for
+ *  itself in the record rather than as the app or as the person. */
+export type MessageAuthor = 'you' | 'graphe' | 'add-on';
 
 type Props = {
   from: MessageAuthor;
@@ -23,6 +25,24 @@ type Props = {
   pictures?: readonly SentPicture[];
   /** The turn's own words, for the copy control. Nothing is drawn without it. */
   copy?: string;
+  /** The one thing that can be done with this turn from here — forking the
+   *  conversation at it. Absent where there is nowhere to fork from. */
+  action?: MessageAction;
+};
+
+/** A thing to do with one turn, drawn beside the copy control.
+ *
+ * `waits` is the reason it cannot be pressed yet — a message still being
+ * written is no place to stop a copy of the conversation at. Said rather than
+ * hiding the control: a press somebody has seen once is a press they look for
+ * again. */
+export type MessageAction = {
+  /** The operation, in one to three words. */
+  label: string;
+  /** What pressing it does. A tooltip, so twelve words. */
+  hint: string;
+  onPress: () => void;
+  waits?: string;
 };
 
 /** A clipboard until it lands, then a tick — one 12px box either way, so the
@@ -108,8 +128,10 @@ function Sent({ picture }: { picture: SentPicture }) {
  * composer people stop trusting with anything technical. What you typed is what
  * is shown.
  */
-function Message({ from, children, streaming, aside, isLast, pictures, copy }: Props) {
+function Message({ from, children, streaming, aside, isLast, pictures, copy, action }: Props) {
   const mine = from === 'you';
+  // An add-on's message is drawn on the app's surface, in the add-on's name.
+  const who = mine ? 'You' : from === 'add-on' ? 'An add-on' : 'Graphe';
   // Named for what it copies: one message, not the conversation.
   const copying = useCopying({ idle: 'Copy this message' });
   const caret = streaming ? <span className="message__caret" aria-hidden="true" /> : null;
@@ -129,8 +151,8 @@ function Message({ from, children, streaming, aside, isLast, pictures, copy }: P
   );
 
   return (
-    <article className={`message message--${from}`} aria-label={mine ? 'You' : 'Graphe'}>
-      <div className="message__who">{mine ? 'You' : 'Graphe'}</div>
+    <article className={`message message--${mine ? 'you' : 'graphe'}`} aria-label={who}>
+      <div className="message__who">{who}</div>
       {pictures === undefined || pictures.length === 0 ? null : (
         <div className="message__pictures">
           {pictures.map((picture, at) => (
@@ -160,25 +182,42 @@ function Message({ from, children, streaming, aside, isLast, pictures, copy }: P
           the reply finishes; the control itself waits until there is a whole
           answer to take. It stays out while it is copying, so the confirmation
           survives the cursor leaving. */}
-      {copy === undefined || copy === '' ? null : (
+      {action === undefined && (copy === undefined || copy === '') ? null : (
         <div className="message__foot">
           {streaming ? null : (
-            <button
-              type="button"
-              className={`message__copy ${copying.copied || copying.failed ? 'message__copy--held' : ''}`}
-              onClick={() => copying.copy(copy)}
-              aria-label={copying.label}
-              title={copying.label}
-            >
-              <CopyMark done={copying.copied} />
-              {/* Beside the icon and out of flow, so saying it landed cannot
-                  widen the control or push what is under it. */}
-              {copying.copied || copying.failed ? (
-                <span className="message__copysaid" aria-hidden="true">
-                  {copying.label}
-                </span>
-              ) : null}
-            </button>
+            <>
+              {action === undefined ? null : (
+                <button
+                  type="button"
+                  className="message__action"
+                  onClick={action.onPress}
+                  disabled={action.waits !== undefined}
+                  aria-label={action.label}
+                  title={action.waits ?? action.hint}
+                  data-tip={action.waits}
+                >
+                  {action.label}
+                </button>
+              )}
+              {copy === undefined || copy === '' ? null : (
+                <button
+                  type="button"
+                  className={`message__copy ${copying.copied || copying.failed ? 'message__copy--held' : ''}`}
+                  onClick={() => copying.copy(copy)}
+                  aria-label={copying.label}
+                  title={copying.label}
+                >
+                  <CopyMark done={copying.copied} />
+                  {/* Beside the icon and out of flow, so saying it landed cannot
+                      widen the control or push what is under it. */}
+                  {copying.copied || copying.failed ? (
+                    <span className="message__copysaid" aria-hidden="true">
+                      {copying.label}
+                    </span>
+                  ) : null}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

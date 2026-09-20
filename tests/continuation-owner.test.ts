@@ -61,6 +61,22 @@ describe('one continuation per settle', () => {
     expect(app.sent).toHaveLength(1);
   });
 
+  /* What somebody typed, an add-on asking for a turn and a child coming back,
+     all in the same run: one send, and the add-on's ask is the one acted on —
+     the order the reasons are tried in. The piece that landed is taken in by
+     that same settle rather than waiting for the next one. */
+  it('acts on an add-on’s ask before a piece that landed, and sends once', async () => {
+    const app = owner(() => someList(1, 6));
+    app.one.spoke(project, address);
+    app.one.landed(project, address, { id: 'a', title: 'The header' });
+    app.one.extensionAsked(project, address, 'an add-on', 'carry on');
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent.map((one) => one.why)).toEqual(['extension']);
+    // The next settle is the list's round, not the piece again.
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent.map((one) => one.why)).toEqual(['extension', 'checklist']);
+  });
+
   it('says out loud what it is doing, and tells the window', async () => {
     const app = owner(() => someList(3, 12));
     await app.one.settled(project, address, 'finished');
@@ -157,6 +173,82 @@ describe('every way it stops', () => {
     app.one.spoke(project, address);
     await app.one.settled(project, address, 'finished');
     expect(app.sent.length).toBe(MOST_ROUNDS + 1);
+  });
+});
+
+describe('a run that has ended', () => {
+  /* The epoch is what makes a late arrival safe. A piece that landed, or an
+     add-on that asked for a turn, while the person was typing belongs to a run
+     that is over: it is a result to read, not a reason to send. */
+  it('sends nothing for a piece that landed before the person spoke', async () => {
+    const app = owner();
+    app.one.landed(project, address, { id: 'a', title: 'The header' });
+    app.one.spoke(project, address);
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent).toHaveLength(0);
+    expect(app.one.lastMove(project, address)?.move.kind).toBe('rest');
+  });
+
+  it('sends nothing for an add-on that asked before the person spoke', async () => {
+    const app = owner();
+    app.one.extensionAsked(project, address, 'an add-on', 'carry on');
+    app.one.spoke(project, address);
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent).toHaveLength(0);
+  });
+
+  it('keeps a piece that landed while the run was stopped from restarting it', async () => {
+    const app = owner();
+    app.one.stopped(project, address);
+    app.one.landed(project, address, { id: 'a', title: 'The header' });
+    await app.one.settled(project, address, 'stopped');
+    app.one.spoke(project, address);
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent).toHaveLength(0);
+  });
+
+  /* A child finishing is a result, not a reason: work that landed after the
+     person stopped the run is theirs to read when they come back, and a list
+     with steps left on it is not a reason to start one either. */
+  it('starts nothing for a child that finished after Stop, list and all', async () => {
+    const app = owner(() => someList(1, 6));
+    app.one.stopped(project, address);
+    app.one.landed(project, address, { id: 'a', title: 'The header' });
+    await app.one.settled(project, address, 'stopped');
+    expect(app.sent).toHaveLength(0);
+    expect(app.one.resting(project, address)).toBe(true);
+    // And it does not creep in on the settle after that one.
+    await app.one.settled(project, address, 'finished');
+    expect(app.sent).toHaveLength(0);
+  });
+
+  /* A hook that fell over after Stop, or a provider retry giving up after it:
+     the run is over, and picking it up is what Stop was pressed to prevent. */
+  it('does not pick up a run that failed after Stop', async () => {
+    const app = owner(() => someList(1, 6));
+    app.one.stopped(project, address);
+    await app.one.settled(project, address, 'failed');
+    await app.one.settled(project, address, 'failed');
+    expect(app.sent).toHaveLength(0);
+  });
+
+  it('ends an add-on’s turn that was started after Stop rather than letting it run', () => {
+    const app = owner();
+    app.one.stopped(project, address);
+    app.one.extensionAsked(project, address, 'an add-on', 'carry on');
+    expect(app.halted).toEqual([address]);
+    // Nothing said: they pressed Stop, and a note about an add-on on top of
+    // that is noise over an act they already took.
+    expect(app.said).toEqual([]);
+  });
+
+  it('spends no round on a turn it turned down', async () => {
+    const app = owner();
+    app.one.landed(project, address, { id: 'a', title: 'The header' });
+    app.one.spoke(project, address);
+    await app.one.settled(project, address, 'finished');
+    expect(app.told.at(-1)?.round).toBe(0);
+    expect(app.told.at(-1)?.resting).toBe(true);
   });
 });
 

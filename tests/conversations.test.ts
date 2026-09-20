@@ -147,6 +147,9 @@ describe('readConversations', () => {
         title: 'Make the pricing page calmer',
         at: MODIFIED,
         messages: 12,
+        // The folder decides which project a transcript belongs to, and a chat
+        // that worked in a checkout is only in that project by this.
+        cwd: '/Users/someone/work',
       },
     ]);
   });

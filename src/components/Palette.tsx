@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { KEY_WORDS, grouped, isReady, matches, type Command } from '../lib/commands';
 import { saysChord } from '../lib/keys';
+import { settingsCommands } from '../work/settingspages';
 import './Palette.css';
 
 /** Every word on this panel, so the copy can be read without the markup. */
@@ -103,6 +104,15 @@ type Props = {
   commands: readonly Command[];
   onClose: () => void;
   onMac?: boolean;
+  /**
+   * Given the id of a preference, opens the page it is on.
+   *
+   * Every preference by name is a row in this list, so "dark" or "cookies" is
+   * one press from here without knowing which page it lives on. The rows are
+   * built here rather than handed in: the table of them is a screen's own
+   * words, and no launch should carry them for a panel nobody has opened.
+   */
+  onOpenSetting?: (id: string) => void;
 };
 
 /**
@@ -112,7 +122,7 @@ type Props = {
  * no animation at all: anything that fades in is a delay between the press and
  * the typing. The only movement in here is a row answering a press.
  */
-export default function Palette({ open, commands, onClose, onMac }: Props) {
+export default function Palette({ open, commands, onClose, onMac, onOpenSetting }: Props) {
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [macHere] = useState(onMacHere);
@@ -122,7 +132,14 @@ export default function Palette({ open, commands, onClose, onMac }: Props) {
   const list = useRef<HTMLDivElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
-  const bands = useMemo(() => shownBands(commands, query), [commands, query]);
+  const all = useMemo(
+    () =>
+      onOpenSetting === undefined
+        ? commands
+        : [...commands, ...settingsCommands((row) => onOpenSetting(row.id))],
+    [commands, onOpenSetting],
+  );
+  const bands = useMemo(() => shownBands(all, query), [all, query]);
   const rows = useMemo(() => walkOrder(bands), [bands]);
   const lit = litRow(highlight, rows.length);
 

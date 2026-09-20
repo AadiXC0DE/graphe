@@ -59,6 +59,13 @@ function flagAt(source: Fields, key: string): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
+/** A number off an untrusted record, or zero. Zero is the honest answer for a
+ *  wait that was not said: it draws as a line with nothing to count down. */
+function numberAt(source: Fields, key: string): number {
+  const value = source[key];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function nestedAt(source: Fields, key: string): Fields | null {
   return fieldsOf(source[key]);
 }
@@ -139,6 +146,18 @@ export function translatePiEvent(event: unknown): AgentEvent | null {
       // nothing left running", which is the only honest moment to add up what a
       // sitting cost.
       return { type: 'settled' };
+
+    /* Pi retrying a provider that refused. The same thing the host's own wait
+     *  says when a service will not answer, so it is said the same way: one
+     *  line with the wait in it, and a line when it is over. Without this the
+     *  window was silent for the whole backoff, and a turn that was waiting
+     *  read as a turn that had stopped. */
+    case 'auto_retry_start':
+      return { type: 'holding', seconds: Math.round(numberAt(source, 'delayMs') / 1000) };
+
+    case 'auto_retry_end':
+      return { type: 'held', ok: flagAt(source, 'success') === true };
+
     default:
       return null;
   }
@@ -354,11 +373,26 @@ export type RelayOptions = {
   spend?: SpendWatch;
   /** Called after a tool finishes, with the original call when known. */
   onToolEnd?: (event: { id: string; ok: boolean; detail?: string; call?: ToolCall }) => void;
+  /**
+   * What the add-on drew for a step's own result, read off the raw event before
+   * it is translated — this file knows Pi's payload only structurally, and a
+   * renderer needs the result object Pi sent.
+   *
+   * Consulted once per finished step and never for a call the Guard stopped:
+   * that call produced no result for an add-on to draw. Anything it throws is
+   * treated as nothing drawn, because a step whose own drawing broke is still a
+   * step that happened.
+   */
+  drawnFor?: (event: unknown) => readonly string[] | undefined;
 };
 
 export class EventRelay {
   /** Calls the Guard let through and Pi has not finished yet. */
   private readonly running = new Map<string, ToolCall>();
+  /** When each running call was let through, so the line can say how long it
+   *  took. Pi's own events carry no duration: the host is the only place that
+   *  sees both the start and the end of the same call. */
+  private readonly began = new Map<string, number>();
   /** Calls the Guard stopped. Pi still reports a result for these. */
   private readonly refused = new Set<string>();
   /** An assistant failure is provisional until Pi says the whole agent has
@@ -376,15 +410,18 @@ export class EventRelay {
     this.spend = options.spend ?? new SpendWatch();
     this.billedSoFar = options.billedSoFar;
     this.onToolEnd = options.onToolEnd;
+    this.drawnFor = options.drawnFor;
   }
 
   private readonly onToolEnd?: RelayOptions['onToolEnd'];
+  private readonly drawnFor?: RelayOptions['drawnFor'];
 
   /** A call that passed the Guard and is about to run. */
   started(call: ToolCall): void {
     this.pendingError = null;
     this.refused.delete(call.id);
     this.running.set(call.id, call);
+    this.began.set(call.id, Date.now());
     this.spend.started(call);
     this.deliver({ type: 'tool-start', call });
   }
@@ -460,6 +497,8 @@ export class EventRelay {
       // A result for something we never announced. Nothing to close off.
       if (call === undefined && !this.running.has(translated.id)) return;
       this.running.delete(translated.id);
+      const since = this.began.get(translated.id);
+      this.began.delete(translated.id);
       // Let the adapter's afterCall handler see the result while we still know
       // which call it was. Failures are delivered before this, so ordering is
       // tool-end handling then afterCall post-processing.
@@ -468,6 +507,18 @@ export class EventRelay {
       } catch {
         // After-call is advisory; it must never break the event stream.
       }
+      let drawn: readonly string[] | undefined;
+      try {
+        drawn = this.drawnFor?.(event);
+      } catch {
+        // An add-on's own drawing failing is not the step failing.
+      }
+      this.deliver({
+        ...translated,
+        ...(since === undefined ? {} : { ms: Date.now() - since }),
+        ...(drawn === undefined || drawn.length === 0 ? {} : { drawn }),
+      });
+      return;
     }
 
     this.deliver(translated);

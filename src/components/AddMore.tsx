@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { everything } from '../agent/pi/packages';
-import type { CarriedExtension } from '../lib/ipc';
+import type { AddonSetup, CarriedExtension, ExtensionHere, Stopping } from '../lib/ipc';
+import { COPY, useCopying } from '../lib/copying';
 import Switch from './Switch';
 import {
-  REACHABLE,
+  alreadyReached,
   readReach,
   reachesMatching,
   type Reach,
@@ -70,6 +71,12 @@ export const SAYS = {
   carriedNote:
     'You did not choose these. They came down with the project. Everything else Graphe does is checked as it goes; these run as part of Graphe itself, so they stay off until you turn one on.',
   carriedRestart: 'Turning one on starts a fresh conversation in this project, so it can be loaded.',
+  stop: 'Stop',
+  hereHeading: 'What is here',
+  hereNote: 'Everything Graphe can load in this project, and what each one is doing.',
+  inChats: 'Loaded in',
+  getNode: 'Get Node',
+  details: 'What it said',
 } as const;
 
 type Props = {
@@ -94,9 +101,11 @@ type Props = {
   /** How many processes add-ons have running right now. Information, not a
    *  control: nothing here kills anything. */
   addonProcesses?: number | null;
-  /** The other half of the shelf: the places somebody's work already lives.
-   *  Ours by default, ticked and extended by whatever has been added. */
-  reaches?: readonly Reach[];
+  /** The other half of the shelf: the places somebody's work already lives,
+   *  as the ids of whichever ones this project has. Names rather than the shelf
+   *  itself, so what we offer is this screen's own and a launch does not carry
+   *  the whole list. */
+  reaches?: readonly string[];
   /** Which of those is being turned on or off this moment. */
   connecting?: string | null;
   /** Given one of ours by name. Without it that half of the shelf stays down,
@@ -110,6 +119,19 @@ type Props = {
    *  they are a decision rather than a shelf, and they are not searched. */
   carried?: readonly CarriedExtension[];
   onTrustCarried?: (id: string, trust: boolean) => void;
+  /** Every add-on this project can see, and what each one is doing here. Read
+   *  when the screen opens: it changes when a session is built or trusted. */
+  here?: readonly ExtensionHere[];
+  /** Whether a change in flight can be ended here, and the line to draw where
+   *  it cannot — the shelf's own sentence, so the screen and a press agree. */
+  stopping?: Stopping;
+  onStop?: () => void;
+  /** What the last stop left on disk, in the shelf's own words. Cleared when
+   *  the next change starts, so it is never read as news about that one. */
+  stoppedSays?: string | null;
+  /** What installing one needs from this computer: nothing at all, or a line
+   *  and a way to install Node. Drawn before anybody presses Add. */
+  setup?: AddonSetup;
 };
 
 const FOCUSABLE =
@@ -140,16 +162,22 @@ export default function AddMore({
   onRemove,
   capabilities = {},
   addonProcesses = null,
-  reaches = REACHABLE,
+  reaches = [],
   connecting = null,
   onConnect,
   onDisconnect,
   onConnectByHand,
   carried = [],
   onTrustCarried,
+  here = [],
+  stopping,
+  onStop,
+  stoppedSays = null,
+  setup,
 }: Props) {
   const [term, setTerm] = useState('');
   const [showing, setShowing] = useState<Showing>('all');
+  const copy = useCopying();
   const panel = useRef<HTMLDivElement>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
@@ -188,9 +216,12 @@ export default function AddMore({
     return () => clearTimeout(timer);
   }, [open, term, onSearch]);
 
+  // Ours, with whichever of them this project already has ticked.
+  const places = useMemo(() => alreadyReached(reaches), [reaches]);
+
   // One ordering for both kinds, then split into the bands they are drawn in.
   const [found, vouched, rest] = useMemo(() => {
-    const shelf = everything(packs, reachesMatching(reaches, term));
+    const shelf = everything(packs, reachesMatching(places, term));
     const ours: Pack[] = [];
     const theirs: Pack[] = [];
     const outward: Reach[] = [];
@@ -200,7 +231,7 @@ export default function AddMore({
       else theirs.push(one.addition);
     }
     return [outward, ours, theirs] as const;
-  }, [packs, reaches, term]);
+  }, [packs, places, term]);
 
   if (!open) return null;
 
@@ -217,11 +248,15 @@ export default function AddMore({
       aria-label={SAYS.title}
       onKeyDown={(event) => trapTab(event, panel.current)}
     >
+      {/* Clicking the dim is a convenience for the hand. Escape and the × are
+          what a keyboard and a reader get, so this stays out of the tree: two
+          buttons announced "Close" said nothing about which was which. */}
       <button
         type="button"
         className="addmore__backdrop"
         onClick={onClose}
         aria-label={SAYS.close}
+        aria-hidden="true"
         tabIndex={-1}
       />
 
@@ -242,6 +277,32 @@ export default function AddMore({
             </svg>
           </button>
         </header>
+
+        {/* What installing one needs before anybody presses Add. A line and a
+            way to act on it, because the press without npm ends in the
+            installer's own words. */}
+        {setup?.needed !== true ? null : (
+          <p className="addmore__setup">
+            <span className="addmore__setupso">{setup.line}</span>
+            <a
+              className="addmore__setuplink"
+              href={setup.download}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {SAYS.getNode}
+            </a>
+            {setup.command === null ? null : (
+              <button
+                type="button"
+                className="addmore__setuplink"
+                onClick={() => copy.copy(setup.command ?? '')}
+              >
+                {copy.copied ? COPY.done : `Copy ${setup.command}`}
+              </button>
+            )}
+          </p>
+        )}
 
         <div className="addmore__search">
           <input
@@ -303,6 +364,16 @@ export default function AddMore({
             </section>
           )}
 
+          {!showAdditions || here.length === 0 ? null : (
+            <section className="addmore__group" aria-label={SAYS.hereHeading}>
+              <h3 className="addmore__grouphead">{SAYS.hereHeading}</h3>
+              <p className="addmore__groupnote">{SAYS.hereNote}</p>
+              {here.map((one) => (
+                <HereRow key={one.where} one={one} />
+              ))}
+            </section>
+          )}
+
           {showReach ? (
             <section className="addmore__group" aria-label={SAYS.reachHeading}>
               <h3 className="addmore__grouphead">{SAYS.reachHeading}</h3>
@@ -322,7 +393,7 @@ export default function AddMore({
                 ))
               )}
               {onConnectByHand === undefined ? null : (
-                <ByHand known={reaches} onAdd={onConnectByHand} />
+                <ByHand known={places} onAdd={onConnectByHand} />
               )}
             </section>
           ) : null}
@@ -331,6 +402,11 @@ export default function AddMore({
             <p className="addmore__quiet">{searching ? SAYS.noMatches : SAYS.emptyCatalogue}</p>
           ) : (
             <>
+              {/* What the last stop left on disk, in the shelf's own words —
+                  said here rather than left to be inferred from a row. */}
+              {stoppedSays === null ? null : (
+                <p className="addmore__stopped">{stoppedSays}</p>
+              )}
               {vouched.length === 0 ? null : (
                 <section className="addmore__group" aria-label={SAYS.vouchedHeading}>
                   <h3 className="addmore__grouphead">{SAYS.vouchedHeading}</h3>
@@ -343,6 +419,8 @@ export default function AddMore({
                       busy={busy}
                       onAdd={onAdd}
                       onRemove={onRemove}
+                      {...(stopping === undefined ? {} : { stopping })}
+                      {...(onStop === undefined ? {} : { onStop })}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -378,6 +456,8 @@ export default function AddMore({
                       busy={busy}
                       onAdd={onAdd}
                       onRemove={onRemove}
+                      {...(stopping === undefined ? {} : { stopping })}
+                      {...(onStop === undefined ? {} : { onStop })}
                       {...(capabilities[pack.id] === undefined
                         ? {}
                         : { capability: capabilities[pack.id] })}
@@ -403,31 +483,59 @@ function Row({
   pack,
   sentence,
   busy,
+  stopping,
   onAdd,
   onRemove,
+  onStop,
   capability,
 }: {
   pack: Pack;
   sentence: string;
   busy: string | null;
+  stopping?: Stopping;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
+  onStop?: () => void;
   capability?: string;
 }) {
   const working = busy === pack.id;
+  // The words the eye reads, plus this row's own name: four presses all called
+  // "Add" are four identical buttons to a screen reader.
+  const forThis = (word: string): string => `${word} ${pack.name}`;
 
   return (
-    <div className="addmore__row">
+    <div className="addmore__row" role="article">
       <div className="addmore__rowtop">
         <div className="addmore__text">
           <span className="addmore__name">{pack.name}</span>
           <span className="addmore__summary">{sentence}</span>
         </div>
+        {/* Only while this row's own change is running, and only where this
+            copy of the app can end one. */}
+        {working && stopping?.canStop === true && onStop !== undefined ? (
+          <button
+            type="button"
+            className="addmore__action"
+            onClick={onStop}
+            aria-label={forThis(SAYS.stop)}
+          >
+            {SAYS.stop}
+          </button>
+        ) : null}
         <button
           type="button"
           className={`addmore__action ${pack.installed ? 'addmore__action--off' : ''}`}
           onClick={() => (pack.installed ? onRemove(pack.id) : onAdd(pack.id))}
           disabled={busy !== null}
+          aria-label={forThis(
+            working
+              ? pack.installed
+                ? SAYS.removing
+                : SAYS.adding
+              : pack.installed
+                ? SAYS.remove
+                : SAYS.add,
+          )}
         >
           {working
             ? pack.installed
@@ -438,6 +546,12 @@ function Row({
               : SAYS.add}
         </button>
       </div>
+
+      {/* Where it cannot be ended, the shelf's own sentence says so. A Stop that
+          only ever answered "I cannot" would be worse than no press at all. */}
+      {working && stopping !== undefined && !stopping.canStop ? (
+        <span className="addmore__does">{stopping.says}</span>
+      ) : null}
 
       <div className="addmore__meta">
         <span className="addmore__kind">{SAYS.kinds[pack.kind]}</span>
@@ -456,6 +570,61 @@ function Row({
   );
 }
 
+/** One add-on this computer has: what it is, where it came from, how far it
+ *  reaches, and what it is doing here — or why it is not. */
+function HereRow({ one }: { one: ExtensionHere }) {
+  const state = one.state.charAt(0).toUpperCase() + one.state.slice(1);
+  return (
+    <div className="addmore__row" role="article">
+      <div className="addmore__rowtop">
+        <div className="addmore__text">
+          <span className="addmore__name">
+            {/* An add-on nothing could fingerprint has no name of its own, and
+                the file it would load is the honest thing to call it. */}
+            {one.id === '' ? one.where : one.id}
+            {one.version === null ? null : ` ${one.version}`}
+          </span>
+          <span className="addmore__summary">{one.says}</span>
+        </div>
+        <span className="addmore__state">{state}</span>
+      </div>
+
+      <div className="addmore__meta">
+        <span className="addmore__kind">{`${one.origin} · ${one.scope}`}</span>
+        {one.commands.length === 0 ? null : (
+          <span className="addmore__uses">{one.commands.map((name) => `/${name}`).join(' ')}</span>
+        )}
+      </div>
+
+      {/* Which conversations have it loaded right now, by the name each one is
+          known by. "Running in 2 chats" is a count; a person deciding whether
+          to remove something wants to know which two. */}
+      {one.activeIn.length === 0 ? null : (
+        <span className="addmore__chats">{`${SAYS.inChats} ${one.activeIn.join(', ')}`}</span>
+      )}
+
+      {/* What it cannot do, in its own terms — the advisor keeping one setting
+          for the whole computer is the one this exists for. */}
+      {one.limits.map((limit) => (
+        <span className="addmore__limit" key={limit}>
+          {limit}
+        </span>
+      ))}
+
+      <span className="addmore__where">{one.where}</span>
+
+      {/* The loader's own words, kept behind a press: "it did not load" without
+          the reason is a shrug, and the reason is several lines long. */}
+      {one.problem === null ? null : (
+        <details className="addmore__hand">
+          <summary className="addmore__exactsummary">{`${SAYS.details}: ${one.problem}`}</summary>
+          <pre className="addmore__logtext">{one.logs.join('\n')}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** One place Graphe can reach: what it lets you do, and one press. */
 function ReachRow({
   reach,
@@ -469,9 +638,11 @@ function ReachRow({
   onDisconnect: ((id: string) => void) | undefined;
 }) {
   const working = busy === reach.id;
+  // Same as an add-on row: the press is announced for the tool it acts on.
+  const forThis = (word: string): string => `${word} ${reach.name}`;
 
   return (
-    <div className="addmore__row">
+    <div className="addmore__row" role="article">
       <div className="addmore__rowtop">
         <div className="addmore__text">
           <span className="addmore__name">{reach.name}</span>
@@ -482,6 +653,15 @@ function ReachRow({
           className={`addmore__action ${reach.added ? 'addmore__action--off' : ''}`}
           onClick={() => (reach.added ? onDisconnect?.(reach.id) : onConnect(reach.id))}
           disabled={busy !== null || (reach.added && onDisconnect === undefined)}
+          aria-label={forThis(
+            working
+              ? reach.added
+                ? SAYS.removing
+                : SAYS.adding
+              : reach.added
+                ? SAYS.remove
+                : SAYS.add,
+          )}
         >
           {working
             ? reach.added

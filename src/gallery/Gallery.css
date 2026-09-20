@@ -364,3 +364,21 @@
 .gallery__sheet .sheet__top {
   padding-top: var(--space-4);
 }
+
+/* The canvas, taken out of the tab it fills in the app. Same board, same bar,
+   same foot — in a box with a real height, because a surface that pans is
+   nothing at all at zero height. Two of them stacked, so the empty one and the
+   drawn one can be compared with the same eye. */
+.gallery__canvas {
+  position: relative;
+  height: 460px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.gallery__canvas .canvas {
+  position: absolute;
+  inset: 0;
+  height: auto;
+}

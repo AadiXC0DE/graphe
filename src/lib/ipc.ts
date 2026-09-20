@@ -1,3 +1,6 @@
+import type { ExtensionAnswer, ExtensionAsk } from './extension-ask';
+
+export type { ExtensionAnswer, ExtensionAsk };
 /** The contract between the desktop shell and the window it draws.
  *
  * Both sides import this file and nothing else in common. It is deliberately
@@ -19,19 +22,17 @@ import type { AgentEvent, Money, RunningPiece, SpendSummary } from '../agent/typ
 
 export type { RunningPiece } from '../agent/types';
 import type { HowFar } from '../agent/guard/policy';
+import type { SessionState } from '../domain/conversations';
 import type { Theme } from './theme';
-import type { Frame, Recording } from '../diff/flow';
 import type { SpendLimit } from '../cost/limits';
-import type { Move } from '../design/moved';
-import type { Held } from '../diff/holdshot';
 import type { FileEntry } from '../files/tree';
 import type { Page } from '../preview/pages';
-import type { Reading } from '../preview/inspect';
 import type { Pointed } from '../preview/point';
 import type { Said } from '../preview/tabs';
 export type { Said };
 import type { AlwaysRow } from '../work/always';
 import type { ComputerUse } from '../work/computeruse';
+import type { Goal } from '../work/goal';
 import type { Telling } from '../work/notify';
 
 export type { ComputerUse } from '../work/computeruse';
@@ -40,7 +41,11 @@ import type { WorkState } from '../work/board';
 import type { Entry as ReviewQueued, FileVerdict, Verdict } from '../work/reviewqueue';
 import type { WorkspaceFacts } from '../work/workspaces';
 import type { Landing as HowItLands } from '../history/worktree';
+import type { Dependencies, InstallPlan, SetupCandidate } from '../projects/setup';
 import type { TokenUsageView } from '../lib/token-days';
+import type { Flow, Run } from '../work/canvas';
+
+export type { Dependencies, InstallPlan, SetupCandidate } from '../projects/setup';
 
 export type { TokenUsageView } from '../lib/token-days';
 
@@ -49,22 +54,47 @@ export type { WorkspaceFacts } from '../work/workspaces';
 
 export type {
   FileEntry,
-  Frame,
-  Held,
   HowFar,
   Money,
-  Move,
   Page,
   Pointed,
-  Reading,
-  Recording,
   SpendLimit,
   SpendSummary,
   WorkState,
 };
 
+export type { Flow, Run } from '../work/canvas';
+
 /** Yes or no, from a person. Same two answers the Guard accepts, and no third. */
 export type Decision = 'yes' | 'no';
+
+/** Everything the open project holds, and the revision it was read at. */
+export type FilesRead = {
+  files: readonly FileEntry[];
+  /** The folder, and every name and size in the listing. A read whose revision
+   *  no longer matches is of a folder that has since changed, so what is on
+   *  screen is not what is there. */
+  revision: string;
+};
+
+/** One file's bytes, and the revision they were read at.
+ *
+ * `changed` is true when the reader held an earlier revision and the file no
+ * longer matches it: the text here is the file as it is now, not the text they
+ * were reading. */
+export type TextRead = { path: string; text: string; revision: string; changed: boolean };
+
+/** One value a project declares in its stylesheets, as the tokens band reads
+ *  it. `used` is how many places in the sheets reach for it with `var()`, and
+ *  `file` is the sheet it was written in. */
+export type StyleToken = {
+  name: string;
+  value: string;
+  kind: 'colour' | 'space' | 'size' | 'radius' | 'shadow' | 'other';
+  line: number;
+  used: number;
+  file: string;
+};
 
 /**
  * Something that went wrong, already written for a person.
@@ -94,6 +124,14 @@ export type Trouble = {
  *  arrives as "Error invoking remote method", which is the single least useful
  *  thing we could put in front of a designer. */
 export type Result<T> = { ok: true; value: T } | { ok: false; trouble: Trouble };
+
+/** One pane, and the conversation it was showing. The pane number is the
+ *  order they were opened in, so pane 0 is the left one. */
+export type ViewShown = {
+  viewId: string;
+  conversation: string;
+  pane: 0 | 1;
+};
 
 /**
  * Which project, and which conversation in it, a call is about.
@@ -146,12 +184,144 @@ export function whereIn(args: readonly unknown[]): Where {
   return where;
 }
 
+/** A pane and the conversation it shows, off a bridge argument. Anything that
+ *  is not exactly the three fields a view is made of is not one. */
+export function asViewShown(raw: unknown): ViewShown | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const fields = raw as Record<string, unknown>;
+  const viewId = fields['viewId'];
+  const conversation = fields['conversation'];
+  const pane = fields['pane'];
+  if (typeof viewId !== 'string' || viewId === '') return null;
+  if (typeof conversation !== 'string' || conversation === '') return null;
+  if (pane !== 0 && pane !== 1) return null;
+  return { viewId, conversation, pane };
+}
+
 /** A project folder, as the window refers to it. */
+/**
+ * What a New worktree would do, in the words a dialog can show.
+ *
+ * Nothing is created by asking: the folder, the base and the commit are all
+ * read, so somebody can see where the copy would go and what it would start
+ * from before anything is made.
+ */
+/**
+ * A question an add-on asked, on its way to the window.
+ *
+ * The id is the window's to answer by, and is unique for the length of the
+ * app's life: a double press, an answer that arrives after Stop, or a stale
+ * answer to a request that was already settled all come back harmless rather
+ * than granting something nobody asked for.
+ */
+export type ExtensionRequest = ExtensionAsk & {
+  requestId: string;
+  project: string;
+  conversation: string | null;
+};
+
+/**
+ * A terminal, as the window knows it.
+ *
+ * The kind is what the header says and who owns the process. It is not a
+ * permission: every one of these is the person's own shell in their own folder,
+ * and none of them is watched by the Guard.
+ */
+export type TerminalKind = 'shell' | 'agent' | 'server';
+
+export type TerminalSession = {
+  id: string;
+  kind: TerminalKind;
+  /** The folder it started in, which is the workspace somebody selected. */
+  workspace: string;
+  /** The shell's own name, for the header: "zsh", "bash". */
+  shell: string;
+  startedAt: number;
+  exit: { code: number; signal: number | null } | null;
+};
+
+/** Output, in chunks: a terminal that printed a megabyte should not arrive as
+ *  one message. */
+export type TerminalChunk = { id: string; data: string; sequence: number };
+export type TerminalSnapshot = { data: string; sequence: number };
+export type TerminalExit = { id: string; code: number; signal: number | null };
+
+/**
+ * What a project carries into a new checkout, and the install one would need.
+ *
+ * Read before the checkout exists, because both questions are asked in the flow
+ * that decides whether to make one: which gitignored files travel, and whether
+ * this project has anything to install at all.
+ */
+export type SetupHere = {
+  /** Every gitignored file this project could carry, with the ones it already
+   *  carries marked. */
+  candidates: readonly SetupCandidate[];
+  /** What a checkout of this project would need installed, or null when there
+   *  is nothing at the top of it to install from. */
+  plan: InstallPlan | null;
+};
+
+/** Where the install in one checkout stands, and what it would run. */
+export type SetupState = {
+  state: Dependencies;
+  plan: InstallPlan | null;
+};
+
+export type WorktreePlan = {
+  /** False in a folder that is not a repository, or that has nothing committed
+   *  yet. `because` says which. */
+  possible: boolean;
+  because: string | null;
+  /** The folder the copy would be made in. */
+  folder: string;
+  /** The branch it would start from, as it is called now. */
+  baseBranch: string | null;
+  /** The commit it would start at. */
+  baseSha: string | null;
+  /** Files that are changed here and would not come with it. */
+  leftBehind: readonly string[];
+  /** What the copy would be given beyond the tracked files, and the install it
+   *  would still need. */
+  setup: SetupHere;
+};
+
+/**
+ * A conversation whose recorded folder is not usable any more.
+ *
+ * The registry and the migration both write this down, and until the window is
+ * told about it a chat whose folder was deleted is indistinguishable from one
+ * whose folder is there. It is carried rather than inferred: only the shell can
+ * see the folder, and a window that guessed would either hide a real problem or
+ * invent one.
+ */
+export type WorkspaceTrouble = {
+  /** The folder it was recorded in, as it was written down. What somebody
+   *  needs in order to recognise where the work used to be. */
+  folder: string;
+  /** Gone, or there and something else. Two different problems, and both mean
+   *  this conversation cannot be opened where it says it works. */
+  state: 'missing' | 'recovery-required';
+  /** One sentence about it, built by src/work/recovery.ts so the window and
+   *  the shell cannot say different things. */
+  because: string;
+};
+
 export type OpenedProject = {
   /** Absolute path. Shown only if the user asks for it. */
   path: string;
   /** The folder's own name, which is what people call their project. */
   name: string;
+  /** True when this conversation is on screen read-only because the folder it
+   *  works in is gone. Nothing may be sent from it: the box is refused and
+   *  `unavailable` says why. */
+  readOnly?: boolean;
+  /** Why, when it is. Absent on every ordinary open. */
+  unavailable?: WorkspaceTrouble;
+  /** What a continued conversation opens with, as a draft: written from the
+   *  conversation it came from, and editable before it is sent. Absent unless
+   *  this conversation was started by continuing another. */
+  handoff?: string;
   /** The conversation this project left behind, replayed as events. The window
    *  folds them through the same reducer it runs live events through, so a
    *  project opened again comes back as the desk it was — not as an
@@ -201,28 +371,6 @@ export type RecentProject = {
  * The window draws it as a ring beside the box. Everything here is the model's
  * own reckoning read back through Pi — nothing is counted on this side.
  */
-/** One go at a job, as the comparison draws it. Kept apart from the board's
- *  own piece: this one carries the change, which nothing else needs. */
-export type SideOfWork = {
-  id: string;
-  name: string;
-  /** Where this go is up to. Only a finished one can be taken; the rest are
-   *  drawn as columns because watching one form is worth something. */
-  state: WorkState;
-  /** Everything it changed, as one patch. Empty when it changed nothing. */
-  diff: string;
-  picture: string | null;
-  /** What it came to, already in words. */
-  spent: string | null;
-  /** Its own copy of the project, so the same set can be served and looked at
-   *  rather than only read as a patch. Null once the copy has gone. */
-  folder: string | null;
-  /** What every go in the set started from, named so the columns mean
-   *  something. The same for all of them; carried per side so the set needs no
-   *  envelope of its own. */
-  base: string;
-};
-
 export type Room = {
   /** Unknown briefly after compaction, while the window size remains known. */
   used: number | null;
@@ -241,13 +389,6 @@ export type Room = {
  * module that spawns processes and reads folders; this one crosses a structured
  * clone into a sandbox, and the seam between them is the point of this file.
  */
-/** A set of design edits the window is holding, to be written and saved in one
- *  go. Nothing about them touches the project until the window asks. */
-export type DesignChange = {
-  tokens: readonly { name: string; value: string }[];
-  motions: readonly { places: readonly unknown[]; change: unknown }[];
-};
-
 export type SavedVersion = {
   id: string;
   /** The same id, short. What a terminal, a review page or a colleague calls
@@ -304,51 +445,28 @@ export type ShowOutcome =
   | { kind: 'showing'; name: string; address: string }
   | { kind: 'unsure'; question: string };
 
-/** One variation to make ready: a folder that already holds it, named and
- *  briefed the way the person asked, and the served address once it is ready. */
-export type VariationSpec = {
-  /** A short stable id, ours. */
-  id: string;
-  /** What it is, said plainly: "Minimal and clean". */
-  name: string;
-  /** The folder it lives in, absolute. */
-  folder: string;
-};
-
-/** The answer to "show me the variations". A set whose members are served, or
- *  the first question that could not be answered — surfaced rather than guessed. */
-export type VariationsOutcome =
-  | {
-      kind: 'showing';
-      subject: string;
-      variations: readonly { id: string; name: string; address: string }[];
-    }
-  | { kind: 'unsure'; question: string };
-
-/**
- * Somebody pointed at something in their own page.
- *
- * The whole reading travels, not a sentence about it. The shell is the only side
- * that can read the project the element came out of — its values, where each
- * component is used, what last touched the file — so it decides there and the
- * window draws what it is handed. `says` is that same reading written out for the
- * agent that gets asked to change it, so the composer message carries the element's
- * file, component and values without the person having to describe where the
- * element lives.
- */
-export type PointedAt = {
-  pointed: Pointed;
-  reading: Reading;
-  says: string;
-};
-
 /** One conversation this project has had. */
 export type Conversation = {
   id: string;
   path: string;
+  /** Registry identity used by tabs and panes; path remains the transcript file. */
+  address?: string;
   title: string;
   at: number;
   messages: number;
+  /** Where its runtime is, when one is holding it. Filled by the shell, which
+   *  is the only side that knows: a conversation with a turn in flight says so
+   *  even after its tab has been closed. */
+  state?: SessionState;
+  /** Set when the folder this conversation works in is gone, or is no longer a
+   *  checkout of this project. The row can then say so before somebody opens
+   *  it and finds out. Absent when there is nothing to say, which is every
+   *  conversation whose folder is where it was left. */
+  workspace?: WorkspaceTrouble;
+  /** Where this came from, when it was made by continuing or forking another
+   *  conversation, or opened by a canvas lane. The shelf groups a canvas's own
+   *  chats under it rather than among the ordinary ones. */
+  lineage?: { from: string; kind: 'continue' | 'fork' | 'flow' } | null;
 };
 
 /**
@@ -388,12 +506,77 @@ export type AddonHere = {
   rewritesSystemPrompt: boolean;
 };
 
-/** Every add-on loaded here, and how many processes they have running between
- *  them. */
+/** What the add-ons screen says about npm before anybody presses anything, and
+ *  what to do about it. Empty `line` when npm is here. */
+export type AddonSetup = {
+  needed: boolean;
+  line: string;
+  /** The page that installs Node. */
+  download: string;
+  /** `brew install node`, or null where there is no Homebrew to run it with. */
+  command: string | null;
+};
+
+/** Whether this copy of the app can end a change once it has started, and the
+ *  one line to draw where it cannot. Answered before a press, so no Cancel is
+ *  drawn on a change that cannot be ended. */
+export type Stopping = { canStop: boolean; says: string };
+
+/** One add-on as the extensions list draws it: what it is, where it came from,
+ *  how far it reaches, what it is doing here, and why not where it is not. */
+export type ExtensionHere = {
+  id: string;
+  version: string | null;
+  where: string;
+  /** Where it came from, and how far it reaches, in the screen's words. */
+  origin: string;
+  scope: string;
+  state:
+    | 'discovered'
+    | 'needs trust'
+    | 'installed'
+    | 'active here'
+    | 'activation pending'
+    | 'disabled'
+    | 'incompatible'
+    | 'failed';
+  /** One sentence for the state, with the conversations it is running in. */
+  says: string;
+  activeIn: readonly string[];
+  /** The `/` commands it offers here. */
+  commands: readonly string[];
+  /** The limits that apply to it here, one sentence each. Empty where there is
+   *  none to state — a limit nobody applies is worse than silence. The
+   *  advisor's one-setting limit is the one this exists for. */
+  limits: readonly string[];
+  /** A concise error, and the raw text behind it. Both empty when nothing went
+   *  wrong. */
+  problem: string | null;
+  logs: readonly string[];
+};
+
+/** Every add-on this project can see, and how many processes they have running
+ *  between them. */
 export type AddonReport = {
   says: Readonly<Record<string, string>>;
   each: readonly AddonHere[];
   running: number;
+  /** What each one is doing here, one row each, in the eight states. */
+  here: readonly ExtensionHere[];
+  /** What installing one needs from this computer. */
+  setup: AddonSetup;
+  /** Whether a change in flight can be ended, and what to say where it cannot. */
+  stopping: Stopping;
+};
+
+/** What came of ending a change: whether anything was ended, the shelf's own
+ *  sentence about what that left on disk, and the list read again so the row
+ *  matches the folder. `packs` is absent when the list could not be read, which
+ *  leaves the screen as it was rather than emptying it. */
+export type StoppedAddition = {
+  stopped: boolean;
+  says: string;
+  packs?: readonly Pack[];
 };
 
 /** One thing that can be added to Graphe. */
@@ -407,6 +590,35 @@ export type StorageNow = {
   rows: readonly StorageRow[];
 };
 
+/** The one-time move of what an older version left behind, as the Storage page
+ *  reads it. Counts only: the folder each record ended up in is the app's own
+ *  business, and the sentence a person reads is built from these. */
+export type MigrationNow = {
+  /** When the move finished, or null when this computer has never been through
+   *  it. Everything below is zero then. */
+  completedAt: number | null;
+  /** Records accounted for: the ones it resolved and the ones it could not
+   *  read, together, because both were looked at. */
+  sources: number;
+  /** How each record's folder turned out, by the answer discovery reached. */
+  verdicts: { verified: number; missing: number; gone: number; foreign: number };
+  /** Chats it pointed at the folder they work in. */
+  connected: number;
+  /** Chats it could not point anywhere, usually because a live record already
+   *  holds them. */
+  unlinked: number;
+  /** Records it could not read at all, kept aside rather than dropped. */
+  unreadable: number;
+  /** Copies kept of the files the move was about to replace, and the folder
+   *  they are beside. Null when the record predates that list, rather than 0,
+   *  which would claim none were kept. */
+  backups: number | null;
+  backupFolder: string;
+  /** The saved work was written by a newer version of Graphe, so nothing here
+   *  may be written to it. */
+  newer: boolean;
+};
+
 export type Pack = {
   id: string;
   name: string;
@@ -416,15 +628,6 @@ export type Pack = {
   version: string | null;
   installed: boolean;
   curated: boolean;
-};
-
-/** One width the page was photographed at. */
-export type Look = {
-  id: string;
-  name: string;
-  width: number;
-  shot: string | null;
-  trouble: string | null;
 };
 
 /** How the window is sitting on screen. */
@@ -449,8 +652,7 @@ export type ChangedArea = { x: number; y: number; width: number; height: number 
  * (BACKLOG F2).
  *
  * Only the small pictures travel with this. The full ones are hundreds of
- * kilobytes each and almost nobody opens every diff in a long conversation, so
- * they are asked for by `visualFrames` at the moment somebody actually looks.
+ * kilobytes each and almost nobody opens every diff in a long conversation.
  */
 export type VisualChange = {
   id: string;
@@ -474,9 +676,6 @@ export type VisualChange = {
   width: number;
   height: number;
 };
-
-/** The full-size pair, fetched only when somebody opens one. */
-export type VisualFrames = { before: string; after: string };
 
 /** One visual change, and which project it belongs to. Same envelope, and same
  *  reason for it, as `AgentNotice`. */
@@ -533,16 +732,9 @@ export type Preferences = {
    *  somebody who did not ask for one is the thing this product exists not to
    *  do. */
   showFiles: boolean;
-  /** Whether each project holds work back to be looked at first, keyed by its
-   *  path. Per project, so saying “ask me first” in one folder never changes
-   *  another. Absent is off — read it through `holdsBack`. */
-  heldBack: Readonly<Record<string, boolean>>;
   /** Whether each project's browser keeps its logins between sittings, keyed by
    *  its path. Absent is off — read it through `keepsLogins`. */
   keptLogins: Readonly<Record<string, boolean>>;
-  /** How much a picture has to move before work is stopped, by id, or null for
-   *  the middle one. */
-  howMuch: string | null;
   /** The ceiling somebody set on spending, or null when they have not set one.
    *  Remembered across launches: a ceiling that forgets itself is not one. */
   ceiling: Money | null;
@@ -550,8 +742,6 @@ export type Preferences = {
   theme: Theme;
   /** Name a conversation, and its branch, from what was first asked in it. */
   nameConversations: boolean;
-  /** Ask before a conversation that is still working is closed. */
-  askBeforeClosing: boolean;
   /** Put a version down before a job's work first reaches the folder. */
   snapBeforeApply: boolean;
   /** What replies come back in. Empty is the request's own language, and says
@@ -580,94 +770,12 @@ export type ComputerStatus = {
  *  rows differ only in which one they hold, so they share one road. */
 export type PlainPreference =
   | 'nameConversations'
-  | 'askBeforeClosing'
   | 'snapBeforeApply'
   | 'replyLanguage'
   | 'whenRunFinishes'
   | 'whenSomethingNeedsYou'
   | 'notifySound'
   | 'badgeDock';
-
-/* -------------------------------------------------------------------------- */
-/* Landing it                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/**
- * One piece of work that has not reached the project yet.
- *
- * `state` is the whole of it: being made, finished and waiting, let in, or set
- * aside. Nothing here says where the copy is — that is the shell's business and
- * the window has no use for a folder it cannot open.
- */
-export type WaitingWork = {
-  id: string;
-  /** What it was asked to do, in the person's own words. */
-  doing: string;
-  state: 'making' | 'waiting' | 'in' | 'aside' | 'nothing';
-  /** Epoch ms. */
-  at: number;
-};
-
-/**
- * What can be done with this project's work right now.
- *
- * Every `can` here was found out by looking rather than assumed, and every
- * `false` has a sentence beside it saying what is missing. The window draws the
- * sentence; it never invents one.
- */
-export type Landing = {
-  /** Work waiting to be looked at, or null when nothing is. */
-  waiting: WaitingWork | null;
-  /** What that work would look like, photographed in the copy before anybody
-   *  agrees to it. Null when nothing is waiting, or when it could not be shown. */
-  held: Held | null;
-  /** True when new work is checked before it lands. */
-  holdBack: boolean;
-  /** Whether the browser this project drives keeps its logins. */
-  keepLogins: boolean;
-  /** Can the work go all the way to where the team keeps this project? */
-  canHandOver: boolean;
-  handOverSays: string;
-  /** Can this project go online from this computer? */
-  canPutOnline: boolean;
-  onlineSays: string;
-};
-
-/** How handing work over went. */
-export type HandedOver = {
-  /** True when it reached where the team works. */
-  sent: boolean;
-  /** What this piece of work is called there. Shown only under "Show me". */
-  name: string;
-  /** Where somebody can go and look at it. */
-  address: string | null;
-  says: string;
-  /** The real commands, for "Show me" and nowhere else. */
-  steps: readonly string[];
-};
-
-/** How putting it online went. */
-export type WentOnline = {
-  address: string | null;
-  pages: number;
-  says: string;
-  steps: readonly string[];
-};
-
-/**
- * What came of deciding about work that was waiting.
- *
- * Both answers are undoable through the same door: `undoTo` is a version, and
- * `putBack` takes versions. Having let work in, it is the moment before; having
- * set work aside, it is the work itself. `letIn` says which, so the window can
- * offer "Undo" or "Bring it back" without knowing why they differ.
- */
-export type Decided = {
-  landing: Landing;
-  versions: readonly SavedVersion[];
-  letIn: boolean;
-  undoTo: string | null;
-};
 
 /* -------------------------------------------------------------------------- */
 /* Work that carries on without you                                            */
@@ -730,20 +838,6 @@ export type AwayPiece = {
   after?: AwayAfter | null;
 };
 
-/** One thing asked for over and over, as the window draws it. Nothing here says
- *  how the timing works — only what it does and when it happens next. */
-export type Repeating = {
-  id: string;
-  doing: string;
-  /** "Every day at 7:00am". */
-  says: string;
-  /** "Tomorrow at 7:00am", or that it has been stopped. */
-  next: string;
-  on: boolean;
-  /** What came of the last one, or null when it has not happened yet. */
-  lastSaid: string | null;
-};
-
 /**
  * Everything that happens whether or not somebody is looking.
  *
@@ -753,7 +847,6 @@ export type Repeating = {
  */
 export type Away = {
   pieces: readonly AwayPiece[];
-  repeats: readonly Repeating[];
   /** How many go side by side. */
   atOnce: number;
   /** What all of it has cost so far, or null when nothing has been spent. */
@@ -763,24 +856,57 @@ export type Away = {
   sinceYouWere: string | null;
 };
 
-/** How often a thing asked for over and over happens. The window offers four,
- *  named after what somebody would say rather than after a rule. */
-export type EveryKind = 'day' | 'weekday' | 'week' | 'month';
-
 /** What is going on, and which project it belongs to. Same envelope, and same
  *  reason for it, as `AgentNotice`: a run can land for a folder somebody has
  *  switched away from, and it must not be drawn under another folder's name. */
 export type AwayNotice = { project: string; away: Away };
 
-/** How the next message should be handled. Both default off; the window turns
- *  the first on by itself when a request looks big enough to be worth a plan. */
+/**
+ * One thing the project offers every chat in it — a brief, a specification, a
+ * house style. Nothing was sent it by this chat: the list belongs to the
+ * project, and a new chat is given the same one on its first turned message.
+ */
+export type ProjectItem = {
+  id: string;
+  /** What it is called, which is what the model is given. */
+  name: string;
+  /** One line on what it is for. */
+  note: string;
+};
+
+/** How the next message should be handled. Both switches default off; the
+ *  window turns the first on by itself when a request looks big enough to be
+ *  worth a plan. */
 export type PromptOptions = {
   /** Look around and propose, changing nothing, before anything is touched. */
   lookFirst?: boolean;
   /** The agent is already working and this message should wait its turn —
    *  delivered after the current run, never interrupting it. */
   queue?: 'followUp';
+  /** What the project shares with every chat, carried with the turn so a chat
+   *  nobody has sent in yet is given it too. Empty or absent changes nothing. */
+  context?: readonly ProjectItem[];
 };
+
+/**
+ * Something true of this machine rather than of any one conversation: git or
+ * npm missing, most of all. Kept in the shell and asked for by the window, as
+ * well as pushed — a notice raised before the window was listening would
+ * otherwise be a notice nobody ever sees.
+ */
+export type AppNotice = {
+  /** Stable, so the same fact said twice is one row and can be put away. */
+  id: string;
+  /** One sentence on what is missing. */
+  what: string;
+  /** One sentence on what to do about it. */
+  because: string;
+};
+
+/** The facts that are about the machine, named once because both halves have to
+ *  agree on them: the shell says which are true, the window stands the controls
+ *  that depend on them down. */
+export const APP_NOTICE = { noGit: 'no-git', noNpm: 'no-npm' } as const;
 
 /** One model, named by the provider it belongs to and its own id. Both ids are
  *  the provider's own — the window stores them and never invents them. */
@@ -963,6 +1089,64 @@ export type PromptAttachment = {
   bytes: string;
 };
 
+/**
+ * An attachment the shell has written down, by the hash of its own bytes.
+ *
+ * This is what a conversation's attachment row keeps: an id, the facts a chip
+ * is drawn from, and the small copy as a data URL. The name the original bytes
+ * are stored under is the id itself, so the same file attached twice — or
+ * retried after a failed send — is one stored attachment rather than two.
+ */
+export type KeptAttachment = {
+  id: string;
+  /** The person's file name, from the first time these bytes were kept. */
+  name: string;
+  kind: 'image' | 'document';
+  /** e.g. 'image/png'. */
+  mimeType: string;
+  byteSize: number;
+  /** A data URL of the thumbnail, or null for anything without one — a PDF,
+   *  or a picture this computer could not decode. Never the original. */
+  thumb: string | null;
+  /** These exact bytes were already here: one stored copy, one id. */
+  twice: boolean;
+};
+
+/** One attachment that did not arrive, named so a person knows which one. */
+export type RefusedAttachment = { name: string; because: string };
+
+/** What came of handing the shell a drop, file by file. A partial upload is
+ *  reported rather than swallowed: `refused` names what did not arrive,
+ *  `kept` is what did, and `because` is the one sentence to show. */
+export type KeptAttachments = {
+  kept: readonly KeptAttachment[];
+  refused: readonly RefusedAttachment[];
+  because: string | null;
+};
+
+/** The original bytes of a kept attachment, back for sending again or opening. */
+export type AttachmentCopy = {
+  id: string;
+  name: string;
+  kind: 'image' | 'document';
+  mimeType: string;
+  /** Base64 without the data: prefix, the same shape `PromptAttachment` has. */
+  bytes: string;
+};
+
+/** One conversation in the trash: what to call it, when it went, how big. */
+export type TrashedConversation = {
+  name: string;
+  path: string;
+  /** An ISO moment. The name carries when it was deleted. */
+  wentAt: string;
+  size: number;
+};
+
+/** The trash as a person sees it: what is in it, and the rule it is kept
+ *  under — nothing is emptied on its own, and emptying is an explicit action. */
+export type TrashView = { items: readonly TrashedConversation[]; rule: string };
+
 /** One installed skill Pi can use. A handle is the compact spelling accepted
  * by the composer — `@${handle}` — while `path` is only a clue for the reader,
  * never an argument that lets the renderer read arbitrary files. */
@@ -983,7 +1167,14 @@ export type Workflow = {
   name: string;
   description: string;
   hint: string | null;
-  source: 'global' | 'project';
+  /** `extension` is a command an add-on registered: it runs in Pi's command
+   *  context rather than being sent as a prompt. */
+  source: 'global' | 'project' | 'extension';
+  /** The add-on that offers it, for an `extension` row. */
+  from?: string;
+  /** Set when a name Graphe already answers to is in front of this one. The
+   *  picker says so rather than dropping the row. */
+  shadowed?: string | null;
 };
 
 /** Where the app has got to carrying a job on by itself. `why` is null once it
@@ -1072,19 +1263,16 @@ export type Overview = {
   repos?: readonly RepoOverview[];
   /**
    * The address of the live preview being served for this folder, or null when
-   * nothing is being served. The window shows its preview button only while
-   * this is set — a preview that exists gets a button; one that does not gets
-   * nothing.
+   * nothing is being served there. The window shows its preview button only
+   * while this is set — a preview that exists gets a button; one that does not
+   * gets nothing. A preview of somewhere else is not this folder's, and is
+   * reported as nothing.
    */
   preview: string | null;
   /** Things the last turn made that are worth looking at rather than reading. */
   artifacts: readonly Artifact[];
   /** Named colours out of a palette file the agent wrote, for real swatches. */
   swatches: readonly Swatch[];
-  /** This project's design tokens, and the file they live in. */
-  /** `text` is the stylesheet as written, so what drifted from these values can
-   *  be worked out without reading the file twice. */
-  styles: { file: string; tokens: readonly StyleToken[]; text: string } | null;
 };
 
 /** One project inside a folder that holds several: its name as the folder
@@ -1114,47 +1302,6 @@ export type Artifact = {
 };
 
 export type Swatch = { name: string; value: string };
-
-/** One custom property in the project's own design tokens. */
-export type StyleToken = {
-  name: string;
-  value: string;
-  kind: 'colour' | 'space' | 'size' | 'radius' | 'shadow' | 'other';
-  line: number;
-  /** The values a slider should snap to, derived from the file's own scale. */
-  steps: readonly string[];
-  /** The stylesheet it was read from, so an edit lands in the same file. Left
-   *  off (a fixture), an edit falls back to the project's primary sheet. */
-  file?: string;
-};
-
-/* -------------------------------------------------------------------------- */
-/* Staying in step with Figma                                                  */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The Figma file this project is kept in step with, and what has moved on in it
- * since the work was built from it.
- *
- * `following` is null when no file has been pointed at yet, which is the honest
- * empty state rather than a failure. `moved` empty means the two agree.
- */
-export type InStep = {
-  following: {
-    id: string;
-    /** What it is called on screen — the frame, or the file. */
-    name: string;
-    /** The address, so it can be opened where it lives. */
-    url: string;
-    /** Epoch ms, when it was last looked at. */
-    readAt: number;
-  } | null;
-  moved: readonly Move[];
-  /** The one line above the list. */
-  says: string;
-  /** Why the last look could not happen, or null. Already a sentence. */
-  trouble: string | null;
-};
 
 /** One file that differs from the last saved version. */
 export type ChangedFile = {
@@ -1380,14 +1527,11 @@ export type ReviewVerdict = Verdict;
 /**
  * One thing waiting to be looked at, as the window draws it.
  *
- * The queue's own `Entry` plus the two facts only the shell can supply: the
- * branch the work is on, which is what Land and the pull request are made from,
- * and whether this card is still mirroring into the folder as it works.
+ * The queue's own `Entry` plus the one fact only the shell can supply: the
+ * branch the work is on, which is what Land and the pull request are made from.
  */
 export type ReviewEntry = ReviewQueued & {
   branch: string;
-  /** True while this conversation carries its files home on every settle. */
-  mirror: boolean;
 };
 
 /** An entry opened for reading: the queue as it stands, and the change itself. */
@@ -1395,6 +1539,13 @@ export type ReviewOpened = {
   entries: readonly ReviewEntry[];
   /** Unified diff of everything the entry changed, against where it started. */
   diff: string;
+  /** What the diff was read from: the copy's revision and its working tree
+   *  together, which is the same reading a decision is checked against. Null
+   *  when the work behind the entry could not be read at all. */
+  revision: string | null;
+  /** True when this is a second look and the work has moved since the first:
+   *  the diff here is the change as it is now, not the one already read. */
+  changed: boolean;
 };
 
 /** What a decision came to. `clashes` names the files both sides changed, which
@@ -1431,7 +1582,6 @@ export const CHANNEL = {
   putBack: 'graphe:put-back',
   nameVersion: 'graphe:name-version',
   show: 'graphe:show',
-  variationsServe: 'graphe:variations-serve',
   showProgress: 'graphe:show-progress',
   windowState: 'graphe:window-state',
   pointed: 'graphe:pointed',
@@ -1448,7 +1598,6 @@ export const CHANNEL = {
   projectFiles: 'graphe:project-files',
   fileText: 'graphe:file-text',
   keepVersion: 'graphe:keep-version',
-  versionPictures: 'graphe:version-pictures',
   hatches: 'graphe:hatches',
   getHelper: 'graphe:get-helper',
   openInEditor: 'graphe:open-in-editor',
@@ -1493,6 +1642,28 @@ export const CHANNEL = {
   checkoutLand: 'graphe:checkout-land',
   checkoutPutAway: 'graphe:checkout-put-away',
   prWorktreePrepare: 'graphe:pr-worktree-prepare',
+  worktreePlan: 'graphe:worktree-plan',
+  setupFiles: 'graphe:setup-files',
+  setupChoose: 'graphe:setup-choose',
+  setupInstall: 'graphe:setup-install',
+  setupState: 'graphe:setup-state',
+  terminalOpen: 'graphe:terminal-open',
+  terminalScrollback: 'graphe:terminal-scrollback',
+  terminalWrite: 'graphe:terminal-write',
+  terminalResize: 'graphe:terminal-resize',
+  terminalClose: 'graphe:terminal-close',
+  terminalList: 'graphe:terminal-list',
+  terminalData: 'graphe:terminal-data',
+  terminalExit: 'graphe:terminal-exit',
+  conversationContinue: 'graphe:conversation-continue',
+  conversationFork: 'graphe:conversation-fork',
+  conversationArchive: 'graphe:conversation-archive',
+  /** Point a conversation at the folder its work is in now, when the one it
+   *  recorded is gone. */
+  conversationRelink: 'graphe:conversation-relink',
+  extensionAsk: 'graphe:extension-ask',
+  extensionAnswer: 'graphe:extension-answer',
+  worktreeNew: 'graphe:worktree-new',
   prReviewOpen: 'graphe:pr-review-open',
   reviewQueue: 'graphe:review-queue',
   reviewOpen: 'graphe:review-open',
@@ -1500,7 +1671,6 @@ export const CHANNEL = {
   reviewDecide: 'graphe:review-decide',
   reviewLand: 'graphe:review-land',
   reviewPr: 'graphe:review-pr',
-  reviewMirror: 'graphe:review-mirror',
   conflictLook: 'graphe:conflict-look',
   conflictSettle: 'graphe:conflict-settle',
   buildStart: 'graphe:build-start',
@@ -1508,9 +1678,6 @@ export const CHANNEL = {
   buildAdvance: 'graphe:build-advance',
   buildSave: 'graphe:build-save',
   buildCancel: 'graphe:build-cancel',
-  flowLoad: 'graphe:flow-load',
-  flowSave: 'graphe:flow-save',
-  flowForget: 'graphe:flow-forget',
   /** Every editor and terminal installed here, so a row can offer the choice. */
   appsHere: 'graphe:apps-here',
   /** Which of them "Open in editor" and "Open in terminal" go to. */
@@ -1522,22 +1689,24 @@ export const CHANNEL = {
   goalClear: 'graphe:goal-clear',
   goalVerify: 'graphe:goal-verify',
   chooseDocument: 'graphe:choose-document',
-  designCommit: 'graphe:design-commit',
-  shareReview: 'graphe:share-review',
-  checkWidths: 'graphe:check-widths',
   conversations: 'graphe:conversations',
   openConversation: 'graphe:open-conversation',
   closeConversation: 'graphe:close-conversation',
   deleteConversation: 'graphe:delete-conversation',
+  /** Accepted attachments, written down under the profile by their content id,
+   *  and the kept conversations a person can put back or throw away. */
+  keepAttachments: 'graphe:keep-attachments',
+  attachmentCopy: 'graphe:attachment-copy',
+  trashList: 'graphe:trash-list',
+  trashRestore: 'graphe:trash-restore',
+  trashEmpty: 'graphe:trash-empty',
   pageAt: 'graphe:page-at',
   pageHidden: 'graphe:page-hidden',
-  watchStart: 'graphe:watch-start',
-  watchStop: 'graphe:watch-stop',
   packages: 'graphe:packages',
   addPackage: 'graphe:add-package',
   removePackage: 'graphe:remove-package',
-  visualChange: 'graphe:visual-change',
-  visualFrames: 'graphe:visual-frames',
+  /** End the change that is running now. Answered with what that left on disk. */
+  stopPackage: 'graphe:stop-package',
   connection: 'graphe:connection',
   connect: 'graphe:connect',
   connectAnswer: 'graphe:connect-answer',
@@ -1560,8 +1729,6 @@ export const CHANNEL = {
   discoveredAccounts: 'graphe:discovered-accounts',
   importAccount: 'graphe:import-account',
   openLink: 'graphe:open-link',
-  landing: 'graphe:landing',
-  setHoldBack: 'graphe:set-hold-back',
   setKeepLogins: 'graphe:set-keep-logins',
   setComputerUse: 'graphe:set-computer-use',
   computerStatus: 'graphe:computer-status',
@@ -1569,10 +1736,17 @@ export const CHANNEL = {
   setTheme: 'graphe:set-theme',
   setAppearance: 'graphe:set-appearance',
   ownStyles: 'graphe:own-styles',
-  setHowMuch: 'graphe:set-how-much',
-  decideOnWork: 'graphe:decide-on-work',
-  handToDeveloper: 'graphe:hand-to-developer',
-  putOnline: 'graphe:put-online',
+  viewsLook: 'graphe:views-look',
+  viewsNote: 'graphe:views-note',
+  flowList: 'graphe:flow-list',
+  flowSave: 'graphe:flow-save',
+  flowDelete: 'graphe:flow-delete',
+  flowStart: 'graphe:flow-start',
+  flowStop: 'graphe:flow-stop',
+  flowContinue: 'graphe:flow-continue',
+  flowResume: 'graphe:flow-resume',
+  flowChanged: 'graphe:flow-changed',
+  tokensRead: 'graphe:tokens-read',
   connectedLook: 'graphe:connected-look',
   connectedCheck: 'graphe:connected-check',
   connectedSave: 'graphe:connected-save',
@@ -1581,25 +1755,22 @@ export const CHANNEL = {
   changesWider: 'graphe:changes-wider',
   changesDrop: 'graphe:changes-drop',
   away: 'graphe:away',
-  awayEverywhere: 'graphe:away-everywhere',
   keepGoing: 'graphe:keep-going',
-  startAfter: 'graphe:start-after',
-  putAfter: 'graphe:put-after',
   stopAway: 'graphe:stop-away',
   keepAway: 'graphe:keep-away',
   answerAway: 'graphe:answer-away',
   sayToAway: 'graphe:say-to-away',
-  compareWays: 'graphe:compare-ways',
-  keepSet: 'graphe:keep-set',
-  addRepeat: 'graphe:add-repeat',
-  switchRepeat: 'graphe:switch-repeat',
-  forgetRepeat: 'graphe:forget-repeat',
   awayChanged: 'graphe:away-changed',
   buildPlanChanged: 'graphe:build-plan-changed',
   /** Where the app has got to carrying a job on by itself. */
   continuation: 'graphe:continuation',
   /** A newer build is out. Once a day, and never in the way. */
   newerVersion: 'graphe:newer-version',
+  /** What this machine is missing — git, npm — asked for on launch, because
+   *  nothing is open yet to say it in. */
+  appNotices: 'graphe:app-notices',
+  /** And the same, as it is found out, for a window already up. */
+  appNotice: 'graphe:app-notice',
   /** A press in the app's own menu that the window is the one to act on. */
   fromMenu: 'graphe:from-menu',
   /** Everything that happened, a frame's worth at a time. One trip across the
@@ -1620,16 +1791,41 @@ export const CHANNEL = {
   /** Empty one storage row outright, where that is safe. */
   clearFolder: 'graphe:clear-folder',
   clearFinishedWork: 'graphe:clear-finished-work',
+  /** What the one-time move of older chats found, and where the copies of the
+   *  files it replaced are kept. */
+  migration: 'graphe:migration',
+  /** Do that check again. Running it twice changes nothing. */
+  migrationCheck: 'graphe:migration-check',
+  /** Show the folder those copies are kept in. */
+  showBackups: 'graphe:show-backups',
   /** Which of those are held, and whether this machine can hold any. */
   credentialsKept: 'graphe:credentials-kept',
   /** Stop it carrying on. Escape, and the Stop beside the line it draws. */
   continuationStop: 'graphe:continuation-stop',
-  inStep: 'graphe:in-step',
-  followDesign: 'graphe:follow-design',
-  lookAgain: 'graphe:look-again',
-  caughtUp: 'graphe:caught-up',
-  stopFollowing: 'graphe:stop-following',
 } as const;
+
+/**
+ * One picture of a preview, and which preview it is a picture of.
+ *
+ * The shell takes a picture of the agent's browser every second or so and sends
+ * it to the window, which draws whatever arrives. What arrives can be of
+ * something the window is not showing any more — another workspace's browser, or
+ * this one before a reload — so every picture says what it is of. The window
+ * draws the ones that match what it is showing and drops the rest, rather than
+ * putting a view of somewhere else on screen as though it were current.
+ */
+export type PreviewFrame = {
+  /** The preview's own id. The same for as long as this browser is the one
+   *  being shown; a different one is a different preview. */
+  preview: string;
+  /** The project whose browser it is, which is what the window asked about. */
+  project: string;
+  /** One more each time the window starts looking again, so a picture taken
+   *  before a reload cannot be mistaken for the one now. */
+  epoch: number;
+  /** The picture itself, base64, as the shell encoded it. */
+  bytes: string;
+};
 
 /**
  * Everything the window may ask the shell to do. All of it.
@@ -1721,10 +1917,6 @@ export type GrapheApi = {
   putBack(versionId: string, where?: Where): Promise<Result<PutBack>>;
   /** Give a version a name of the user's own. */
   nameVersion(versionId: string, name: string, where?: Where): Promise<Result<readonly SavedVersion[]>>;
-  /** What each version of the open project looked like, by id, as data URIs. A
-   *  version with no picture is simply absent — never a stand-in. */
-  versionPictures(where?: Where): Promise<Result<Readonly<Record<string, string>>>>;
-
   /** What this person has chosen, as remembered on this computer. */
   preferences(): Promise<Result<Preferences>>;
   /** Turn "Show me" on or off. Returns the whole set, so the window never has
@@ -1741,12 +1933,21 @@ export type GrapheApi = {
   /** Everything the open project holds, with each file's size and whether this
    *  version touched it. Empty — never a failure — when nothing is open. The
    *  walk is bounded, so a folder of somebody else's machinery costs a moment
-   *  rather than the window. */
-  projectFiles(where?: Where): Promise<Result<readonly FileEntry[]>>;
+   *  rather than the window.
+   *
+   *  The answer carries the revision it was read at, so a window holding a
+   *  listing can tell whether the folder has moved since and read it again
+   *  rather than drawing what is no longer there. */
+  projectFiles(where?: Where): Promise<Result<FilesRead>>;
   /** One file of the open project, as text. A location outside the project, a
    *  file too big to read, or one that is not text comes back as a sentence
-   *  rather than as bytes. */
-  fileText(path: string, where?: Where): Promise<Result<string>>;
+   *  rather than as bytes.
+   *
+   *  `expect` is the revision the caller last read this file at. When it is
+   *  given and no longer matches, the answer carries the file as it is now and
+   *  says so, rather than handing over the newer bytes as though they were the
+   *  ones being read. */
+  fileText(path: string, where?: Where, expect?: string): Promise<Result<TextRead>>;
 
   /** What the escape hatches can offer here — which editor, if any. */
   hatches(): Promise<Result<Hatches>>;
@@ -1774,8 +1975,9 @@ export type GrapheApi = {
   /** Watch what the browser is doing, a picture at a time, or stop. The
    *  pictures arrive on `onBrowserFrame`. */
   watchBrowser(on: boolean, where?: Where): Promise<Result<boolean>>;
-  /** Each picture of the browser, while somebody is watching one. */
-  onBrowserFrame(listener: (frame: { project: string; bytes: string }) => void): () => void;
+  /** Each picture of the browser, while somebody is watching one. Each one says
+   *  which preview it is of; the window draws the ones matching what it shows. */
+  onBrowserFrame(listener: (frame: PreviewFrame) => void): () => void;
   /** Start a document-to-build: name a document and an optional instruction,
    *  and the shell turns it into a plan. */
   buildStart(source: { name: string; text: string; instruction?: string }, where?: Where): Promise<Result<BuildPlan>>;
@@ -1790,20 +1992,14 @@ export type GrapheApi = {
   buildSave(tasks: readonly { title: string; acceptance: string }[], where?: Where): Promise<Result<BuildPlan | null>>;
   /** Cancel the current build checklist and clear it from the screen. */
      buildCancel(where?: Where): Promise<Result<null>>;
-  /** A goal per project, kept on disk. Null when none. */
-  /** Every canvas this project has, in the order it drew them. */
-  flowLoad(where?: Where): Promise<Result<readonly import('../work/canvas').Flow[]>>;
-  /** Keep the shape. Nothing is run by saving one. */
-  flowSave(flow: import('../work/canvas').Flow, where?: Where): Promise<Result<null>>;
-  /** Throw one away for good. */
-  flowForget(id: string, where?: Where): Promise<Result<null>>;
   appsHere(): Promise<Result<{ editors: readonly string[]; terminals: readonly string[] }>>;
   setOpensIn(which: 'editor' | 'terminal', name: string | null): Promise<Result<Preferences>>;
   /** One preference on Behaviour or Notifications. Whatever is handed back is
    *  what was actually kept, so a refused write shows as the old answer. */
   setPreference(which: PlainPreference, value: string | boolean): Promise<Result<Preferences>>;
-  goalLoad(where?: Where): Promise<Result<import('../work/goal').Goal | null>>;
-  goalSave(goal: import('../work/goal').Goal, where?: Where): Promise<Result<null>>;
+  /** A goal per project, kept on disk. Null when none. */
+  goalLoad(where?: Where): Promise<Result<Goal | null>>;
+  goalSave(goal: Goal, where?: Where): Promise<Result<null>>;
   goalClear(where?: Where): Promise<Result<null>>;
   /** Run real checks (tsc etc.) in the project. */
   goalVerify(where?: Where): Promise<Result<{ passed: boolean; reason: string }>>;
@@ -1854,7 +2050,6 @@ export type GrapheApi = {
   /** Open a pull request from the entry's branch, with its summary as the body. */
   reviewPr(id: string, summary: string, where?: Where): Promise<Result<{ url: string; entries: readonly ReviewEntry[] }>>;
   /** Carry this conversation's files home as it works, or stop doing that. */
-  reviewMirror(id: string, on: boolean, where?: Where): Promise<Result<readonly ReviewEntry[]>>;
   /** One file both sides changed, written out with markers to decide over.
    *  `address` is the conversation whose version is the other side. */
   conflictLook(address: string, path: string, where?: Where): Promise<Result<ReviewClash>>;
@@ -1894,12 +2089,9 @@ export type GrapheApi = {
   /** Make the project, then open the made thing in their own browser. `at` opens
    *  one page of it rather than its front door. */
   show(at?: string, point?: boolean, where?: Where): Promise<Result<ShowOutcome>>;
-  /** Make ready every variation in a set at once, each served on its own address
-   *  so they can be compared in the pane. `where` names the project in front. */
-  variationsServe(parts: { subject: string; variations: readonly VariationSpec[] }, where?: Where): Promise<Result<VariationsOutcome>>;
   /** Somebody clicked an element, in their own browser or in the page beside
    *  the conversation. Read against the project before it gets here. */
-  onPointed(listener: (at: PointedAt) => void): () => void;
+  onPointed(listener: (pointed: Pointed) => void): () => void;
   /** A key the native page pane swallowed. Escape only, and only because a
    *  menu that will not close traps the hand. */
   onPaneKey(listener: (press: { key: string }) => void): () => void;
@@ -1910,17 +2102,87 @@ export type GrapheApi = {
    *  the layout stops reserving room for them. */
   onWindowState(listener: (state: WindowState) => void): () => void;
 
-  /** Write a read-only page of what changed, for somebody who is not you.
-   *  Returns where it was written, or null when the save was cancelled. */
-  shareReview(where?: Where): Promise<Result<string | null>>;
-  /** Photograph the project at phone, tablet and desktop width. */
-  checkWidths(where?: Where): Promise<Result<{ looks: readonly Look[]; says: string }>>;
-
   /** The conversations this project has had, newest first. */
   conversations(where?: Where): Promise<Result<readonly Conversation[]>>;
   /** Open one of them, or start a fresh one when given null. Comes back with
-   *  the conversation replayed as events, the same as opening a project. */
-  openConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>>;
+   *  the conversation replayed as events, the same as opening a project.
+   *
+   *  `key` names the press that asked for a fresh one, so a request sent twice
+   *  answers with the conversation the first one made instead of a second.
+   *  A path and a key together are contradictory; the path wins and the key is
+   *  ignored. */
+  openConversation(
+    path: string | null,
+    workspace?: string | null,
+    key?: string | null,
+    where?: Where,
+  ): Promise<Result<OpenedProject>>;
+  /** What a New worktree would make, before anybody commits to it. */
+  worktreePlan(where?: Where): Promise<Result<WorktreePlan>>;
+  /** Which gitignored files this project carries into a checkout, and whether a
+   *  checkout would need an install. Read only. */
+  setupFiles(where?: Where): Promise<Result<SetupHere>>;
+  /** Write this project's ticks down. Answers with the same reading as
+   *  `setupFiles`, so the flow draws what is now true rather than what it hoped. */
+  setupChoose(files: readonly string[], where?: Where): Promise<Result<SetupHere>>;
+  /** Install what one checkout needs, as the step of its own that it is. */
+  setupInstall(where?: Where): Promise<Result<SetupState>>;
+  /** Where that install stands, for a window that was not there when it ran. */
+  setupState(where?: Where): Promise<Result<SetupState>>;
+  /** A new conversation carrying one editable note about where this one got
+   *  to. Nothing of the transcript comes across but the files and the note. */
+  continueConversation(source?: string | null, where?: Where): Promise<Result<OpenedProject>>;
+  /** The same history in a conversation of its own, or — when `said` names a
+   *  place — only as far as that exchange: how many things the person had said
+   *  by then, counting from one. */
+  forkConversation(
+    source?: string | null,
+    said?: number | null,
+    where?: Where,
+  ): Promise<Result<OpenedProject>>;
+  /** Out of the list, or back into it. Not delete, not close. */
+  archiveConversation(
+    id: string,
+    on: boolean,
+    where?: Where,
+  ): Promise<Result<readonly Conversation[]>>;
+  /**
+   * Point this conversation at the folder its work is in now.
+   *
+   * The one repair for a conversation whose recorded folder is gone, and
+   * deliberately the only one: the record is moved onto the folder chosen, so
+   * the same conversation carries on in the same transcript and the runtime it
+   * holds. A folder that is not there, or is not a checkout of this project,
+   * is refused with a sentence and nothing is changed.
+   */
+  relinkConversation(path: string | null, where?: Where): Promise<Result<OpenedProject>>;
+  /** Start a shell in the workspace this call names. There is no command
+   *  argument on purpose: a terminal is keystrokes, not an execution door. */
+  terminalOpen(
+    size: { cols: number; rows: number; kind: TerminalKind },
+    where?: Where,
+  ): Promise<Result<TerminalSession>>;
+  /** What it has printed so far, for a pane opened after the fact. */
+  terminalScrollback(id: string): Promise<Result<TerminalSnapshot>>;
+  terminalWrite(id: string, data: string): Promise<Result<null>>;
+  terminalResize(id: string, cols: number, rows: number): Promise<Result<null>>;
+  terminalClose(id: string): Promise<Result<null>>;
+  terminalList(where?: Where): Promise<Result<readonly TerminalSession[]>>;
+  /** Output arriving from a terminal, chunk by chunk. */
+  onTerminalData(listener: (chunk: TerminalChunk) => void): () => void;
+  /** A terminal's process ending, once. */
+  onTerminalExit(listener: (exit: TerminalExit) => void): () => void;
+  /** Something an add-on is asking. Answered through `answerExtension`, and
+   *  with `extensionAnswer` in the shape its own question has. */
+  onExtensionAsk(listener: (ask: ExtensionRequest) => void): () => void;
+  answerExtension(
+    requestId: string,
+    answer: ExtensionAnswer,
+    where?: Where,
+  ): Promise<Result<null>>;
+  /** Make the copy, and start a conversation in it. A context handoff from
+   *  another conversation is a separate, explicit action. */
+  worktreeNew(wanted: { base?: string | null }, where?: Where): Promise<Result<OpenedProject>>;
   /** Put one down. Only the view closes — it stays written down, and opening it
    *  again carries on from where it was left. Optional, so a bridge with no way
    *  to close one is still a whole bridge. */
@@ -1929,37 +2191,59 @@ export type GrapheApi = {
   /** Throw a conversation away. The file on disk goes; the project does not. */
   deleteConversation(path: string, where?: Where): Promise<Result<readonly Conversation[]>>;
 
+  /** Write down what was accepted, by content id, and say what did not arrive.
+   *  `held` is the ids the conversation is already carrying, so the ceiling is
+   *  a property of the conversation and a retry of something already held does
+   *  not count twice. */
+  keepAttachments(
+    files: readonly PromptAttachment[],
+    held?: readonly string[],
+  ): Promise<Result<KeptAttachments>>;
+  /** The original bytes of a kept attachment, back for sending again. Null when
+   *  nothing is stored under that id. */
+  attachmentCopy(id: string): Promise<Result<AttachmentCopy | null>>;
+  /** What is in the trash, and the rule it is kept under. */
+  trashList(): Promise<Result<TrashView>>;
+  /** Put one back where the shell can open it again: its path, or null when it
+   *  would have to write over a conversation that is already there. */
+  trashRestore(name: string): Promise<Result<string | null>>;
+  /** Delete exactly the kept conversations named, and return the ones that
+   *  actually went. Nothing else in the trash is touched. */
+  trashEmpty(names: readonly string[]): Promise<Result<readonly string[]>>;
+
   /** A second copy of a conversation, so another direction can be tried without
   /** Point the page at an address and glue it to a rectangle in the window.
    *  A null rectangle closes it. */
   /** Where the page is drawn, and what it shows. Moving it never reloads it:
    *  the box is reported whenever the window changes shape, and a turn full of
-   *  tool calls changes it many times. `again` is the reload press. */
+   *  tool calls changes it many times. `again` is the reload press.
+   *
+   *  The page is one native view for the whole window, so `where` is not
+   *  optional here: it names the project whose page this is, and a call that
+   *  names another project, or none, is refused rather than pointed at
+   *  whichever page happens to be up. */
   pageAt(
     address: string | null,
     bounds: { x: number; y: number; width: number; height: number } | null,
-    again?: boolean,
+    again: boolean,
+    where: Where,
   ): Promise<Result<null>>;
-  /** Take the page out of the way while something is drawn over it. */
-  pageHidden(hidden: boolean): Promise<Result<null>>;
-  /** Watch how somebody uses the page, capturing every state with the thing
-   *  that produced it. `says` is what they are trying, in their own words. */
-  watchStart(says?: string): Promise<Result<null>>;
-  /** Stop watching and keep what was seen. Null when nothing was. */
-  watchStop(): Promise<Result<Recording | null>>;
-
+  /** Take the page out of the way while something is drawn over it. `where`
+   *  names the project whose page it is, as `pageAt` does. */
+  pageHidden(hidden: boolean, where: Where): Promise<Result<null>>;
   /** What can be added to Graphe. A search term looks past the ones we ship. */
   packages(term?: string): Promise<Result<readonly Pack[]>>;
   addPackage(id: string): Promise<Result<readonly Pack[]>>;
   removePackage(id: string): Promise<Result<readonly Pack[]>>;
-  /** Write every design change the window has been holding and save it as one
-   *  version. `tokens` renames to real names with the value each is set to;
-   *  `motions` are the shapes `src/motion/read.ts` hands out. Nothing is
-   *  written on the way to this — the design view stays untracked until asked. */
-  designCommit(
-    changes: DesignChange,
-    where?: Where,
-  ): Promise<Result<readonly SavedVersion[]>>;
+  /**
+   * End the change that is running now — an install, an update or a removal —
+   * and answer with what that left on disk, in the shelf's own words.
+   *
+   * Drawn only where the shell has said it can do this (`AddonReport.stopping`):
+   * an install it cannot reach is one it cannot end, and the press is answered
+   * with that rather than with a pretend success.
+   */
+  stopPackage(): Promise<Result<StoppedAddition>>;
   /** Follow along while that happens. Returns the function that stops. */
   onShowProgress(listener: (progress: ShowProgress) => void): () => void;
 
@@ -1975,13 +2259,6 @@ export type GrapheApi = {
    * conversation is read in never changes.
    */
   onEvents(listener: (frames: readonly AgentFrame[]) => void): () => void;
-
-  /** The full-size before and after for one change. Asked for when somebody
-   *  opens the strip, and not before — see `VisualChange`. */
-  visualFrames(changeId: string): Promise<Result<VisualFrames>>;
-  /** A before and after has been worked out. Returns the function that stops
-   *  listening. */
-  onVisualChange(listener: (notice: VisualNotice) => void): () => void;
 
   /** Everything the window knows about who can think for it. */
   /** Who can think for this computer. `fresh` re-reads the model catalogue off
@@ -2041,10 +2318,6 @@ export type GrapheApi = {
   /** Open a link in the person's own browser, never inside this window. */
   openLink(url: string): Promise<Result<null>>;
 
-  /** What can be done with this project's work, and what is waiting. */
-  landing(where?: Where): Promise<Result<Landing>>;
-  /** Check new work in a copy before it reaches the files. Sticky. */
-  setHoldBack(on: boolean, where?: Where): Promise<Result<Preferences>>;
   /** Keep this project's browser signed in between sittings, or stop keeping
    *  it. Off keeps nothing and starts every browser clean. */
   setKeepLogins(on: boolean, where?: Where): Promise<Result<Preferences>>;
@@ -2069,26 +2342,53 @@ export type GrapheApi = {
    * what is in it, because the answer to "where do I put this" is a path.
    */
   ownStyles(): Promise<Result<{ css: string; file: string }>>;
-  /** Move the line a picture has to cross before the work is stopped. One of
-   *  `HOW_MUCH` in `src/design/gate.ts`. Sticky. */
-  setHowMuch(id: string): Promise<Result<Preferences>>;
-  /** Let the work that is waiting in, or set it aside. Both are undoable —
-   *  letting it in through `putBack`, setting it aside by deciding again.
-   *  `observed` is true only for a person's explicit press. Auto-clear may let
-   *  work in, but it must not move the picture the next change is measured
-   *  against: only a picture somebody actually saw can become agreed. */
-  decideOnWork(letIn: boolean, observed: boolean, where?: Where): Promise<Result<Decided>>;
 
   /**
-   * Write up what changed and put the work where a developer picks it up.
+   * What the panes were showing when the window was last closed.
    *
-   * Nothing leaves this computer unless `confirmed` is true, and the window
-   * only passes true from a press that has already said what will happen.
+   * One record per pane, in pane order, each naming the conversation that sat
+   * there. Empty for a profile written before views were recorded, which reads
+   * as an ordinary single-pane window rather than as an error.
    */
-  handToDeveloper(confirmed: boolean, where?: Where): Promise<Result<HandedOver>>;
-  /** Put the finished project on the internet. Same rule about `confirmed`,
-   *  and the same reason for it. */
-  putOnline(confirmed: boolean, where?: Where): Promise<Result<WentOnline>>;
+  viewsLook(where?: Where): Promise<Result<readonly ViewShown[]>>;
+  /**
+   * Write down what the panes are showing, the whole set at once.
+   *
+   * The set rather than one record because closing a pane has to be able to
+   * take a view away: a record left behind by a pane somebody closed would
+   * open again at the next launch as a window they did not leave. A pane with
+   * no record in the list has its view dropped.
+   */
+  viewsNote(shown: readonly ViewShown[], where?: Where): Promise<Result<null>>;
+
+  /* ------------------------------------------------------------------ canvas */
+
+  /** Every canvas this project has, newest first. */
+  flowList(where?: Where): Promise<Result<readonly Flow[]>>;
+  /** Write one back. The runs are the shell's and are not overwritten: the
+   *  answer is the flow it kept, runs included. */
+  flowSave(flow: Flow, where?: Where): Promise<Result<Flow>>;
+  flowDelete(id: string, where?: Where): Promise<Result<null>>;
+  /** Start a run. Refuses with `canStart`'s sentence when it cannot. */
+  flowStart(id: string, where?: Where): Promise<Result<Run>>;
+  flowStop(id: string, where?: Where): Promise<Result<Run>>;
+  /** Open a gate, which is the one thing a run stops for. */
+  flowContinue(id: string, block: string, where?: Where): Promise<Result<Run>>;
+  /** Carry on an interrupted run, from its first unfinished block. */
+  flowResume(id: string, where?: Where): Promise<Result<Run>>;
+  /** Every run change, pushed. What the window draws from while a flow runs. */
+  onFlow(listener: (notice: { project: string; flow: Flow }) => void): () => void;
+
+  /* ------------------------------------------------------------------ tokens */
+
+  /**
+   * The custom properties this project's stylesheets declare, grouped, with how
+   * often each is used. Null for a project whose sheets declare none — the band
+   * is then absent rather than empty.
+   */
+  tokensRead(
+    where?: Where,
+  ): Promise<Result<{ tokens: StyleToken[]; sheets: number } | null>>;
 
   /* ---------------------------------------------- while you are not looking */
 
@@ -2114,23 +2414,10 @@ export type GrapheApi = {
   /** Everything happening for this project whether or not the window is open. */
   away(where?: Where): Promise<Result<Away>>;
 
-  /** The same, for every project at once — work does not stop because somebody
-   *  switched folders, and until this there was nowhere to see that. */
-  awayEverywhere(): Promise<Result<readonly AwayNotice[]>>;
   /** Start a piece of work that carries on with the window closed. It runs in
    *  its own copy, so the folder on screen is untouched until it is kept.
    *  `untilDone` is the overnight mode: full access, no questions, wall clock. */
   keepGoing(text: string, untilDone?: boolean, where?: Where): Promise<Result<Away>>;
-  /**
-   * The same, but it waits until another has finished before it starts.
-   *
-   * Refused with a sentence, there and then, when the two would end up waiting
-   * for each other — a plan that could never run is not written down.
-   */
-  startAfter(text: string, after: string, where?: Where): Promise<Result<Away>>;
-  /** Make one that has not started yet wait for another, or let it off its wait
-   *  with null. Refused the same way, for the same reason. */
-  putAfter(id: string, after: string | null, where?: Where): Promise<Result<Away>>;
   /** Stop one, or let its result go. Same door for both, because what it means
    *  depends only on whether it had finished. */
   stopAway(id: string, where?: Where): Promise<Result<Away>>;
@@ -2152,33 +2439,6 @@ export type GrapheApi = {
    * watching something go the wrong way and being able to say so.
    */
   sayToAway(id: string, text: string, where?: Where): Promise<Result<Away>>;
-  /**
-   * The several goes at one job, each with what it changed.
-   *
-   * Read on the press, never kept: a go that is still working has a different
-   * answer a minute later, and a stale one would be read as the real thing.
-   */
-  compareWays(ways: string, where?: Where): Promise<Result<readonly SideOfWork[]>>;
-  /**
-   * Take several finished pieces into the project, in the order they need.
-   *
-   * One press rather than N: they were meant to arrive in an order, and going
-   * in one at a time by hand is how that order gets lost. Whatever happens, the
-   * whole run is one version away from never having happened.
-   */
-  keepSet(ids: readonly string[], where?: Where): Promise<Result<Away>>;
-  /** Ask for something over and over: what to do, how often, and at what time. */
-  addRepeat(
-    doing: string,
-    every: EveryKind,
-    at: { hour: number; minute: number },
-    on?: number,
-    where?: Where,
-  ): Promise<Result<Away>>;
-  /** Stop one happening, or start it again. What was typed is kept either way. */
-  switchRepeat(id: string, on: boolean, where?: Where): Promise<Result<Away>>;
-  /** Forget one entirely. */
-  forgetRepeat(id: string, where?: Where): Promise<Result<Away>>;
   /** Follow along while any of that changes, including while the window was
    *  away and has just come back. Returns the function that stops listening. */
   onAway(listener: (notice: AwayNotice) => void): () => void;
@@ -2193,6 +2453,10 @@ export type GrapheApi = {
    *  line under the reply with a Stop beside it. */
   onContinuation(listener: (notice: ContinuationNotice) => void): () => void;
   onNewerVersion(listener: (one: NewerVersion) => void): () => void;
+  /** What this machine is missing, so a missing git or npm is visible with
+   *  nothing open. Asked for on launch as well as pushed. */
+  appNotices(): Promise<Result<readonly AppNotice[]>>;
+  onAppNotice(listener: (notice: AppNotice) => void): () => void;
   /** Stop it carrying on, from that Stop or from Escape. */
   continuationStop(where?: Where): Promise<Result<null>>;
 
@@ -2243,21 +2507,10 @@ export type GrapheApi = {
   storage(): Promise<Result<StorageNow>>;
   clearFolder(name: string): Promise<Result<StorageNow>>;
   clearFinishedWork(): Promise<Result<{ removed: number; freed: number; says: string }>>;
-
-  /* ----------------------------------------------- staying in step with Figma */
-
-  /** What this project is keeping in step with, and what has moved on since the
-   *  work was built from it. Nothing followed is an empty answer, not a
-   *  failure. */
-  inStep(where?: Where): Promise<Result<InStep>>;
-  /** Keep this project in step with the Figma file behind a pasted address.
-   *  What is read now becomes what the work was built from. */
-  followDesign(address: string, where?: Where): Promise<Result<InStep>>;
-  /** Read the file again and say what differs. */
-  lookAgain(where?: Where): Promise<Result<InStep>>;
-  /** Take what is in Figma now as what the work was built from, once the work
-   *  has caught up with it. */
-  caughtUp(where?: Where): Promise<Result<InStep>>;
-  /** Stop following it. Nothing in Figma is touched. */
-  stopFollowing(where?: Where): Promise<Result<InStep>>;
+  /** What the one-time move of older chats found, or nothing to say. */
+  migration(): Promise<Result<MigrationNow>>;
+  /** Run that check again. It changes nothing the second time. */
+  migrationCheck(): Promise<Result<MigrationNow>>;
+  /** Show the copies it kept, so a recovery does not start with a path hunt. */
+  showBackups(): Promise<Result<null>>;
 };

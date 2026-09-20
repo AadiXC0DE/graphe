@@ -36,7 +36,11 @@
   --haze-dim: #948b83;
 
   --font: 'Satoshi', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* The system mono. IBM Plex was a render-blocking request to Google for a
+     handful of small labels; the app draws its own labels in the platform's
+     mono anyway, and this page should not wait on a third party to say
+     "watch the loop". */
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Motion — the app's own curves, so the two feel related. */
   --ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
@@ -1493,19 +1497,6 @@ a {
   gap: 8px;
 }
 
-.piece__thumbs {
-  display: flex;
-  gap: 6px;
-}
-
-.piece__thumbs span {
-  width: 46px;
-  height: 30px;
-  border-radius: 4px;
-  border: 1px solid var(--edge-strong);
-  background: linear-gradient(150deg, var(--night-raised), var(--night-sunken));
-}
-
 .away__points {
   display: grid;
   gap: 28px;
@@ -1539,12 +1530,6 @@ a {
   font-size: 0.75rem;
 }
 
-/* Opens a band instead of closing one, so it does not carry the gap a closing
-   picture needs — the heading above it already left that room. */
-.wide--lead {
-  margin-top: 0;
-}
-
 /* ───────────────────────────────────────────────────── the canvas ── */
 
 /* The blocks, named as the app names them. A row of them rather than a
@@ -1552,41 +1537,6 @@ a {
 .blocks {
   max-width: var(--full);
   margin: clamp(40px, 5vw, 64px) auto clamp(32px, 4vw, 48px);
-}
-
-.blocks__label {
-  color: var(--haze-dim);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-bottom: 14px;
-}
-
-.blocks__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.blocks__list li {
-  padding: 7px 13px;
-  border: 1px solid var(--edge);
-  border-radius: var(--r-sm);
-  background: var(--night);
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  letter-spacing: 0;
-  color: var(--haze);
-}
-
-.blocks__note {
-  margin-top: 18px;
-  max-width: var(--measure);
-  color: var(--haze);
-  font-size: 0.9375rem;
 }
 
 /* ────────────────────────────────────────────────── both audiences ── */
@@ -2138,212 +2088,6 @@ a {
   line-height: 1.75;
 }
 
-/* ── one request, four copies of the project, one branch back ── */
-
-.fan {
-  display: grid;
-  grid-template-columns: minmax(0, 0.85fr) clamp(28px, 5vw, 64px) minmax(0, 1fr)
-    clamp(28px, 5vw, 64px) minmax(0, 0.85fr);
-  grid-template-rows: auto minmax(0, 1fr);
-  column-gap: 0;
-  row-gap: 14px;
-}
-
-.fan__label {
-  grid-row: 1;
-  align-self: end;
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--haze-dim);
-}
-
-.fan__label--one {
-  grid-column: 1;
-}
-
-.fan__label--many {
-  grid-column: 3;
-  color: var(--coral);
-}
-
-.fan__label--back {
-  grid-column: 5;
-}
-
-.fan__end {
-  grid-row: 2;
-  align-self: center;
-  display: block;
-  padding: 14px 16px;
-  border: 1px solid var(--edge-strong);
-  border-radius: var(--r-md);
-  background: var(--night-sunken);
-  font-size: 0.9375rem;
-  line-height: 1.35;
-  letter-spacing: -0.015em;
-  opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 300ms var(--ease-settle), transform 300ms var(--ease-settle);
-}
-
-.fan__end--from {
-  grid-column: 1;
-  transition-delay: 0ms;
-}
-
-.fan__end--to {
-  grid-column: 5;
-  transition-delay: 1320ms;
-}
-
-.fan__end .mono {
-  display: block;
-  margin-top: 6px;
-  color: var(--haze-dim);
-  font-size: 0.6875rem;
-  overflow-wrap: anywhere;
-}
-
-.is-in .fan__end {
-  opacity: 1;
-  transform: none;
-}
-
-/* The wiring. Every line is axis-aligned, so every line is a box that grows
-   along one axis — no stroke to redraw, nothing that costs a layout. */
-.fan__wire {
-  position: relative;
-  grid-row: 2;
-}
-
-.fan__wire--out {
-  grid-column: 2;
-}
-
-.fan__wire--in {
-  grid-column: 4;
-}
-
-.fan__spine,
-.fan__arm,
-.fan__stub {
-  position: absolute;
-  background: var(--edge-strong);
-}
-
-.fan__spine {
-  inset-block: 12.5% 12.5%;
-  inset-inline-start: 50%;
-  width: 1px;
-  transform: scaleY(0);
-  transition: transform 380ms var(--ease-settle);
-}
-
-.fan__stub,
-.fan__arm {
-  height: 1px;
-  width: 50%;
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 260ms var(--ease-settle);
-}
-
-.fan__stub {
-  top: 50%;
-}
-
-.fan__arm {
-  top: var(--y);
-}
-
-.fan__wire--out .fan__stub {
-  inset-inline-start: 0;
-  transition-delay: 200ms;
-}
-
-.fan__wire--out .fan__spine {
-  transition-delay: 420ms;
-}
-
-.fan__wire--out .fan__arm {
-  inset-inline-start: 50%;
-  transition-delay: calc(200ms + var(--n, 0) * 40ms);
-}
-
-.fan__wire--in .fan__arm {
-  inset-inline-start: 0;
-  transition-delay: calc(280ms + var(--n, 0) * 40ms);
-}
-
-.fan__wire--in .fan__spine {
-  transition-delay: 1180ms;
-}
-
-.fan__wire--in .fan__stub {
-  inset-inline-start: 50%;
-  transition-delay: 1280ms;
-}
-
-.is-in .fan__spine {
-  transform: scaleY(1);
-}
-
-.is-in .fan__arm,
-.is-in .fan__stub {
-  transform: scaleX(1);
-}
-
-/* Zero gap on purpose: the arms above meet each lane at (n + 0.5) / 4 of this
-   column's height, which is only true while the rows are equal and touching.
-   The breathing room is inside each lane instead. */
-.fan__lanes {
-  grid-column: 3;
-  grid-row: 2;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  grid-template-rows: repeat(4, minmax(0, 1fr));
-  gap: 0;
-}
-
-.fan__lane {
-  display: flex;
-  align-items: center;
-}
-
-.fan__lane > span {
-  flex: 1;
-  display: block;
-  margin-block: 4px;
-  padding: 9px 14px;
-  border: 1px solid var(--edge);
-  border-inline-start: 2px solid var(--coral);
-  border-radius: var(--r-sm);
-  background: var(--night-sunken);
-  font-size: 0.875rem;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  opacity: 0;
-  transform: translateX(-8px);
-  transition: opacity 280ms var(--ease-settle), transform 280ms var(--ease-settle);
-  transition-delay: calc(220ms + var(--n, 0) * 40ms);
-}
-
-.is-in .fan__lane > span {
-  opacity: 1;
-  transform: none;
-}
-
-.fan__lane .mono {
-  display: block;
-  margin-top: 3px;
-  color: var(--haze-dim);
-  font-size: 0.6875rem;
-  overflow-wrap: anywhere;
-}
-
 /* ── every tool call goes through the same two things ── */
 
 .dias {
@@ -2493,42 +2237,6 @@ a {
 
   .nav__end {
     margin-inline-start: auto;
-  }
-}
-
-/* The fan is a picture of three stages side by side, and the wiring between
-   them only lines up while the lanes are one tall column. Below that it is the
-   same three stages, read downwards, with the wires taken out rather than
-   redrawn wrong. */
-@media (max-width: 940px) {
-  .fan {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-    row-gap: 8px;
-  }
-
-  .fan__wire {
-    display: none;
-  }
-
-  .fan__label,
-  .fan__end,
-  .fan__lanes {
-    grid-row: auto;
-    grid-column: 1;
-  }
-
-  .fan__label:not(:first-child) {
-    margin-top: 16px;
-  }
-
-  .fan__lanes {
-    grid-template-rows: none;
-    gap: 6px;
-  }
-
-  .fan__end--to {
-    transition-delay: 760ms;
   }
 }
 
@@ -2839,16 +2547,11 @@ a {
      movement only ever made the order of it legible, and there is no order to
      read when nothing moves. */
   .pill--now,
-  .carry__arrow,
-  .carry__rail,
-  .carry__rows li,
-  .fan__end,
-  .fan__lane > span,
-  .fan__spine,
-  .fan__arm,
-  .fan__stub,
-  .gate__step,
-  .gate__link {
+.carry__arrow,
+.carry__rail,
+.carry__rows li,
+.gate__step,
+.gate__link {
     opacity: 1 !important;
     transform: none !important;
     transition: none !important;
@@ -2856,50 +2559,5 @@ a {
 
   .pill--was {
     opacity: 0.45 !important;
-  }
-}
-
-/* The same window wearing three palettes, side by side. The point is made by
-   putting them next to each other, so they are one row and never a carousel. */
-.skins {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-  margin-top: 44px;
-}
-
-.skins figure {
-  margin: 0;
-}
-
-.skins img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 10px;
-  border: 1px solid var(--paper-edge);
-  box-shadow: 0 18px 40px rgba(20, 16, 14, 0.1);
-}
-
-.skins figcaption {
-  margin-top: 10px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  text-align: center;
-}
-
-.skins__note {
-  margin: 22px 0 0;
-  font-size: 13px;
-  color: var(--ink-muted);
-  text-align: center;
-}
-
-@media (max-width: 860px) {
-  .skins {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 28px;
   }
 }

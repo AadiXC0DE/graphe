@@ -15,14 +15,35 @@ import type { Where } from './ipc';
 export const OWN_COPY_WORDS = {
   /** Said on the row, so the two controls under it are not a surprise. */
   says: 'This conversation works in its own worktree.',
-  bring: 'Merge the worktree back',
-  bringHint: 'Put everything this conversation wrote into your project, and close its copy.',
+  bring: 'Merge into…',
+  bringHint: 'Merge everything this conversation wrote into your project, and give its copy back.',
   away: 'Delete the worktree',
   awayHint: 'Delete everything this conversation wrote.',
   sure: 'Everything this conversation wrote goes with it, and there is no getting it back.',
   yes: 'Yes, throw it away',
   no: 'Keep it',
 } as const;
+
+/**
+ * Which two workspaces a merge is between.
+ *
+ * The row is under a conversation, and the copy lives somewhere named on disk:
+ * without both names, "merge the worktree back" leaves somebody to work out
+ * what landed where, and in a project with three copies that is a guess.
+ */
+export type MergeEnds = {
+  /** The worktree the work is in now, as it is called on disk. */
+  source: string;
+  /** The workspace it would land in — the project folder, or the repository
+   *  inside a folder holding several. */
+  target: string;
+};
+
+/** What the control says it will do, with both ends named. Twelve words, so it
+ *  is a tooltip and an accessible name rather than a paragraph. */
+export function mergeInto(ends: MergeEnds): string {
+  return `Merge worktree ${ends.source} into ${ends.target}`;
+}
 
 /**
  * Whether a row is the one to offer those two on.

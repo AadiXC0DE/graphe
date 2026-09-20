@@ -1,0 +1,9 @@
+{
+  "name": "install-fails-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A package whose own install step fails.",
+  "scripts": {
+    "install": "node fail-install.mjs"
+  }
+}

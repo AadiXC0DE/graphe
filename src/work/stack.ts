@@ -87,10 +87,6 @@ export type Landing = (
 /** Every sentence this module can put in front of somebody, in one place so the
  *  vocabulary can be swept. */
 export const stackWords = {
-  /** The one press over the finished pieces. Says how many, because the whole
-   *  point is that it is not one of them. */
-  takeAll: (count: number): string =>
-    count === 2 ? 'Take both' : `Take all ${countWord(count)}`,
   /** Under the press, said once so nobody has to try it to find out. */
   what: 'They go into your project one after another, in the order they need to be in.',
   /** The disclosure beside it: the order itself, for anybody who wants it. */

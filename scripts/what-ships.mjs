@@ -38,6 +38,10 @@ export const RUNTIME = [
   // (src/agent/memory.ts), but esbuild must not try to bundle either one.
   '@huggingface/transformers',
   'onnxruntime-node',
+  // A native pty for the terminal pane, loaded lazily at runtime. Its prebuilt
+  // .node file and its spawn-helper cannot be read from inside an archive, so it
+  // travels unpacked.
+  'node-pty',
 ];
 
 /** In the tree, but never loaded, and large enough to be worth saying so.
@@ -105,10 +109,19 @@ async function resolveFrom(name, fromDir) {
 }
 
 /** Every package reachable from `roots`, walking runtime and optional
- *  dependencies. Optional ones count: they are installed and they are copied. */
+ *  dependencies. Optional ones count: they are installed and they are copied.
+ *
+ *  Two answers, because packaging needs both. The **names** are what the runtime
+ *  has to be able to resolve; the **folders** are where the project's own
+ *  node_modules keeps them, which is what an exclusion is written against.
+ *  They are not the same set: electron-builder 26 hoists a package nested under
+ *  another one up to the archive's top level, so `cross-spawn` — installed
+ *  inside `@earendil-works/pi-coding-agent` and nowhere else — has no folder of
+ *  its own here and still has to ship. */
 async function closureOf(roots) {
   const seen = new Set();
-  const found = new Set();
+  const names = new Set();
+  const folders = new Set();
   const queue = roots.map((name) => ({ name, from: root }));
   while (queue.length > 0) {
     const { name, from } = queue.pop();
@@ -117,20 +130,21 @@ async function closureOf(roots) {
     const at = await realpath(resolved.dir);
     if (seen.has(at)) continue;
     seen.add(at);
-    found.add(topLevelName(at));
+    names.add(resolved.manifest.name);
+    folders.add(topLevelName(at));
     const deps = {
       ...(resolved.manifest.dependencies ?? {}),
       ...(resolved.manifest.optionalDependencies ?? {}),
     };
     for (const dep of Object.keys(deps)) queue.push({ name: dep, from: resolved.dir });
   }
-  found.delete(null);
-  return found;
+  folders.delete(null);
+  return { names, folders };
 }
 
 /** The folder directly under the project's own node_modules that a resolved
  *  package lives in — `@scope/name` for a scoped one. Null for anything nested
- *  under another package, which travels with its parent and needs no entry. */
+ *  under another package, which that package's own copy ships with. */
 function topLevelName(at) {
   const rel = relative(join(root, 'node_modules'), at);
   if (rel.startsWith('..') || rel.includes(`node_modules${sep}`)) return null;
@@ -141,7 +155,8 @@ function topLevelName(at) {
 /** The packages electron-builder would copy: the production tree of package.json. */
 async function everythingItWouldCopy() {
   const manifest = await readJson(join(root, 'package.json'));
-  return closureOf(Object.keys(manifest?.dependencies ?? {}));
+  const { names } = await closureOf(Object.keys(manifest?.dependencies ?? {}));
+  return names;
 }
 
 /** Drop anything on the never-loaded list, by name or by scope. */
@@ -172,9 +187,15 @@ async function trimmings() {
  *  Exclusions rather than an allowlist on purpose. A pattern that says what to
  *  drop can only ever drop too little — the app still works and the download is
  *  bigger than it needed to be. One that says what to keep can drop too much,
- *  and the symptom of that arrives on somebody else's laptop. */
+ *  and the symptom of that arrives on somebody else's laptop.
+ *
+ *  Keyed by name, not by where the project's node_modules happens to keep a
+ *  package: an exclusion is written as a name, and electron-builder 26 gives a
+ *  package it hoists the top-level copy of the name. Matching by folder dropped
+ *  the hoisted copy of everything installed only under another package. */
 export async function leaveOut() {
-  const carried = withoutTheDeadWeight(await closureOf(RUNTIME.filter((name) => name !== 'electron')));
+  const { names } = await closureOf(RUNTIME.filter((name) => name !== 'electron'));
+  const carried = withoutTheDeadWeight(names);
   const all = await everythingItWouldCopy();
   const whole = [...all]
     .filter((name) => !carried.has(name))
@@ -185,8 +206,39 @@ export async function leaveOut() {
 
 /** What is left in, for anything that wants to check the sums. */
 export async function carriedAlong() {
-  const carried = withoutTheDeadWeight(await closureOf(RUNTIME.filter((name) => name !== 'electron')));
-  return [...carried].sort();
+  const { names } = await closureOf(RUNTIME.filter((name) => name !== 'electron'));
+  return [...withoutTheDeadWeight(names)].sort();
+}
+
+/**
+ * The packages that must sit outside the archive beside the unpacked ones.
+ *
+ * A module unpacked to disk resolves `node_modules` by walking up from its own
+ * real path, so it can never reach a dependency that is inside the asar. Pi is
+ * unpacked on purpose — its entry is imported dynamically and its prebuilt
+ * binaries cannot load from the archive at all — so everything in its runtime
+ * closure has to be unpacked with it, or the import dies on the first missing
+ * package name rather than on anything that looks like our mistake.
+ *
+ * The whole carried set rather than Pi's dependencies read off its manifest:
+ * the tree is hoisted, so the package that actually needs `partial-json` may
+ * not be the one that declares it. Naming every one is a bigger download than
+ * naming the three that happen to be missing today, and it is the version that
+ * cannot rot when somebody else's manifest changes.
+ */
+export async function unpackedAlong() {
+  const carried = await carriedAlong();
+  // node-pty is in the carried set and unpacks with the rest; it is named here
+  // as well because its prebuilt .node files cannot be loaded from an archive
+  // at all, so a day when it falls out of the closure is a day the terminal
+  // stops working in the bundle.
+  return [...new Set([...carried, 'node-pty'])].sort();
+}
+
+/** electron-builder `asarUnpack` entries, from the same list. */
+export async function unpackRules() {
+  const names = await unpackedAlong();
+  return names.flatMap((name) => [`node_modules/${name}`, `node_modules/${name}/**/*`]);
 }
 
 /** Chromium's own interface, in 55 languages.

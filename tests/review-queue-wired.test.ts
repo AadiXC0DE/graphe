@@ -9,11 +9,12 @@
  *
  * The carry itself is real git: a per-file decision is only worth anything if
  * the file it names is the only one that moves.
+ *
+ *  Source text, not behaviour: the settle-to-list join and the review doors across the shell boundary; no behavioural test can reach it — the handlers are in electron/main.ts and App.tsx, which nothing imports.
  */
 
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,7 +72,6 @@ function entry(over: Partial<ReviewEntry> = {}): ReviewEntry {
     title: 'Make the header sticky',
     address: 'a1',
     branch: 'graphe/conversation-2',
-    mirror: false,
     files: [
       { path: 'src/Header.tsx', added: 12, removed: 3 },
       { path: 'src/Header.css', added: 4, removed: 0 },
@@ -85,32 +85,15 @@ function entry(over: Partial<ReviewEntry> = {}): ReviewEntry {
 /* -------------------------------------------------------------------------- */
 
 describe('an entry arrives instead of the files', () => {
-  it('notes the work on the list at every settle, whether or not it is mirroring', () => {
-    // The one call that puts an entry on the list, and it is made before the
-    // decision about carrying anything.
-    expect(MAIN).toContain('void noteForReview(path, held, address, holding, mirroring)');
-  });
-
-  it('carries nothing home when the card is not mirroring', () => {
+  it('notes the work on the list at every settle, and carries nothing home', () => {
     const settle = MAIN.slice(MAIN.indexOf('function settleUpTheJob'));
-    const body = settle.slice(0, settle.indexOf('\n}\n'));
-    // The early return is the whole change: with mirror off, nothing below it
-    // runs, and everything below it is the old apply.
-    const noted = body.indexOf('noteForReview');
-    const stop = body.indexOf('if (!mirroring) {');
-    const carry = body.indexOf('bringBack(gitRunHereFor()');
-    expect(noted).toBeGreaterThan(-1);
-    expect(stop).toBeGreaterThan(noted);
-    expect(carry).toBeGreaterThan(stop);
-  });
-
-  it('keeps live mirror as the old behaviour, and only for the conversation in front', () => {
-    const settle = MAIN.slice(MAIN.indexOf('function settleUpTheJob'));
-    expect(settle).toContain('held.mirroring.has(address)');
-    expect(settle).toContain("held.sessions.current?.path === address");
-    // Unchanged below the gate: the same version-first, same-line, bring-back.
-    expect(settle).toContain('beforeBringingWorkIn');
-    expect(settle).toContain('onTheSameLine(path, checkout.folder)');
+    const body = settle.slice(0, settle.indexOf('\n}\n') + 1);
+    // The one call that puts an entry on the list.
+    expect(body).toContain('void noteForReview(path, held, address, holding)');
+    // And the whole of the rest: a finished turn never writes to the person's
+    // folder. Bringing work in happens from the review list, on a press.
+    expect(body).not.toContain('bringBack(');
+    expect(body).not.toContain('mirroring');
   });
 
   it('never notes work for a conversation being landed or dropped', () => {
@@ -243,7 +226,7 @@ describe('a pull request from an entry', () => {
   it('describes what it actually carries, not what the entry started with', () => {
     const one = entry();
     const held = chooseFile([one], 'a1', 'src/Header.css', 'keep mine')[0] as ReviewEntry;
-    const said = prBody({ ...held, branch: one.branch, mirror: false });
+    const said = prBody({ ...held, branch: one.branch });
     expect(said).toContain('src/Header.tsx');
     expect(said).not.toContain('src/Header.css');
   });
@@ -259,7 +242,6 @@ describe('the bridge is whole', () => {
     'reviewDecide',
     'reviewLand',
     'reviewPr',
-    'reviewMirror',
     'conflictLook',
     'conflictSettle',
   ];
@@ -278,7 +260,9 @@ describe('the bridge is whole', () => {
   });
 
   it('opens the screen from the palette and from above the composer', () => {
-    expect(APP).toContain("id: 'review-queue', name: 'Review finished work'");
+    // One name for one thing: Review is reviewing a finished change, and the
+    // shelf, the palette and the screen all say it.
+    expect(APP).toContain("id: 'review-queue', name: 'Review'");
     expect(APP).toContain('className="reviewband"');
     expect(APP).toContain('waitingToReview(reviewQ)');
   });
@@ -300,6 +284,5 @@ describe('the bridge is whole', () => {
   it('remembers the list and the mirroring cards between sittings', () => {
     expect(MAIN).toContain('function reviewIndexFile(');
     expect(MAIN).toContain('const restoredReview = await readReviewQueue(path);');
-    expect(existsSync(fileURLToPath(new URL('../src/components/ReviewQueue.tsx', import.meta.url)))).toBe(true);
   });
 });

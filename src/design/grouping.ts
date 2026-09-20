@@ -1,16 +1,12 @@
-/** Which shelf of the styles panel a value belongs on.
+/** Which shelf of the tokens band a value belongs on.
  *
  * Sorting, naming and ordering only — nothing here renders, reads a disk or
- * holds state, so the shape of the panel can be tested without a screen.
+ * holds state, so the shape of the band can be tested without a screen.
  */
 
 import type { StyleToken } from '../lib/ipc';
 
 export type GroupId = 'colour' | 'type' | 'spacing' | 'corners' | 'shadow' | 'size' | 'other';
-
-/** How a value is changed: a picker, a slider along the project's own scale, or
- *  nothing at all for something that can only be looked at. */
-export type Control = 'colour' | 'steps' | 'none';
 
 export type StyleGroup = {
   id: GroupId;
@@ -32,11 +28,11 @@ const SHELVES: readonly { id: GroupId; title: string }[] = [
   { id: 'other', title: 'Other' },
 ];
 
-export const GROUP_ORDER: readonly GroupId[] = SHELVES.map((shelf) => shelf.id);
-
 /** Long enough that a real palette arrives whole, short enough that a generated
- *  file cannot turn the panel into a scroll. */
+ *  file cannot turn the band into a scroll. */
 export const MOST_IN_A_GROUP = 36;
+
+export const GROUP_ORDER: readonly GroupId[] = SHELVES.map((shelf) => shelf.id);
 
 /* -------------------------------------------------------------------- words */
 
@@ -105,17 +101,13 @@ export function specimenSize(value: string, smallest = 9, biggest = 34): number 
 
 /* ---------------------------------------------------------- classification */
 
-export function controlFor(token: StyleToken): Control {
-  if (token.kind === 'colour') return 'colour';
-  return token.steps.length > 0 ? 'steps' : 'none';
-}
-
-/** A shadow is worth drawing even though no slider can move it; a font stack
- *  with nothing to nudge is still the answer to “what type is this?” and must
- *  be shown, not hidden — the design system is where somebody comes to read
- *  fonts. Everything else a slider cannot move, we do not need. */
+/** A font stack has no size and is still the answer to "what type is this?",
+ *  and a duration or a grid is a value somebody wrote in the file on purpose
+ *  and will come here to look up. What is left out is prose that happens to
+ *  live in a custom property: it is not part of a design system. */
 export function canShow(token: StyleToken): boolean {
-  if (token.kind === 'shadow' || controlFor(token) !== 'none') return true;
+  if (token.kind !== 'other') return true;
+  if (measure(token.value) !== null) return true;
   return wordsIn(token.name).some((word) => TEXT_WORDS.has(word));
 }
 
@@ -154,11 +146,11 @@ function climbing(tokens: readonly StyleToken[]): readonly StyleToken[] {
 /* ---------------------------------------------------------------- grouping */
 
 /**
- * Every value the panel can offer, on its shelf.
+ * Every value the band can offer, on its shelf.
  *
  * A name declared more than once — the same colour restated per theme — keeps
- * its first declaration, which is the one a nudge writes back to. Empty shelves
- * do not come back at all.
+ * its first declaration, which is the one written in the file a reader would
+ * open. Empty shelves do not come back at all.
  */
 export function groupTokens(
   tokens: readonly StyleToken[],
@@ -190,9 +182,4 @@ export function groupTokens(
     });
   }
   return groups;
-}
-
-/** How many the panel would draw in total, cap and all. */
-export function countShown(groups: readonly StyleGroup[]): number {
-  return groups.reduce((sum, group) => sum + group.tokens.length, 0);
 }

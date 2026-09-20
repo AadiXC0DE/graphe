@@ -79,8 +79,8 @@ describe('S-01 the translation', () => {
       { type: 'tool-start', call: { id: 'call-1', name: 'edit', input: { file: 'index.html' } } },
       { type: 'message-end' },
       // Nothing in this transcript ever came back to say how the edit went, so
-      // the replay closes it rather than leaving it turning.
-      { type: 'tool-end', id: 'call-1', ok: false },
+      // the replay closes it as interrupted rather than leaving it turning.
+      { type: 'tool-end', id: 'call-1', ok: false, ending: 'interrupted' },
     ]);
   });
 
@@ -89,7 +89,7 @@ describe('S-01 the translation', () => {
     const failed = { type: 'message', message: { role: 'toolResult', toolCallId: 'call-2', isError: true } };
     expect(eventsFromEntries([ok, failed])).toEqual([
       { type: 'tool-end', id: 'call-1', ok: true },
-      { type: 'tool-end', id: 'call-2', ok: false },
+      { type: 'tool-end', id: 'call-2', ok: false, ending: 'failed' },
     ]);
   });
 
@@ -103,7 +103,7 @@ describe('S-01 the translation', () => {
     };
     expect(eventsFromEntries([entry])).toEqual([
       { type: 'tool-start', call: { id: 'call-1', name: 'edit', input: {} } },
-      { type: 'tool-end', id: 'call-1', ok: false },
+      { type: 'tool-end', id: 'call-1', ok: false, ending: 'interrupted' },
     ]);
   });
 
@@ -124,12 +124,13 @@ describe('S-01 the translation', () => {
     const ends = eventsFromEntries(entries).filter((one) => one.type === 'tool-end');
     expect(ends).toEqual([
       { type: 'tool-end', id: 'call-1', ok: true },
-      { type: 'tool-end', id: 'call-2', ok: false },
+      { type: 'tool-end', id: 'call-2', ok: false, ending: 'interrupted' },
     ]);
   });
 
-  it('does not replay a tidy — there is no honest place to put it', () => {
-    expect(eventsFromEntries([{ type: 'compaction' }])).toEqual([]);
+  it('replays a tidy where it happened, as the pair the live feed drew', () => {
+    const tidied = { type: 'compaction', summary: 'The first half, in short.', tokensBefore: 120_000 };
+    expect(eventsFromEntries([tidied])).toEqual([{ type: 'tidying' }, { type: 'tidied', ok: true }]);
   });
 
   it('does not replay a failure as a live trouble card', () => {
@@ -175,6 +176,8 @@ describe('S-01 the translation', () => {
       'user-said',
       'message-delta',
       'message-end',
+      'tidying',
+      'tidied',
       'user-said',
     ]);
   });
@@ -260,7 +263,9 @@ describe('S-02 the journey back onto the desk', () => {
         message: { role: 'assistant', content: [], errorMessage: 'The connection dropped.' },
       },
     ]);
-    expect(turns.map((turn) => turn.kind)).toEqual(['said']);
+    // No trouble card: the failure is last week's and nothing can be done about
+    // it now. What is drawn is where the conversation was tidied.
+    expect(turns.map((turn) => turn.kind)).toEqual(['said', 'tidying']);
   });
 
   it('an empty transcript is an empty desk', () => {

@@ -11,8 +11,10 @@
  * is deliberately mean. A check recorded as failing only holds work up, and
  * somebody can look and see why. A check recorded as passing *unblocks* work
  * against a standard nobody met, which is the whole reason the standard was
- * written down. So a reviewer that never answered, a reviewer that hedged, and
- * a reviewer that wrote an essay all count as not passing.
+ *  written down. So a reviewer that never answered, a reviewer that hedged, and
+ *  a reviewer that wrote an essay all count as not passing.
+ *
+ *  Source text, not behaviour: the session handing one desk to the rules and to run_checks; no behavioural test can reach it — the wiring is a closure needing a model.
  */
 
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';

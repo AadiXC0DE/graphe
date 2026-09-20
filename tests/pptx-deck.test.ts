@@ -5,18 +5,24 @@
  * skill library, every step of the work has to get past the Guard without a
  * wall, and the file that comes out has to be handed over as a deck rather than
  * as bytes nobody can place.
+ *
+ *  Source text, not behaviour: where the shell tells the skill reader the app's own skills live; no behavioural test can reach it — electron/main.ts cannot be imported.
  */
 
 import { readFileSync } from 'node:fs';
-import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { availableSkills } from '../src/agent/pi/skills';
+import { availableSkills, skillsShippedWith } from '../src/agent/pi/skills';
 import { evaluate } from '../src/agent/guard/policy';
 import { serveFolder } from '../src/preview/serve';
+
+/* The packaging config works out what ships by walking node_modules, which is
+   over ten seconds on a busy machine. */
+vi.setConfig({ testTimeout: 30_000 });
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SKILL = join(here, '..', 'skills', 'pptx', 'SKILL.md');
@@ -181,19 +187,36 @@ describe('D-03 what comes out is handed over as itself', () => {
    with it lives beside the source in a checkout and beside the licences in a
    packaged app, and neither is a place the reader looked before. */
 describe('D-04 the app can actually find what it brought with it', () => {
-  const skills = readFileSync(new URL('../src/agent/pi/skills.ts', import.meta.url), 'utf8');
   const shell = readFileSync(new URL('../electron/main.ts', import.meta.url), 'utf8');
 
-  it('reads a root for the skills that ship with it', () => {
-    expect(skills).toContain('export function skillsShippedWith');
-    expect(skills).toContain("if (shippedWith !== '') roots.push({ path: shippedWith, source: 'global' })");
+  /** A folder holding a skills folder with one deck skill in it. */
+  async function deckSkill(description: string): Promise<string> {
+    const folder = await newFolder();
+    await mkdir(join(folder, 'skills', 'pptx'), { recursive: true });
+    await writeFile(
+      join(folder, 'skills', 'pptx', 'SKILL.md'),
+      `---\nname: pptx\ndescription: ${description}\n---\n\nMake a deck.\n`,
+      'utf8',
+    );
+    return folder;
+  }
+
+  it('reads a root for the skills that ship with it', async () => {
+    const shipped = join(await deckSkill('Slides, in the project’s own look.'), 'skills');
+    skillsShippedWith(shipped);
+    const found = await availableSkills(null, await newFolder());
+    expect(
+      found.some((skill) => skill.path.startsWith(shipped)),
+      'nothing from the shipped root was read',
+    ).toBe(true);
   });
 
-  it('lets anything somebody installed themselves win over it', () => {
-    const own = skills.indexOf("path: join(homedir(), '.agents', 'skills')");
-    const shipped = skills.indexOf("path: shippedWith");
-    expect(own).toBeGreaterThan(-1);
-    expect(shipped).toBeGreaterThan(own);
+  it('lets anything somebody installed themselves win over it', async () => {
+    const own = await deckSkill('Installed by hand.');
+    skillsShippedWith(join(await deckSkill('Shipped with the app.'), 'skills'));
+    // The same name in both: the one found first keeps the plain handle.
+    const deck = (await availableSkills(null, own)).find((skill) => skill.handle === 'pptx');
+    expect(deck?.description).toBe('Installed by hand.');
   });
 
   it('is told where they are, in a checkout and in a packaged app', () => {

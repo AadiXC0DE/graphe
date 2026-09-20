@@ -29,6 +29,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
+import * as asar from '@electron/asar';
+
 const run = promisify(execFile);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const releaseDir = join(root, 'release');
@@ -52,6 +54,72 @@ async function sizeOf(path) {
   const { stdout } = await run('du', ['-sk', path]);
   const kb = Number.parseInt(stdout.trim().split(/\s+/)[0] ?? '0', 10);
   return `${(kb / 1024).toFixed(0)} MB`;
+}
+
+/** Every package reachable from `roots` inside an asar, and anything it declares
+ *  but cannot find. Node's own rule: a package resolves in the nearest
+ *  `node_modules` at or above the dependent, so a hoisted copy at the archive's
+ *  top level satisfies a dependency declared deep inside Pi.
+ *
+ *  Read from the archive listing rather than by walking `app.asar.unpacked`,
+ *  which is why this works for both architectures on a one-architecture machine.
+ *  Manifest bytes come through `extractFile`, read only for the packages the
+ *  walk reaches. */
+async function reachableIn(archive, roots) {
+  const members = new Set(asar.listPackage(archive));
+  const manifests = new Map();
+  const readManifest = async (dir) => {
+    const key = `${dir}/package.json`;
+    if (!manifests.has(key)) {
+      let parsed = null;
+      try {
+        // `extractFile` takes the member path without its leading slash, while
+        // `listPackage` hands them back with one.
+        parsed = JSON.parse((await asar.extractFile(archive, key.slice(1))).toString('utf8'));
+      } catch {
+        parsed = null;
+      }
+      manifests.set(key, parsed);
+    }
+    return manifests.get(key);
+  };
+
+  const found = new Set();
+  const missing = new Set();
+  // Roots and required dependencies have to resolve. An optional dependency is
+  // allowed to be absent: those are per-platform binaries, and a darwin bundle
+  // has no use for @esbuild/win32-x64.
+  const queue = roots.map((name) => ({ name, from: '', required: true }));
+  while (queue.length > 0) {
+    const { name, from, required } = queue.pop();
+    // Up through node_modules folders, as Node does.
+    let at = null;
+    for (let dir = from; ; ) {
+      const candidate = dir === '' ? `/node_modules/${name}` : `${dir}/node_modules/${name}`;
+      if (members.has(candidate)) {
+        at = candidate;
+        break;
+      }
+      if (dir === '') break;
+      const cut = dir.lastIndexOf('/node_modules');
+      dir = cut === -1 ? '' : dir.slice(0, cut);
+    }
+    if (at === null) {
+      if (required) missing.add(name);
+      continue;
+    }
+    if (found.has(at)) continue;
+    found.add(at);
+    const manifest = await readManifest(at);
+    if (manifest === null) continue;
+    for (const dep of Object.keys(manifest.dependencies ?? {})) {
+      queue.push({ name: dep, from: at, required: true });
+    }
+    for (const dep of Object.keys(manifest.optionalDependencies ?? {})) {
+      queue.push({ name: dep, from: at, required: false });
+    }
+  }
+  return { found, missing };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -84,16 +152,41 @@ for (const bundle of bundles) {
     // Its own dependency tree, not just the entry package. Pi is useless
     // without pi-agent-core and undici, and "the folder is there" is not the
     // same claim as "the tree is complete".
-    const siblings = await readdir(join(app, 'Contents/Resources/app.asar.unpacked/node_modules'));
-    if (!siblings.includes('@earendil-works')) fault('the @earendil-works scope is missing');
-    const nested = await readdir(join(piDir, 'node_modules')).catch(() => []);
-    if (nested.length < 20) {
-      fault(`Pi's own dependencies look incomplete — ${nested.length} packages under it`);
+    //
+    // Asserted as reachability rather than as a count of what sits under Pi.
+    // electron-builder 26 hoists a nested package to the archive's top level, so
+    // a bundle that satisfies "everything Pi declares resolves" can have nothing
+    // at all beneath Pi — and a bundle that had lost cross-spawn, debug, ms and
+    // which still had two folders there to count.
+    const { found, missing } = await reachableIn(join(app, 'Contents/Resources/app.asar'), [PI]);
+    if (missing.size > 0) {
+      fault(`Pi cannot resolve ${[...missing].join(', ')} inside the bundle`);
     } else {
-      pass(`Pi's dependency tree came with it — ${nested.length} packages`);
+      pass(`Pi's dependency tree came with it — ${found.size} packages`);
     }
   } else {
     fault(`${PI} is NOT in the bundle — the app cannot think`);
+  }
+
+  /* The terminal's pty helper: unpacked, and executable. The execute bit is the
+     whole reason this check exists — npm can install the prebuilt binary without
+     it, and a terminal that silently will not start is the kind of thing nobody
+     notices until they need it. */
+  const ptyDir = join(app, 'Contents/Resources/app.asar.unpacked/node_modules/node-pty');
+  const helpers = join(ptyDir, 'prebuilds');
+  if (await exists(join(ptyDir, 'package.json'))) {
+    const arch = `darwin-${bundle.arch}`;
+    const helper = join(helpers, arch, 'spawn-helper');
+    if (!(await exists(helper))) {
+      fault(`node-pty is in the bundle but ${arch}/spawn-helper is not`);
+    } else {
+      const mode = (await stat(helper)).mode & 0o111;
+      if (mode === 0) fault('node-pty spawn-helper is not executable — the terminal will not start');
+      else pass('node-pty is in the bundle with an executable helper');
+    }
+  } else {
+    // Not a fault while the app ships without it: the terminal says so itself.
+    console.log('  note: node-pty is not in this bundle, so the terminal is unavailable');
   }
 
   /* The window's own build. */
@@ -171,6 +264,45 @@ for (const bundle of bundles) {
       else fault(`the memory store opened but answered oddly — ${stdout.trim()}`);
     } catch (cause) {
       fault(`the memory store does not open inside the bundle: ${String(cause).split('\n')[0]}`);
+    }
+
+    /* The child runtime, which a conversation is hosted in once the switch is
+       on. Two claims, and the second is the one that costs an afternoon when it
+       is false: the file is *outside* the archive — an ESM entry Node has to
+       import, which is why `asarUnpack` names it — and the real binary under the
+       real interpreter starts it far enough to say it is ready. A worker that
+       cannot say that is a conversation that cannot open, and nothing else in
+       the pipeline notices: the app installs, opens, and fails on the first
+       message somebody sends. */
+    const child = join(app, 'Contents/Resources/app.asar.unpacked/dist-electron/runtime-child.mjs');
+    if (!(await exists(child))) {
+      fault('dist-electron/runtime-child.mjs is not unpacked from the archive — no conversation can start one');
+    } else {
+      pass('the child runtime is unpacked, where an ESM entry can be imported');
+      /* Pi's entry, handed over the way the shell hands it over. `startRuntime`
+         sets these three, so this is the same start rather than a lookalike. */
+      const ready = [
+        "const { spawn } = require('node:child_process');",
+        `const child = spawn(process.execPath, [${JSON.stringify(child)}, '--no-extensions', '--no-approve'], {`,
+        "  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', GRAPHE_RUNTIME_NONCE: 'verify',",
+        `    GRAPHE_RUNTIME_PI_ENTRY: ${JSON.stringify(join(app, 'Contents/Resources/app.asar.unpacked/node_modules', PI, 'dist/index.js'))} },`,
+        "  stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],",
+        '});',
+        "let said = '';",
+        'child.stdio[3].setEncoding("utf8");',
+        `child.stdio[3].on('data', (c) => { said += c; if (said.includes('"ready"')) { console.log('ready:' + said.trim()); child.kill('SIGKILL'); } });`,
+        "child.on('exit', () => { if (!said.includes('\"ready\"')) { console.error('no ready line'); process.exit(1); } });",
+      ].join('\n');
+      try {
+        const { stdout } = await run(binary, ['-e', ready], {
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+          timeout: 90_000,
+        });
+        if (/"type":"ready"/.test(stdout)) pass('the child runtime starts in the bundle and says it is ready');
+        else fault(`the child runtime started but never said it was ready — ${stdout.trim()}`);
+      } catch (cause) {
+        fault(`the child runtime does not start in the bundle: ${String(cause).split('\n')[0]}`);
+      }
     }
   }
 }

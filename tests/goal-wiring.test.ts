@@ -3,6 +3,8 @@
  * The window saved and loaded it with no address; the authority read it with
  * one. Both worked, both were tested, and they were never the same file, so
  * Goal Mode ran one round and rested. These are the joins.
+ *
+ *  Source text, not behaviour: the shell's goal handlers and the window hook that names a conversation per call; no behavioural test can reach it — the real electron/renderer seam is what the harness replaces.
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';

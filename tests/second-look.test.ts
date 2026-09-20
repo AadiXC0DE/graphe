@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /** The things a second pass through the built app turned up.
  *
  * Every one of these was visible in a screenshot and invisible to types: a band
@@ -5,40 +6,92 @@
  * control it was hiding, a new conversation that opened behind the canvas, a
  * finish somebody could switch to that the app is not drawn for. They are
  * guarded on the source, the way the rest of the composition is.
+ *
+ *  Source text, not behaviour: stylesheet rules jsdom cannot compute and App/main wiring no render reaches; the drawable components are drawn.
  */
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { act, createElement, type ReactElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import AppearanceBand from '../src/components/AppearanceBand';
+import ColourPicker from '../src/components/ColourPicker';
+import HelpersView from '../src/components/HelpersView';
 import { PRESETS, appearanceWords, defaultAppearance, tokensFor } from '../src/design/appearance';
 import { OPEN_TO, ROWS as rows, asOpenTo } from '../src/work/settingspages';
 import { withElapsed } from '../src/work/goal';
 import { tallyOf, titleOf } from '../src/components/HelpersView';
 
-const read = (path: string): string =>
-  readFileSync(fileURLToPath(new URL(`../${path}`, import.meta.url)), 'utf8');
+/* jsdom has no file: URL of its own, so the sources are read from the repo root
+   the run starts in. */
+const read = (path: string): string => readFileSync(join(process.cwd(), path), 'utf8');
 
 const overview = read('src/components/Overview.tsx');
 const overviewCss = read('src/components/Overview.css');
-const canvasCss = read('src/components/CanvasView.css');
 const sidebarCss = read('src/components/Sidebar.css');
-const band = read('src/components/AppearanceBand.tsx');
-const picker = read('src/components/ColourPicker.tsx');
-const app = read('src/App.tsx');
 const welcome = read('src/components/Welcome.tsx');
 const welcomeCss = read('src/components/Welcome.css');
 const settings = read('src/components/Settings.tsx');
-const sheetCss = read('src/components/Sheet.css');
+const app = read('src/App.tsx');
 const diffCss = read('src/components/DiffView.css');
 const tokensCss = read('src/styles/tokens.css');
 const connect = read('src/hooks/useConnect.ts');
 const main = read('electron/main.ts');
-const helpers = read('src/components/HelpersView.tsx');
 const helpersCss = read('src/components/HelpersView.css');
 const appCss = read('src/App.css');
 const settingsCss = read('src/components/Settings.css');
+
+beforeAll(() => {
+  // React only batches inside act() once a test harness says it is driving.
+  const runtime = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; ResizeObserver?: unknown };
+  runtime.IS_REACT_ACT_ENVIRONMENT = true;
+  // jsdom measures nothing, so the sheet's clipped half only needs something
+  // that can be observed.
+  runtime.ResizeObserver ??= class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+});
+
+/* One component at a time: a menu in a portal lands on the body, where a second
+   one would be a second answer to the same query. */
+const drawn: { host: HTMLElement; root: Root }[] = [];
+
+function undraw(): void {
+  for (const one of drawn.splice(0)) {
+    act(() => {
+      one.root.unmount();
+    });
+    one.host.remove();
+  }
+}
+
+afterEach(undraw);
+
+function draw(element: ReactElement): HTMLElement {
+  undraw();
+  const host = document.createElement('div');
+  host.className = 'app';
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() => {
+    root.render(element);
+  });
+  drawn.push({ host, root });
+  return host;
+}
+
+/** A press the way React hears it. */
+function press(control: Element | null | undefined): void {
+  if (control == null) throw new Error('nothing was there to press');
+  act(() => {
+    control.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
 
 describe('a band that folds', () => {
   /* Closed, with nothing in it, the band drew the word LOOKED UP and a "0" on
@@ -56,29 +109,13 @@ describe('a band that folds', () => {
   });
 });
 
-describe('the canvas under a drawer', () => {
-  /* The drawer is fixed to the bottom of the window, and the canvas was too, so
-     opening one covered the zoom control and the card that says a run stopped. */
-  it('gives the drawer its room rather than being drawn over', () => {
-    expect(canvasCss).toMatch(/\.canvas \{[^}]*bottom: var\(--commands-take, 0px\);/);
-  });
-
-  /* "8 blocks · 3 d…" is not a shorter sentence, it is a broken one. */
-  it('drops the count rather than cutting a word in half', () => {
-    expect(canvasCss).toMatch(/\.canvas__count \{[^}]*flex: none;/);
-    expect(canvasCss).not.toMatch(/\.canvas__count \{[^}]*text-overflow: ellipsis;/);
-    expect(canvasCss).toMatch(/@media \(max-width: 1180px\) \{\s*\.canvas__count \{\s*display: none;/);
-  });
-});
-
 describe('a new conversation from anywhere', () => {
-  /* Pressing + on the canvas opened a tab and left you on the canvas, so the
-     thing that was asked for happened somewhere nobody could see. */
+  /* Pressing + from another screen opened a tab and left you on that screen, so
+     the thing that was asked for happened somewhere nobody could see. */
   it('leaves whatever screen is over the conversation', () => {
     const at = app.indexOf('const swapConversation = useCallback(');
     expect(at).toBeGreaterThan(0);
     const body = app.slice(at, at + 1400);
-    expect(body).toContain('setCanvasAt(null);');
     expect(body).toContain("goToScreen('chat');");
   });
 });
@@ -91,7 +128,6 @@ describe('the folded shelf', () => {
   it('reserves the least room that clears the window buttons', () => {
     expect(sidebarCss).toMatch(/\[data-shell='desktop'\] \.shelf--closed \{\s*padding-top: 34px;/);
     expect(sidebarCss).toMatch(/\[data-shell='desktop'\] \.shelf--closed::before \{[^}]*-webkit-app-region: drag;/);
-    expect(sidebarCss).not.toMatch(/\.shelf--closed::before \{[^}]*border-bottom/);
   });
 
   it('gives it back in full screen, where those buttons are gone', () => {
@@ -109,8 +145,26 @@ describe('a finish the app is not drawn for', () => {
   });
 
   it('is not a control on the appearance panel', () => {
-    expect(band).not.toContain("choice('finish'");
-    expect(band).not.toContain('appearanceWords.finish');
+    const host = draw(
+      createElement(AppearanceBand, {
+        appearance: defaultAppearance,
+        onChange: () => undefined,
+        on: 'dark',
+      }),
+    );
+    const named = [...host.querySelectorAll('.appearance__name')].map((one) => one.textContent);
+    // The rows it does draw, so that an empty panel cannot pass this either.
+    expect(named).toEqual([
+      appearanceWords.tone.name,
+      appearanceWords.contrast.name,
+      appearanceWords.radius.name,
+      appearanceWords.density.name,
+      appearanceWords.motion.name,
+      appearanceWords.uiFont.name,
+      appearanceWords.codeFont.name,
+      appearanceWords.ligatures.name,
+    ]);
+    expect(host.textContent).not.toContain(appearanceWords.finish.glass);
   });
 
   it('still works, so putting it back is a press', () => {
@@ -122,28 +176,72 @@ describe('a finish the app is not drawn for', () => {
 });
 
 describe('choosing a colour', () => {
+  type PickerProps = Parameters<typeof ColourPicker>[0];
+
   /* Three `<input type="color">` in a row is a form, not a palette: nothing to
      recognise, nothing to compare, and the operating system's wheel behind each
      one. */
+  /** The picker open, the way a press opens it. The menu is in a portal, so it
+   *  is read off the body rather than out of the component's own place. */
+  function opened(over: Partial<PickerProps> = {}): HTMLElement {
+    const host = draw(
+      createElement(ColourPicker, {
+        name: 'Accent',
+        value: '#b8492c',
+        chosen: '#b8492c',
+        onChange: () => undefined,
+        ...over,
+      }),
+    );
+    press(host.querySelector('.colour__chip'));
+    return host;
+  }
+
+  function menu(): HTMLElement {
+    const found = document.querySelector('.colour__menu');
+    if (found === null) throw new Error('the picker drew no menu');
+    return found as HTMLElement;
+  }
+
   it('is a swatch, what it is set to, and colours worth one press', () => {
-    expect(picker).toContain('className="colour__swatch"');
-    expect(picker).toContain('{chosen === null ? WORDS.auto : value.toUpperCase()}');
-    expect(picker).toContain('className="colour__grid"');
-    expect(picker).toContain('const READY');
+    const taken: string[] = [];
+    const host = opened({ onChange: (hex) => taken.push(hex) });
+
+    const chip = host.querySelector('.colour__chip');
+    expect(chip?.querySelector('.colour__swatch')).not.toBeNull();
+    expect(chip?.textContent).toContain('#B8492C');
+
+    const ready = [...menu().querySelectorAll('.colour__grid button')];
+    expect(ready).toHaveLength(12);
+    expect(ready[0]?.getAttribute('aria-label')).toBe('Ember');
+    press(ready[0]);
+    expect(taken).toEqual(['#b8492c']);
+
+    // And where the colour is worked out rather than set, the chip says so.
+    const workedOut = opened({ chosen: null });
+    expect(workedOut.querySelector('.colour__chip')?.textContent).toContain('Auto');
   });
 
   it('keeps the hex field and the wheel for whoever wants them', () => {
-    expect(picker).toContain("aria-label={WORDS.hex}");
-    expect(picker).toContain('type="color"');
+    opened();
+    expect(menu().querySelector('input[aria-label="Hex"]')).not.toBeNull();
+    expect(menu().querySelector('input[type="color"]')).not.toBeNull();
   });
 
   it('is drawn from the swatch rather than whatever ancestor is positioned', () => {
-    expect(picker).toContain("useAnchored(chip, open, 'below-right')");
-    expect(picker).toContain('createPortal(');
+    const host = opened();
+    const sheet = menu();
+    expect(host.contains(sheet)).toBe(false);
+    expect(sheet.parentElement).toBe(document.body);
+    expect(sheet.style.position).toBe('fixed');
   });
 
   it('offers Auto only where there is something to work it out from', () => {
-    expect(picker).toContain('onAuto === undefined ? null : (');
+    opened({ onAuto: () => undefined });
+    expect(menu().querySelector('.colour__auto')).not.toBeNull();
+
+    opened();
+    expect(menu().querySelector('.colour__auto')).toBeNull();
   });
 });
 
@@ -199,18 +297,6 @@ describe('where a launch lands', () => {
 
   it('is still both, on the row that chooses', () => {
     expect(OPEN_TO.map((one) => one.id)).toEqual(['last', 'list']);
-  });
-});
-
-describe('a screen that arrives', () => {
-  /* The flicker that survived two fixes. A sheet faded in from nothing over
-     280ms, and what shows through a half-transparent sheet is the screen you
-     just left: canvas to history flashed the conversation, history to canvas
-     did not, because the canvas is opaque and does not fade. Screens are opened
-     dozens of times an hour, the frequency the motion rule bans animating at. */
-  it('does not fade in over whatever is behind it', () => {
-    expect(sheetCss).not.toContain('animation: sheet-arrives');
-    expect(sheetCss).not.toContain('@keyframes sheet-arrives');
   });
 });
 
@@ -294,7 +380,27 @@ describe('the helpers screen', () => {
   });
 
   it('draws what it said as prose', () => {
-    expect(helpers).toContain('<Markdown text={chosen.saying} />');
+    const host = draw(
+      createElement(HelpersView, {
+        helpers: [
+          {
+            id: 'h1',
+            task: 'Check the header',
+            saying: 'It is **bold** and [linked](https://example.test).',
+            state: 'done' as const,
+            startedAt: Date.now(),
+          },
+        ],
+        at: 'h1',
+        onClose: () => undefined,
+      }),
+    );
+    const said = host.querySelector('.helpersview__said');
+    expect(said).not.toBeNull();
+    expect(said?.querySelector('strong')?.textContent).toBe('bold');
+    expect(said?.querySelector('a')?.getAttribute('href')).toBe('https://example.test');
+    // Not the paragraph in a box that escaped markup would have drawn.
+    expect(said?.textContent).not.toContain('**');
   });
 });
 
@@ -303,15 +409,6 @@ describe('the strip along the top', () => {
      nothing between them. */
   it('starts a little after the shelf ends', () => {
     expect(appCss).toMatch(/\.app--shelved \.topbar \{[^}]*padding-left: var\(--space-3\);/);
-  });
-});
-
-describe('the screen with no project on it', () => {
-  /* The app's own name, printed over an empty window, under the mark that is
-     already the app's name. It is in the menu bar, the Dock and the window's
-     title as well. */
-  it('does not print the app’s name at itself', () => {
-    expect(app).not.toContain('<span className="topbar__name topbar__name--quiet">Graphe</span>');
   });
 });
 

@@ -13,6 +13,7 @@ import {
   helpersRunning,
   nowDoing,
   changeDesk,
+  conversationIn,
   currentDesk,
   noDesks,
   openDesk,
@@ -23,17 +24,20 @@ import {
   type Desks,
 } from '../src/lib/projects';
 import { said } from '../src/lib/thread';
+import { NOTHING_SAID } from '../src/state/conversations';
 
 const HERE = { path: '/p/paper-street', name: 'paper-street' };
 
-/** A project with two conversations in it: `a` in front, `b` put down. */
+/** A project with two conversations in it: `a` in front, `b` behind it. */
 function twoOpen(): Desks {
   const opened = openDesk(noDesks, HERE);
   return changeDesk(opened, HERE.path, (desk) => ({
     ...desk,
     address: 'a',
-    turns: [said('you', 'make the hero tighter')],
-    parked: { b: { turns: [said('you', 'the pricing page')] } },
+    conversations: {
+      a: { ...NOTHING_SAID, turns: [said('you', 'make the hero tighter')] },
+      b: { ...NOTHING_SAID, turns: [said('you', 'the pricing page')] },
+    },
     order: ['a', 'b'],
   }));
 }
@@ -60,16 +64,18 @@ describe('a project with more than one conversation open', () => {
     const desk = currentDesk(desks)!;
 
     expect(desk.address).toBe('b');
-    expect(desk.turns[0]).toMatchObject({ text: 'the pricing page' });
+    expect(conversationIn(desk, 'b').turns[0]).toMatchObject({ text: 'the pricing page' });
     // And the one that was in front is still there, exactly as it was.
-    expect(desk.parked['a']?.turns[0]).toMatchObject({ text: 'make the hero tighter' });
+    expect(conversationIn(desk, 'a').turns[0]).toMatchObject({ text: 'make the hero tighter' });
   });
 
   it('going back finds it as it was, not as an empty thread', () => {
     const there = showThread(twoOpen(), HERE.path, 'b');
     const back = showThread(there, HERE.path, 'a');
 
-    expect(currentDesk(back)?.turns[0]).toMatchObject({ text: 'make the hero tighter' });
+    expect(conversationIn(currentDesk(back), 'a').turns[0]).toMatchObject({
+      text: 'make the hero tighter',
+    });
   });
 
   /* The one that matters: a reply still arriving when somebody switched belongs
@@ -82,9 +88,9 @@ describe('a project with more than one conversation open', () => {
     });
     const desk = currentDesk(desks)!;
 
-    expect(desk.parked['b']?.turns.some((turn) => turn.kind === 'said')).toBe(true);
+    expect(conversationIn(desk, 'b').turns.some((turn) => turn.kind === 'said')).toBe(true);
     // And the conversation on screen heard nothing at all.
-    expect(desk.turns).toHaveLength(1);
+    expect(conversationIn(desk, 'a').turns).toHaveLength(1);
   });
 
   /* The agent beginning on a queued message is news for the waiting line
@@ -96,7 +102,7 @@ describe('a project with more than one conversation open', () => {
       conversation: 'a',
       event: { type: 'message-started', text: 'make the hero tighter' },
     });
-    expect(currentDesk(desks)?.turns).toHaveLength(1);
+    expect(conversationIn(currentDesk(desks), 'a').turns).toHaveLength(1);
   });
 
   it('still files one that names no conversation into the one in front', () => {
@@ -105,18 +111,20 @@ describe('a project with more than one conversation open', () => {
       event: { type: 'message-delta', text: 'On it.' },
     });
 
-    expect(currentDesk(desks)?.turns).toHaveLength(2);
+    expect(conversationIn(currentDesk(desks), 'a').turns).toHaveLength(2);
   });
 
   it('measures concurrent jobs against the conversation that settled', () => {
     const started = changeDesk(twoOpen(), HERE.path, (desk) => ({
       ...desk,
-      doing: { task: { kind: 'blog' as const, size: 'feature' as const }, startedAt: 10 },
-      counted: 10,
-      parked: {
-        ...desk.parked,
+      conversations: {
+        a: {
+          ...desk.conversations['a']!,
+          doing: { task: { kind: 'blog' as const, size: 'feature' as const }, startedAt: 10 },
+          counted: 10,
+        },
         b: {
-          ...desk.parked['b']!,
+          ...desk.conversations['b']!,
           doing: { task: { kind: 'contact-form' as const, size: 'feature' as const }, startedAt: 20 },
           counted: 20,
         },
@@ -143,8 +151,8 @@ describe('a project with more than one conversation open', () => {
       event: summary(50),
     }, 100);
     const desk = currentDesk(backgroundSettled)!;
-    expect(desk.doing?.task.kind).toBe('blog');
-    expect(desk.parked['b']?.doing).toBeNull();
+    expect(conversationIn(desk, 'a').doing?.task.kind).toBe('blog');
+    expect(conversationIn(desk, 'b').doing).toBeNull();
     expect(desk.jobs.map((job) => job.cost.minor)).toEqual([30]);
 
     const bothSettled = receive(backgroundSettled, {
@@ -163,8 +171,7 @@ describe('a project with more than one conversation open', () => {
       event: { type: 'error', message: 'terminated' },
     });
 
-    expect(currentDesk(desks)?.turns).toEqual(currentDesk(before)?.turns);
-    expect(currentDesk(desks)?.parked).toEqual(currentDesk(before)?.parked);
+    expect(desks.byPath[HERE.path]?.conversations).toEqual(before.byPath[HERE.path]?.conversations);
   });
 
   /* Putting one down is not throwing it away — but the window does forget it,
@@ -173,7 +180,9 @@ describe('a project with more than one conversation open', () => {
     const desks = parkThread(twoOpen(), HERE.path, 'b');
 
     expect(threadsIn(currentDesk(desks)!).map((one) => one.address)).toEqual(['a']);
-    expect(currentDesk(desks)?.turns[0]).toMatchObject({ text: 'make the hero tighter' });
+    expect(conversationIn(currentDesk(desks), 'a').turns[0]).toMatchObject({
+      text: 'make the hero tighter',
+    });
   });
 
   it('refuses to put down the one you are looking at', () => {
@@ -214,21 +223,27 @@ describe('helpers stay on screen when another tab is opened', () => {
   it('keeps a helper the conversation behind is still running', () => {
     const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
       ...one,
-      turns: [],
-      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h1', 'running')] } },
+      conversations: {
+        ...one.conversations,
+        a: { ...one.conversations['a']!, turns: [] },
+        b: { ...one.conversations['b']!, turns: [helperTurn('h1', 'running')] },
+      },
     }));
     const front = currentDesk(desk)!;
     // The whole of the bug: reading the front conversation alone found none,
     // so the rail came off the screen and the helper looked stopped.
-    expect(nowDoing(front.turns).helpers).toHaveLength(0);
+    expect(nowDoing(conversationIn(front, 'a').turns).helpers).toHaveLength(0);
     expect(helpersRunning(front).map((one) => one.id)).toEqual(['h1']);
   });
 
   it('leaves a finished helper behind a tab where it is', () => {
     const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
       ...one,
-      turns: [],
-      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h2', 'done')] } },
+      conversations: {
+        ...one.conversations,
+        a: { ...one.conversations['a']!, turns: [] },
+        b: { ...one.conversations['b']!, turns: [helperTurn('h2', 'done')] },
+      },
     }));
     expect(helpersRunning(currentDesk(desk)!)).toHaveLength(0);
   });
@@ -236,8 +251,11 @@ describe('helpers stay on screen when another tab is opened', () => {
   it('never lists one twice', () => {
     const desk = changeDesk(twoOpen(), HERE.path, (one) => ({
       ...one,
-      turns: [helperTurn('h3', 'running')],
-      parked: { ...one.parked, b: { ...one.parked['b']!, turns: [helperTurn('h3', 'running')] } },
+      conversations: {
+        ...one.conversations,
+        a: { ...one.conversations['a']!, turns: [helperTurn('h3', 'running')] },
+        b: { ...one.conversations['b']!, turns: [helperTurn('h3', 'running')] },
+      },
     }));
     expect(helpersRunning(currentDesk(desk)!)).toHaveLength(1);
   });

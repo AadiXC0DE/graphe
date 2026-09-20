@@ -9,6 +9,8 @@
  *
  * A looping indicator is not any of that — a spinner turning once a second is a
  * spinner, not a slow transition — so those are read past.
+ *
+ *  Source text, not behaviour: the motion vocabulary and the three rules over every stylesheet; no behavioural test can reach them — jsdom computes no custom property and resolves no cascade.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';

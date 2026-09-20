@@ -83,13 +83,12 @@ export function commandsRan(turns: readonly Turn[]): readonly CommandRan[] {
     if (command === null) continue;
     const at = turn.at ?? null;
     const ended = endedOf(turn.state);
-    const finished = turn.endedAt ?? null;
     rows.push({
       id: turn.id,
       command,
       ended,
       at,
-      ms: at === null || finished === null ? null : Math.max(0, finished - at),
+      ms: turn.ms ?? null,
       output: (turn.progress ?? turn.detail ?? '').trim(),
     });
   }

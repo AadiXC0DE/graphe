@@ -9,7 +9,17 @@
  * spawn a process by accident.
  */
 
+import { oneAtATime, type PackageChange, type PackageProgress } from './package-lifecycle';
+import { installPlanFor } from '../../projects/setup';
 import { REACHABLE, type Reach } from './reach';
+
+export {
+  RELOAD_TO_ACTIVATE,
+  RELOAD_TO_LET_GO,
+  reloadWords,
+  type PackageChange,
+  type PackageProgress,
+} from './package-lifecycle';
 
 export {
   REACHABLE,
@@ -286,19 +296,75 @@ export function everything(
  * `id` is the catalogue's own name and nothing else — no prefix, no version.
  * Whoever implements this owns the spelling the package manager wants, so the
  * vocabulary of one particular installer never reaches the rest of the app.
+ *
+ * The three below are what a change needs to be reported rather than merely
+ * made. A host that cannot say what version is on disk still installs: the
+ * record then says the change happened without naming a version, which is the
+ * honest thing to write down.
  */
 export type PackageHost = {
   search(term: string): Promise<unknown>;
   list(): Promise<unknown>;
   add(id: string): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Install the newest of one that is already here. */
+  update?(id: string): Promise<void>;
+  /** What is on disk for this id now, and which version. */
+  installed?(id: string): Promise<{ version: string | null }>;
+  /** The installer's own progress, on its way past, as one line at a time. */
+  watching?(handler: (says: string) => void): void;
+  /** End the install this host started, if one is running. Absent for a host
+   *  that cannot: an install this app cannot reach is one it cannot stop, and
+   *  saying so beats offering a button that does nothing. */
+  stop?(): Promise<void>;
 };
+
+/** What went wrong, and what the installer said on the way. The lines are kept
+ *  because a failure nobody can read is a failure nobody can act on — and they
+ *  are the installer's own, so they never stand in for our sentence. */
+export type NotAdded = {
+  ok: false;
+  why: string;
+  /** The installer's last lines, oldest first. Absent when it said nothing. */
+  logs?: readonly string[];
+  /** True when somebody asked for this to stop, which is not a failure. */
+  stopped?: boolean;
+};
+
+/** The most of the installer's own output worth keeping. Enough to see which
+ *  step it died on; short enough to stay one expandable block on a screen. */
+export const LOGS_KEPT = 40;
+
+/** What came of pressing Stop: whether anything was stopped, and the one line
+ *  that says what that left on disk. */
+export type StopOutcome = { stopped: boolean; says: string };
 
 export type Shelf = {
   browse(term: string): Promise<readonly Pack[]>;
   mine(): Promise<readonly Pack[]>;
-  add(id: string): Promise<{ ok: true } | { ok: false; why: string }>;
-  remove(id: string): Promise<void>;
+  /**
+   * Whether this app can end a change once it has started.
+   *
+   * Answered before any press, because a Cancel drawn on a change that cannot
+   * be ended is a control that only ever fails: where this is false the screen
+   * draws `CANNOT_STOP` instead.
+   */
+  canStop: boolean;
+  /** A change is reported with what it replaced, because "installed" without a
+   *  version is not enough to tell an update from a first install. */
+  add(id: string): Promise<{ ok: true; change: PackageChange } | NotAdded>;
+  update(id: string): Promise<{ ok: true; change: PackageChange } | NotAdded>;
+  remove(id: string): Promise<PackageChange>;
+  /**
+   * Stop the change happening now, and say what it left on disk.
+   *
+   * False when there was nothing to stop, which still gets the same sentence a
+   * stop that worked does: silence after a press reads as a press that was
+   * lost.
+   */
+  stop(): Promise<StopOutcome>;
+  /** Follow what is happening, in sentences. Returns the way to stop. */
+  watching(handler: (progress: PackageProgress) => void): () => void;
 };
 
 /** npm's own rule for a name, which is what the catalogue holds. */
@@ -343,12 +409,123 @@ const COULD_NOT = {
   add: 'I could not add that.',
 } as const;
 
+const NOTHING_RUNNING = 'Nothing is being changed just now.';
+
+/** What a screen draws where a Stop control would go, for a host that cannot
+ *  end one: the same sentence `stop()` answers a press with, so the line and
+ *  the press can never say different things. */
+export const CANNOT_STOP =
+  'This copy of the app cannot end an install once it has started. It will finish and say what it did.';
+
+/** A failure, with the installer's own last lines when it said anything. Kept
+ *  out of the sentence above them: one is what to do, the other is evidence. */
+function failed(why: string, logs: readonly string[]): NotAdded {
+  return logs.length === 0 ? { ok: false, why } : { ok: false, why, logs };
+}
+
+/** The change that is running right now, and whether somebody has asked it to
+ *  stop. Held so the press that asks can wait for the answer rather than guess
+ *  at one: what a stopped install left behind is only knowable once it is over. */
+type RunningChange = { cancelled: boolean; over: Promise<void> };
+
 /** The one thing here that reaches outside this process, and only through
  *  `host`. Every failure leaves as a sentence somebody can act on. */
 export function packageShelf(host: PackageHost): Shelf {
   const alreadyHere = async (): Promise<ReadonlySet<string>> => new Set(installed(await host.list()));
+  /** One change at a time, however many presses arrive at once. */
+  const inTurn = oneAtATime();
+  const watchers = new Set<(progress: PackageProgress) => void>();
+  const say = (progress: PackageProgress): void => {
+    for (const watch of watchers) watch(progress);
+  };
+  /** What the installer said, for the failure this attempt may end in. Cleared
+   *  when an attempt starts, so a line from the last one is never the reason
+   *  given for this one. */
+  const logs: string[] = [];
+  const keep = (says: string): void => {
+    const line = says.trim();
+    if (line === '' || line === logs[logs.length - 1]) return;
+    logs.push(line);
+    if (logs.length > LOGS_KEPT) logs.shift();
+  };
+  // The installer's own progress, in the same channel as ours, so the screen
+  // has one thing to follow rather than two.
+  host.watching?.((says) => {
+    keep(says);
+    say({ says, id: '', doing: 'install', done: false });
+  });
+  let running: RunningChange | null = null;
+  /** What the change that was stopped left, written when it ends so the press
+   *  that asked for it can say it. Empty until then. */
+  let lastStopped = '';
+
+  /** What is installed for this id, as far as anybody can say. */
+  async function versionOf(id: string): Promise<{ version: string | null } | null> {
+    if (host.installed === undefined) return null;
+    try {
+      return await host.installed(id);
+    } catch {
+      // A version nobody can read is not a reason to refuse the change.
+      return null;
+    }
+  }
+
+  /**
+   * One change, with the version that was there before it and the one that is
+   * there after, and a line said at each end. Serialized even when two people
+   * press at the same moment: two installs into one folder at once is how a
+   * half-populated `node_modules` gets written down as a card.
+   *
+   * A change somebody stopped says what it left instead of pretending it
+   * finished or failed: the installer that was killed mid-write is neither.
+   */
+  async function change(
+    id: string,
+    doing: PackageChange['doing'],
+    work: () => Promise<void>,
+  ): Promise<
+    { kind: 'done'; change: PackageChange } | { kind: 'stopped'; change: PackageChange } | { kind: 'trouble'; cause: unknown }
+  > {
+    return inTurn(async () => {
+      const before = await versionOf(id);
+      logs.length = 0;
+      say({ says: saysDoing(doing, id), id, doing, done: false });
+      const over = Promise.withResolvers<void>();
+      const mine: RunningChange = { cancelled: false, over: over.promise };
+      running = mine;
+
+      let cause: unknown = null;
+      try {
+        await work();
+      } catch (thrown) {
+        cause = thrown;
+      }
+      running = null;
+
+      // Read back either way: after a stop this is the whole answer to "what is
+      // on disk", and after a failure it is what tells somebody whether the
+      // thing they were replacing is still there.
+      const after = doing === 'remove' ? null : await versionOf(id);
+      const change: PackageChange = { id, doing, before, after };
+      if (mine.cancelled) {
+        lastStopped = saysStopped(doing, id, change);
+        over.resolve();
+        return { kind: 'stopped' as const, change };
+      }
+      over.resolve();
+      if (cause !== null) return { kind: 'trouble' as const, cause };
+      say({ says: saysChanged(change), id, doing, done: true });
+      return { kind: 'done' as const, change };
+    });
+  }
+
+  /** The installer's own lines, copied out so a later attempt cannot append to
+   *  the list somebody is still reading. */
+  const saidSoFar = (): readonly string[] => logs.slice();
 
   return {
+    canStop: host.stop !== undefined,
+
     async browse(term: string): Promise<readonly Pack[]> {
       let answer: unknown;
       try {
@@ -396,26 +573,286 @@ export function packageShelf(host: PackageHost): Shelf {
         .sort(byWorth);
     },
 
-    async add(id: string): Promise<{ ok: true } | { ok: false; why: string }> {
-      const wanted = id.trim();
-      if (wanted === '' || wanted.length > 214 || !PLAUSIBLE_ID.test(wanted)) {
-        return { ok: false, why: 'That is not something I know how to add.' };
-      }
-      try {
-        await host.add(wanted);
-        return { ok: true };
-      } catch (cause) {
-        return { ok: false, why: whyItFailed(cause, COULD_NOT.add) };
-      }
+    async add(id: string): Promise<{ ok: true; change: PackageChange } | NotAdded> {
+      const wanted = plausible(id);
+      if (wanted === null) return { ok: false, why: 'That is not something I know how to add.' };
+      const outcome = await change(wanted, 'install', () => host.add(wanted));
+      if (outcome.kind === 'done') return { ok: true, change: outcome.change };
+      if (outcome.kind === 'stopped') return { ok: false, why: saysStopped('install', wanted, outcome.change), stopped: true };
+      return failed(whyItFailed(outcome.cause, COULD_NOT.add), saidSoFar());
     },
 
-    async remove(id: string): Promise<void> {
-      try {
-        await host.remove(id.trim());
-      } catch {
+    async update(id: string): Promise<{ ok: true; change: PackageChange } | NotAdded> {
+      const wanted = plausible(id);
+      if (wanted === null) return { ok: false, why: 'That is not something I know how to add.' };
+      if (host.update === undefined) {
+        return { ok: false, why: 'This copy of the app cannot install a newer one of these.' };
+      }
+      const outcome = await change(wanted, 'update', () => host.update!(wanted));
+      if (outcome.kind === 'done') return { ok: true, change: outcome.change };
+      if (outcome.kind === 'stopped') return { ok: false, why: saysStopped('update', wanted, outcome.change), stopped: true };
+      return failed(whyItFailed(outcome.cause, COULD_NOT.add), saidSoFar());
+    },
+
+    async remove(id: string): Promise<PackageChange> {
+      const wanted = id.trim();
+      const outcome = await change(wanted, 'remove', () => host.remove(wanted));
+      if (outcome.kind === 'trouble') {
         // Nothing useful to say: the shelf is read again straight after, and
         // one that is still listed is its own report.
+        return { id: wanted, doing: 'remove', before: null, after: null };
       }
+      return outcome.change;
+    },
+
+    /**
+     * Stop the one that is running.
+     *
+     * The host is asked to end the installer, and then this waits for the
+     * change itself to come back — because "what did it leave on disk" is a
+     * question only the change can answer, and answering it before the write
+     * has stopped is the kind of guess that makes somebody reinstall twice.
+     *
+     * The sentence is handed back rather than said here: the progress channel
+     * is where a change talks about itself while it runs, and this is the
+     * answer to a press.
+     */
+    async stop(): Promise<StopOutcome> {
+      const mine = running;
+      if (mine === null) return { stopped: false, says: NOTHING_RUNNING };
+      if (host.stop === undefined) return { stopped: false, says: CANNOT_STOP };
+      mine.cancelled = true;
+      try {
+        await host.stop();
+      } catch {
+        // A stop that could not be delivered still says what was left: the
+        // change reports itself either way.
+      }
+      await mine.over;
+      return { stopped: true, says: lastStopped };
+    },
+
+    watching(handler: (progress: PackageProgress) => void): () => void {
+      watchers.add(handler);
+      return () => {
+        watchers.delete(handler);
+      };
     },
   };
 }
+
+/** A catalogue id, or nothing. npm's own rule, which is what the catalogue
+ *  holds; anything else is not something to hand an installer. */
+function plausible(id: string): string | null {
+  const wanted = id.trim();
+  if (wanted === '' || wanted.length > 214 || !PLAUSIBLE_ID.test(wanted)) return null;
+  return wanted;
+}
+
+/** What is happening, in one line. Never a spinner without a sentence. */
+function saysDoing(doing: PackageChange['doing'], id: string): string {
+  if (doing === 'install') return `Adding ${nameOf(id)}…`;
+  if (doing === 'update') return `Updating ${nameOf(id)}…`;
+  return `Removing ${nameOf(id)}…`;
+}
+
+/**
+ * What a stopped change left, in one sentence.
+ *
+ * The version is read back after the installer has gone, so this is what is
+ * on disk rather than what the installer was part way through saying it would
+ * leave — the difference between a folder somebody can use and one they have
+ * to clear out.
+ */
+export function saysStopped(doing: PackageChange['doing'], id: string, change: PackageChange): string {
+  const name = nameOf(id);
+  const here = change.after?.version ?? null;
+  const was = change.before?.version ?? null;
+  if (doing === 'install') {
+    return here === null
+      ? `Stopped adding ${name}. Nothing was installed.`
+      : `Stopped adding ${name}. ${name} ${here} is on disk.`;
+  }
+  if (doing === 'update') {
+    if (here === null) return `Stopped updating ${name}. Nothing is installed now.`;
+    return was === here
+      ? `Stopped updating ${name}. ${name} ${here} is on disk, unchanged.`
+      : `Stopped updating ${name}. ${name} ${here} is on disk.`;
+  }
+  return here === null
+    ? `Stopped removing ${name}. It is gone.`
+    : `Stopped removing ${name}. ${name} ${here} is still on disk.`;
+}
+
+/** What happened, with the version where one is known: "added" on its own
+ *  cannot tell an update from a first install, and that is the question
+ *  somebody asking about a version is asking. */
+function saysChanged(change: PackageChange): string {
+  const name = nameOf(change.id);
+  const was = change.before?.version ?? null;
+  const now = change.after?.version ?? null;
+  if (change.doing === 'remove') return was === null ? `Removed ${name}.` : `Removed ${name} ${was}.`;
+  if (change.doing === 'update') {
+    if (was === null) return now === null ? `Updated ${name}.` : `Updated ${name} to ${now}.`;
+    return now === null ? `Updated ${name}.` : `Updated ${name} from ${was} to ${now}.`;
+  }
+  return now === null ? `Added ${name}.` : `Added ${name} ${now}.`;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The route that runs the install ourselves                                   */
+/* -------------------------------------------------------------------------- */
+
+/** One command and its arguments, as our own child process should be run. */
+export type PackageRoute = { command: string; args: readonly string[] };
+
+/**
+ * The argv for installing, updating or removing one add-on in `root`.
+ *
+ * Mirrors what Pi's own package manager runs, because the folder it writes to
+ * is the one Pi reads at the next session: `--prefix` for npm and pnpm,
+ * `--cwd` for bun, and yarn with neither (it installs into the working
+ * directory, which is the root this is given). Peer resolution is off, so an
+ * add-on's own pi peers do not drag a second copy of the runtime in.
+ */
+export function routeFor(
+  doing: PackageChange['doing'],
+  manager: string,
+  root: string,
+  id: string,
+): PackageRoute {
+  const spec = doing === 'update' ? `${id}@latest` : id;
+  const quiet = ['--no-audit', '--no-fund'];
+
+  if (doing === 'remove') {
+    if (manager === 'pnpm') return { command: 'pnpm', args: ['uninstall', id, '--prefix', root] };
+    if (manager === 'bun') return { command: 'bun', args: ['uninstall', id, '--cwd', root] };
+    if (manager === 'yarn') return { command: 'yarn', args: ['remove', id] };
+    return { command: 'npm', args: ['uninstall', id, '--prefix', root, '--legacy-peer-deps', ...quiet] };
+  }
+
+  if (manager === 'pnpm') {
+    return {
+      command: 'pnpm',
+      args: [
+        'install',
+        spec,
+        '--prefix',
+        root,
+        '--config.auto-install-peers=false',
+        '--config.strict-peer-dependencies=false',
+      ],
+    };
+  }
+  if (manager === 'bun') {
+    return { command: 'bun', args: ['install', spec, '--cwd', root, '--omit=peer'] };
+  }
+  if (manager === 'yarn') return { command: 'yarn', args: ['add', spec] };
+  return { command: 'npm', args: ['install', spec, '--prefix', root, '--legacy-peer-deps', ...quiet] };
+}
+
+/** How long an add-on install is given. Long, because its length is somebody
+ *  else's dependency tree; finite, because a wedged one must not hold the
+ *  add-ons screen for the rest of the afternoon. */
+export const INSTALL_PATIENCE = 20 * 60_000;
+
+/** What running one command came back as: the shape `runHelper` already has,
+ *  plus the signal that ends it. The signal is the whole reason this route
+ *  exists — Pi owns its own npm child and offers no way to stop it. */
+export type RunInstall = (
+  command: string,
+  args: readonly string[],
+  options: { folder: string; patience: number; signal: AbortSignal },
+) => Promise<{ code: number; said: string }>;
+
+/** Where an add-on's install root is, and what is already in it. */
+export type InstallRoot = { folder: string; present: readonly string[] };
+
+/** What came of one install. A stopped one is `ended` rather than a failure:
+ *  the installer that was killed mid-write is neither finished nor broken, and
+ *  the shelf reads the folder afterwards to say what it actually left. */
+export type Installed =
+  | { ok: true }
+  | { ok: false; because: string }
+  | { ok: false; ended: true };
+
+/**
+ * Run one add-on change as our own child process.
+ *
+ * Separated from `packageHost` so the decision it makes — which manager, from
+ * the lockfile in the install root — and the child it starts can be answered
+ * without Pi, a settings file or a network anywhere in sight. The caller owns
+ * the folder, the settings entry and the signal; this owns the process.
+ *
+ * `onCommand` says what is about to run, because this is minutes of somebody
+ * else's network and a screen with nothing on it reads as broken.
+ */
+export async function installAddon(
+  run: RunInstall,
+  doing: PackageChange['doing'],
+  root: InstallRoot,
+  id: string,
+  signal: AbortSignal,
+  onCommand?: (says: string) => void,
+): Promise<Installed> {
+  const manager = installPlanFor(root.present)?.manager ?? 'npm';
+  const { command, args } = routeFor(doing, manager, root.folder, id);
+  onCommand?.(`${command} ${args.join(' ')}`);
+
+  try {
+    const ran = await run(command, args, {
+      folder: root.folder,
+      patience: INSTALL_PATIENCE,
+      signal,
+    });
+    // A stopped child comes back as a code, not as a throw: execFile reports
+    // the abort itself. Somebody pressing Stop is not a failure of the work,
+    // and the shelf reads the folder afterwards to say what it left.
+    if (signal.aborted) return { ok: false, ended: true };
+    if (ran.code === 0) return { ok: true };
+    return { ok: false, because: ran.said.trim() };
+  } catch (cause) {
+    if (signal.aborted) return { ok: false, ended: true };
+    return { ok: false, because: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+/** Where Node comes from for somebody who does not have it. The page rather
+ *  than a download: it is the one address that is the same on every machine. */
+export const NODE_DOWNLOAD = 'https://nodejs.org/en/download';
+
+/** The one command to run, where there is a Homebrew to run it with. */
+export const BREW_NODE = 'brew install node';
+
+/** What the add-ons screen says about npm, worked out from what this computer
+ *  has. Nothing here reads a disk or runs anything: the caller hands over what
+ *  it found.
+ *
+ * An add-on is installed by npm, run as this app's own child so it can be
+ * ended and with the path a packaged app needs. A machine that has never had
+ * Node has no npm to run, and without this the first press ends in the
+ * installer's own words. Said before the press, not after it. */
+export type NpmSetup = {
+  /** False when npm is here, and there is nothing to say. */
+  needed: boolean;
+  /** One sentence naming what is missing and what to do about it. Empty when
+   *  nothing is missing. */
+  line: string;
+  /** The page that installs Node. */
+  download: string;
+  /** `brew install node`, or null where there is no Homebrew: a command
+   *  somebody cannot run is worse than the page on its own. */
+  command: string | null;
+};
+
+export function npmSetup(here: { npm: boolean; brew: boolean }): NpmSetup {
+  return {
+    needed: !here.npm,
+    line: here.npm
+      ? ''
+      : 'Add-ons are installed with npm, and this Mac does not have it. Install Node, then reopen Graphe so it is found.',
+    download: NODE_DOWNLOAD,
+    command: here.npm || !here.brew ? null : BREW_NODE,
+  };
+}
+

@@ -1,0 +1,35 @@
+/* An add-on's own drawing of a step, sitting under that step's line.
+
+   Indented to the activity line's text column like the picture beside it, so a
+   run of steps still reads as one column with one spine. The panel scrolls on
+   its own rather than widening the conversation: a box drawn for eighty columns
+   is a box, and wrapping it is what would break it. */
+
+.drawn {
+  margin: var(--space-2) 0 var(--space-1);
+  margin-left: calc(var(--activity-icon, 16px) + var(--space-3));
+  max-width: calc(100% - var(--activity-icon, 16px) - var(--space-3));
+}
+
+.drawn__said {
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.drawn__sheet {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  /* The drawing's own layout, kept exactly: box characters only line up at the
+     width the add-on drew them for. */
+  white-space: pre;
+  tab-size: 4;
+}

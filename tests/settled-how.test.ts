@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyEvent, said, STEP_WAS_STOPPED, type Turn } from '../src/lib/thread';
-import { changeDesk, noDesks, openDesk, receive, type Desks } from '../src/lib/projects';
+import { changeDesk, inFront, noDesks, openDesk, receive, type Desks } from '../src/lib/projects';
 import { sizeUp } from '../src/cost/sizing';
 import type { AgentEvent } from '../src/agent/types';
 
@@ -85,7 +85,10 @@ describe('the job in flight', () => {
   function desksWithAJob(): Desks {
     return changeDesk(openDesk(noDesks, { path: where, name: 'site' }), where, (one) => ({
       ...one,
-      doing: { task: sizeUp('a short request'), startedAt: Date.now() - 1_000 },
+      conversations: {
+        ...one.conversations,
+        '': { ...inFront(one), doing: { task: sizeUp('a short request'), startedAt: Date.now() - 1_000 } },
+      },
     }));
   }
 
@@ -98,7 +101,7 @@ describe('the job in flight', () => {
       conversation: null,
       event: { type: 'settled', how: 'finished' },
     });
-    expect(desks.byPath[where]?.doing).toBeNull();
+    expect(inFront(desks.byPath[where]).doing).toBeNull();
   });
 
   it('is still there to be filed against when the split lands a beat later', () => {
@@ -123,7 +126,7 @@ describe('the job in flight', () => {
       },
     });
     expect(desks.byPath[where]?.jobs.length).toBe(before + 1);
-    expect(desks.byPath[where]?.filing).toBeNull();
+    expect(inFront(desks.byPath[where]).filing).toBeNull();
   });
 });
 

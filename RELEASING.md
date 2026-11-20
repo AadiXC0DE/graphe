@@ -220,7 +220,7 @@ To roll back:
 
 ## Signing, said once and plainly
 
-- `mac.identity: null` in `electron-builder.yml` turns Apple code signing off.
+- `mac.identity: null` in `electron-builder.js` turns Apple code signing off.
 - `scripts/adhoc-sign.mjs` then runs `codesign --sign -` on the packed app, because
   electron-builder's own rewriting invalidates the signature Electron shipped with, and an
   **unsigned app does not launch on Apple Silicon at all** — no dialog, no message, just a process
@@ -229,9 +229,8 @@ To roll back:
   to have a Developer ID in its keychain does not quietly produce a differently-signed build from
   the one the release workflow produces.
 
-None of this is notarization. A browser download will still be quarantined and will still send the
-user to System Settings. That is the known cost of the free route, and the reason the alpha's
-install instructions are a `brew install` line.
+None of this is notarization. Browser and Homebrew downloads can be quarantined and may require
+approval in System Settings > Privacy & Security. Neither install route bypasses Gatekeeper.
 
 When we do pay the $99: set `mac.identity` to the Developer ID, turn `hardenedRuntime` back on, add
 an entitlements file, and add a notarization step. `scripts/adhoc-sign.mjs` becomes unnecessary and
